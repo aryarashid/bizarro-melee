@@ -3,7 +3,7 @@
  * Simulation coordinates are Y-up (y=0 deck, y>0 up); canvas draws at (wx, -wy).
  */
 
-import { MOVE as M, STATE, PLAYER_COLORS } from './constants.js';
+import { MODE, MOVE as M, STATE, PLAYER_COLORS } from './constants.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -14,6 +14,116 @@ const wideStrikes = new Set([M.FSMASH, M.USMASH, M.DSMASH, M.FAIR, M.BAIR, M.DAI
 const nonMelee = new Set(['projectile', 'chargeShot', 'itemShot', 'itemThrow']);
 const hurt = new Set([STATE.HITSTUN, STATE.TUMBLE, STATE.KNOCKDOWN, STATE.GRABBED, STATE.SHIELD_BREAK]);
 export const victimFlashes = (f) => f.hitlag > 0 && (hurt.has(f.state) || f.sleepTimer > 0);
+
+export const flashesAllowed = (options) => options.reducedMotion !== true && options.flashEnabled !== false
+  && !(options.reducedMotion == null && globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+export const fighterTag = (f, count) => {
+  const port = `P${f.port + 1}`, name = f.name || (f.isCpu ? 'CPU' : port);
+  if (count < 4 || !f.isCpu || !/^CPU(?:\s+Lv\.?\s*\d+)?$/i.test(name)) return name;
+  const level = name.match(/\d+/)?.[0] ?? f.cpuLevel;
+  return level == null ? port : `${port} · Lv.${level}`;
+};
+
+export function victoryOrder(match) {
+  const draw = match.winnerPort == null && match.winningTeam == null;
+  const won = (f) => match.winningTeam != null ? f.team === match.winningTeam : f.port === match.winnerPort;
+  const score = (f) => match.mode === MODE.VS_TIME ? (f.kos || 0) - (f.falls || 0) : f.stocks || 0;
+  return (match.fighters || []).filter((f) => f.def).sort((a, b) =>
+    draw ? a.port - b.port : Number(won(b)) - Number(won(a)) || score(b) - score(a) ||
+    (a.percent || 0) - (b.percent || 0) || a.port - b.port).slice(0, 4);
+}
+
+export function fighterArchetype(f) {
+  const { id, rig = {} } = f.def || {};
+  if (['brute', 'tallBrute', 'armor'].includes(rig.silhouette)) return 'heavy';
+  if (rig.silhouette === 'tallHero' || rig.prop === 'wrench') return 'sword';
+  if (['faux', 'falcont'].includes(id)) return 'spacie';
+  if (['puff', 'tinyRodent', 'rodent', 'kid', 'stout', 'parka'].includes(rig.silhouette)) return 'mascot';
+  return 'nimble';
+}
+
+const reactions = {
+  counter: ['#8daec4', '#f6fcff', .61, 41, 12],
+  reflect: ['#50dfff', '#e0ffff', .51, 61, 17],
+  chargeStored: ['#ffb644', '#fff4b9', .60, 35, 19],
+  armor: ['#e4a271', '#e4edf5', .48, 36, 11],
+  jabReset: ['#ff86ba', '#fff3cd', .26, 29, 13],
+};
+export function combatReaction(e, match) {
+  if (!Object.hasOwn(reactions, e.type)) return null;
+  const [rim, core, anchor, size, life] = reactions[e.type];
+  const f = match.fighters?.find(({ port }) => port === e.port);
+  const h = (f?.def.stats.height ?? 70) * (f?.scale || 1), face = f?.facing || 1;
+  const x = (e.x ?? f?.x ?? 0) + (e.type === 'chargeStored' ? 11 * face : 0);
+  return { type: e.type, x, cy: (e.y ?? f?.y ?? 0) + anchor * h, rim, core, size, life, face,
+    power: clamp01(e.level ?? 1) };
+}
+
+const mittColors = { gun: '#ffb267', slap: '#ff6486', slam: '#ffa152', sweep: '#ffe078', drill: '#e6aaff', clap: '#a0edff' };
+export function mittGunAim(f, move) {
+  const dx = Math.max(1, ((f.bossTargetX ?? f.x) - f.x) * (f.facing || 1) - Math.abs(move?.offsetX ?? 0));
+  const limit = 70 * Math.PI / 180;
+  return Math.max(-limit, Math.min(limit, Math.atan2((f.bossAimY ?? f.y) - f.y, dx)));
+}
+
+export function mittTell(f) {
+  if (f.def.id !== 'master-mitt' || f.state !== STATE.ATTACK || !f.moveData) return null;
+  const m = f.moveData, age = (f.moveFrame ?? 0) - m.startup;
+  const type = f.bossTell || m.bossTell || Object.keys(mittColors).find((tell) => m.name?.toLowerCase().includes(tell));
+  if (!Object.hasOwn(mittColors, type) || age >= 0) return null;
+  const face = f.facing || 1, scale = f.scale || 1, h = f.def.stats.height * scale;
+  const x = type === 'gun' ? f.x + face * f.def.stats.width * .64 * scale : f.x;
+  const y = type === 'gun' ? f.y + (m.offsetY ?? h * .5) : f.y + h * .51;
+  const aim = type === 'gun' ? mittGunAim(f, m) : 0;
+  return { type, x, y, face, scale, aim, color: mittColors[type], progress: clamp01(1 + age / Math.max(1, m.startup)) };
+}
+
+// Coordinates are local, Y down, so the same tell can be projected over either battle view.
+export function drawMittTell(ctx, cue, steady) {
+  const { type, color, progress } = cue;
+  const p = steady ? .8 : progress;
+  ctx.save();
+  ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.globalAlpha = .55 + .43 * p;
+  const path = (build, w = 2.4) => {
+    ctx.beginPath(); build(ctx);
+    ctx.strokeStyle = '#25152c'; ctx.lineWidth = w + 3; ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.stroke();
+  };
+  const arrow = (x, y, dx, dy) => {
+    const len = Math.hypot(dx, dy), u = dx / len, v = dy / len;
+    path((c) => {
+      c.moveTo(x, y); c.lineTo(x + dx, y + dy);
+      c.moveTo(x + dx - 8*u + 5*v, y + dy - 8*v - 5*u); c.lineTo(x + dx, y + dy);
+      c.lineTo(x + dx - 8*u - 5*v, y + dy - 8*v + 5*u);
+    });
+  };
+  if (type === 'gun') {
+    ctx.rotate(-cue.aim);
+    const r = 16 - 7 * p;
+    path((c) => { c.arc(27, 0, r, 0, TAU); });
+    path((c) => { c.moveTo(3, 0); c.lineTo(16, 0); c.moveTo(27, -r - 5); c.lineTo(27, -r + 3); c.moveTo(37, 0); c.lineTo(50, 0); });
+  } else if (type === 'slap') {
+    arrow(30 - 12*p, -12, 36 + 20*p, 0);
+    arrow(22 - 12*p, 9, 25 + 20*p, 0);
+  } else if (type === 'slam') {
+    const d = 13 + 12*p;
+    for (const x of [-25, 25]) arrow(x, 3 + 7*p, 0, d);
+    path((c) => c.ellipse(0, 53, 55 - 12*p, 9, 0, 0, TAU));
+  } else if (type === 'sweep') {
+    path((c) => c.ellipse(14, 29, 54, 14, 0, .12, Math.PI - .12), 3.5);
+    arrow(16, 33, 32 + 19*p, 9);
+  } else if (type === 'drill') {
+    for (let i = 0; i < 3; i++) path((c) => {
+      const y = 6 + i * 13 + 6*p, w = 22 - i*5;
+      c.moveTo(-w, y); c.lineTo(0, y + 11); c.lineTo(w, y);
+    }, 3);
+  } else {
+    for (const s of [-1, 1]) arrow(s * (70 - 10*p), -7, -s * (20 + 7*p), 0);
+    path((c) => { c.moveTo(0, -35); c.lineTo(0, -24); c.moveTo(-9, -31); c.lineTo(-5, -23); c.moveTo(9, -31); c.lineTo(5, -23); });
+  }
+  ctx.restore();
+}
 
 // Shared palette, attack aim and special-event projection keep both views in sync.
 export const combatPaint = {
@@ -34,6 +144,18 @@ function moveStyle(f) {
   return 'unarmed';
 }
 
+export function attackLimb(f) {
+  const key = f.moveKey, d = f.moveData, type = fighterArchetype(f);
+  const blade = type === 'sword' && [M.JAB, M.JAB2, M.JAB3, M.FTILT, M.FAIR, M.BAIR, M.DAIR].includes(key);
+  const fist = type === 'heavy' && [M.BAIR, M.DAIR].includes(key);
+  if (blade || fist) return 'grip';
+  if (type === 'spacie' && [M.FTILT, M.FAIR].includes(key)) return 'foot';
+  if (key === M.JAB2) return 'offGrip';
+  if (key === M.BAIR) return 'offFoot';
+  if (d?.name === 'Knee of Bread') return 'knee';
+  return [M.NAIR, M.UAIR, M.DAIR, M.DTILT].includes(key) || /kick/i.test(d?.name || '') ? 'foot' : 'grip';
+}
+
 export function attackVisual(f) {
   const d = f.moveData, key = f.moveKey;
   if (!(f.state === STATE.ATTACK || f.state === STATE.THROW) || !d || f.charging || f.vanished ||
@@ -50,9 +172,7 @@ export function attackVisual(f) {
   const reach = Math.min(95, Math.max(48, (box?.r || d.radius || 23) * .72 + (weight ? 57 : 38)));
   const x = radial ? f.x : box?.x ?? f.x + Math.cos(angle) * height * .55;
   const y = radial ? f.y + height * .52 : box?.y ?? f.y + height * .53 + Math.sin(angle) * height * .39;
-  return { x, y, angle, radial, reach, age, duration, melee: !nonMelee.has(d.kind), style: moveStyle(f),
-    limb: key === M.JAB2 ? 'offGrip' : key === M.BAIR ? 'offFoot' : d.name === 'Knee of Bread' ? 'knee'
-      : [M.NAIR, M.UAIR, M.DAIR, M.DTILT].includes(key) || /kick/i.test(d.name || '') ? 'foot' : 'grip' };
+  return { x, y, angle, radial, reach, age, duration, melee: !nonMelee.has(d.kind), style: moveStyle(f), limb: attackLimb(f) };
 }
 
 export function specialVisual(f) {
@@ -181,8 +301,9 @@ export class DynamicCamera {
     if (active.length > 0) {
       minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
       for (const f of active) {
-        const halfW = (f.def?.stats?.width || 44) * 0.8 + 140;
-        const h = (f.def?.stats?.height || 72) + 120;
+        const scale = f.scale || 1;
+        const halfW = (f.def?.stats?.width || 44) * scale * 0.8 + 140;
+        const h = (f.def?.stats?.height || 72) * scale + 120;
         if (f.x - halfW < minX) minX = f.x - halfW;
         if (f.x + halfW > maxX) maxX = f.x + halfW;
         if (f.y - 70 < minY) minY = f.y - 70;
@@ -263,13 +384,12 @@ export class FxSystem {
       if (!fighterHidden(f, specialVisual(f))) drawFighter.call(renderer, ctx, f, match, options);
     };
     renderer._drawFighterBody = (ctx, f, ...args) => {
-      if (!victimFlashes(f)) return drawBody.call(renderer, ctx, f, ...args);
+      if (!this.allowFlash || !victimFlashes(f)) return drawBody.call(renderer, ctx, f, ...args);
       ctx.save();
       try {
         const electric = this.hitColors.get(f.port) === true;
         ctx.translate((f.hitlag % 2 ? 1 : -1) * (electric ? 11 : 8), 0);
-        ctx.filter = f.hitlag % 2 ? `brightness(0) invert(1)${electric ? ' sepia(1) saturate(4) hue-rotate(136deg)' : ''}`
-          : 'brightness(2.1) saturate(.55)';
+        ctx.filter = f.hitlag % 2 ? `brightness(1.55) saturate(${electric ? 1.28 : .86})` : 'brightness(1.12)';
         drawBody.call(renderer, ctx, f, ...args);
       } finally { ctx.restore(); }
     };
@@ -320,6 +440,8 @@ export class FxSystem {
     this.match = match;
     for (const e of events) {
       if (this._specialEvent(e, match)) continue;
+      const reaction = combatReaction(e, match);
+      if (reaction) { this._cue({ ...reaction, type: 'reaction', kind: e.type }, reaction.life); continue; }
       switch (e.type) {
         case 'hit': {
           const heavy = e.heavy || e.sweetspot || e.meteor || (e.kb || 0) >= 95;
@@ -714,6 +836,36 @@ export class FxSystem {
           }
           ctx.closePath(); ctx.fillStyle = ink; ctx.fill();
         }
+      } else if (p.type === 'reaction') {
+        ctx.translate(p.x, -p.cy);
+        const r = p.size * (.58 + t * .56);
+        const line = (build, ink, width) => {
+          ctx.beginPath(); build(ctx); ctx.lineWidth = width; ctx.strokeStyle = ink; ctx.stroke();
+        };
+        if (p.kind === 'reflect') {
+          for (const [s, tilt, ink] of [[1, -.36, p.rim], [.72, .38, p.core]]) {
+            line((c) => c.ellipse(0, 0, r*s, r*s*.73, tilt, 0, TAU), ink, 3.8 * left);
+          }
+        } else if (p.kind === 'armor') {
+          for (let i = 0; i < 6; i++) {
+            const a = (i + .24) * TAU / 6, x = Math.cos(a), y = Math.sin(a);
+            line((c) => { c.moveTo(x*r*.40, y*r*.40); c.lineTo(x*r*.77, y*r*.77); c.lineTo(x*r - y*4, y*r + x*4); },
+              i % 2 ? p.rim : p.core, 3.5 * left);
+          }
+        } else if (p.kind === 'jabReset') {
+          for (let i = -1; i <= 1; i++) line((c) => {
+            c.moveTo(i*r*.62 - 6, -r*.37); c.lineTo(i*r*.62, -r*.72 - Math.abs(i)*4); c.lineTo(i*r*.62 + 6, -r*.37);
+          }, i ? p.rim : p.core, 4.1 * left);
+        } else {
+          const gold = p.kind === 'chargeStored';
+          ctx.rotate(gold ? Math.PI / 4 : -.62 * p.face);
+          const w = r * (gold ? .64 + p.power * .24 : 1);
+          for (const [s, ink] of [[1, p.rim], [.66, p.core]]) line((c) => {
+            c.moveTo(-w*s, 0); c.lineTo(w*s, 0);
+            c.moveTo(0, -r*.66*s); c.lineTo(0, r*.66*s);
+          }, ink, (s === 1 ? 6 : 2.7) * left);
+          if (gold) line((c) => { c.rect(-w*.32, -w*.32, w*.64, w*.64); }, p.core, 3 * left);
+        }
       } else if (p.type === 'quickZip') {
         ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.beginPath(); p.points.forEach(([x, y], i) => i ? ctx.lineTo(x, -y) : ctx.moveTo(x, -y));
@@ -745,6 +897,11 @@ export class FxSystem {
     for (const f of match?.fighters || []) {
       const special = specialVisual(f), a = attackVisual(f);
       if (f.state === STATE.DEAD || fighterHidden(f, special)) continue;
+      const tell = mittTell(f);
+      if (tell) {
+        ctx.save(); ctx.translate(tell.x, -tell.y); ctx.scale(tell.face * tell.scale, tell.scale);
+        drawMittTell(ctx, tell, !this.allowFlash); ctx.restore();
+      }
       if (a?.melee) {
         const reach = a.reach * (.92 + .16 * Math.min(1, a.age / 3));
         const shift = a.radial ? 0 : reach * .34;
@@ -752,7 +909,23 @@ export class FxSystem {
           a.angle + (a.radial ? match.frame * .22 : (a.age / a.duration - .5) * .68), reach, combatPaint[a.style],
           a.radial ? 5.5 : 2.55, 1 - .34 * a.age / a.duration);
       }
-      if (!special) continue;
+      if (f.moveData?.kind === 'chargePunch' || f.chargeShotLevel > 0 &&
+          Object.values(f.def.moves).some((m) => m.kind === 'chargePunch')) {
+        const power = clamp01(f.chargeShotLevel || f.specialCharge || (f.chargeFrames || 0) / 60);
+        if (power > 0) {
+          const face = f.facing || 1, sc = f.scale || 1;
+          ctx.save(); ctx.translate(f.x + face * 17 * sc, -f.y - f.def.stats.height * sc * .63); ctx.scale(sc, sc);
+          for (let i = 0; i < 3; i++) {
+            const t = this.allowFlash ? ((match.frame + i * 8) % 24) / 24 : (i + 1) / 4;
+            const x = (i - 1) * (5 + 10*t), y = -t * (12 + power * 19);
+            ctx.globalAlpha = Math.sin(t * Math.PI) * (.3 + power * .55);
+            ctx.strokeStyle = i === 1 ? '#fff0bd' : '#ffc86e'; ctx.lineWidth = 2.6 - t; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.bezierCurveTo(x - 8, y - 5, x + 9, y - 10, x + 2, y - 15); ctx.stroke();
+          }
+          ctx.restore();
+        }
+      }
+      if (!special || f.moveData?.kind === 'chargePunch' && special.phase === 'charge') continue;
       const cy = f.y + f.def.stats.height * (f.scale || 1) * .5, paint = combatPaint[special.style];
       if (special.phase === 'charge') {
         const radius = 49 + special.charge * 41;

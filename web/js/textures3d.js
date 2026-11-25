@@ -683,6 +683,28 @@ export function getImpactPuffTexture(kind, T, owner) {
   });
 }
 
+export function getFistSteamTexture(T, owner) {
+  return cached(owner, 'gold-fist-steam', () => {
+    const c = canvas(96);
+    const ink = c.createLinearGradient(35, 88, 58, 7);
+    ink.addColorStop(0, '#fff4ccb0');
+    ink.addColorStop(.39, '#ffe0a1db');
+    ink.addColorStop(.78, '#ffcb705a');
+    ink.addColorStop(1, '#ffcb7000');
+    c.beginPath();
+    c.moveTo(42, 91);
+    c.bezierCurveTo(18, 73, 27, 60, 49, 47);
+    c.bezierCurveTo(72, 32, 67, 18, 46, 5);
+    c.bezierCurveTo(80, 15, 82, 38, 62, 55);
+    c.bezierCurveTo(42, 70, 34, 77, 49, 91);
+    c.closePath();
+    c.fillStyle = ink;
+    c.fill();
+    stroke(c, (p) => { p.moveTo(42, 82); p.bezierCurveTo(31, 64, 65, 55, 68, 31); }, '#ffefc68f', 2.6);
+    return texture(T, c);
+  });
+}
+
 export function getJumbotronTexture(T, owner, nextForm) {
   return cached(owner, nextForm ? `jumbotron-warning:${nextForm}` : 'jumbotron-live', () => {
     const c = canvas(512, 256);

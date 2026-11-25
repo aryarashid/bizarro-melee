@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0d0a1f">
   <title>Bizarro Melee</title>
-  <meta name="description" content="3D WebGL Melee-physics browser platform fighter with 26 Bizarro fighters, 16 stages, 18 items, Break the Targets, Home-Run Derby &amp; Multi-Man Brawl. Built for dpad.games.">
+  <meta name="description" content="3D WebGL Melee-physics browser platform fighter with 26 Bizarro fighters, 29 stages, 18 items, Break the Targets, Home-Run Derby &amp; Multi-Man Brawl. Built for dpad.games.">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/game.css">
 </head>
@@ -118,6 +118,7 @@
             <button id="btn-active-port-1" class="port-tab" data-port="1" type="button">P2</button>
             <button id="btn-active-port-2" class="port-tab" data-port="2" type="button" hidden>P3</button>
             <button id="btn-active-port-3" class="port-tab" data-port="3" type="button" hidden>P4</button>
+            <button id="btn-css-bio-toggle" class="btn btn-ghost btn-xs css-bio-toggle" type="button">Specials &amp; Bio</button>
             <span id="css-count-pill" class="count-pill">26 Bizarro Fighters</span>
           </div>
           <div id="css-grid" class="css-grid" role="grid" aria-label="Fighter roster"></div>
@@ -196,6 +197,7 @@
           </div>
         </div>
         <div id="online-peers" class="peer-list"></div>
+        <div id="online-net-meta" class="note-box" hidden>Lockstep 3f Delay &bull; Deterministic Checksum Sync</div>
         <button id="btn-online-launch" class="btn btn-primary" type="button" hidden>Start Online Match</button>
       </div>
     </section>
@@ -333,7 +335,11 @@
           </label>
           <label class="setting-row setting-check">
             <input id="inp-shake" type="checkbox" checked>
-            <span>Screen Shake &amp; Hit Flash</span>
+            <span>Screen Shake</span>
+          </label>
+          <label class="setting-row setting-check">
+            <input id="inp-flash" type="checkbox" checked>
+            <span>Hit Flash &amp; Dramatic Zoom</span>
           </label>
         </div>
         <div class="controls-box">
@@ -430,13 +436,42 @@
       <div class="modal-card modal-compact">
         <h2>PAUSED</h2>
         <div id="pause-tech-readout" class="pause-tech"></div>
+        <div id="pause-training-controls" class="pause-training-controls" hidden>
+          <div class="pause-train-row">
+            <label class="train-chip">
+              <span>Speed</span>
+              <select id="sel-pause-train-speed">
+                <option value="1" selected>1x</option>
+                <option value="0.5">0.5x</option>
+                <option value="0.25">0.25x</option>
+              </select>
+            </label>
+            <label class="train-chip">
+              <span>CPU</span>
+              <select id="sel-pause-train-cpu">
+                <option value="stand" selected>Stand</option>
+                <option value="jump">Jump</option>
+                <option value="evade">Evade</option>
+                <option value="attack">Attack</option>
+              </select>
+            </label>
+          </div>
+          <div class="pause-train-row">
+            <label class="train-chip">
+              <span>Item</span>
+              <select id="sel-pause-train-item"></select>
+            </label>
+            <button id="btn-pause-train-spawn" class="btn btn-accent btn-xs" type="button">Spawn</button>
+            <button id="btn-pause-train-reset" class="btn btn-secondary btn-xs" type="button">Reset Pos</button>
+          </div>
+        </div>
         <div class="pause-actions">
           <button id="btn-pause-resume" class="btn btn-primary" type="button">Resume</button>
           <button id="btn-pause-restart" class="btn btn-secondary" type="button">Restart Match</button>
           <button id="btn-pause-controller" class="btn btn-secondary" type="button">Controller &amp; Combos</button>
           <button id="btn-pause-3d" class="btn btn-secondary" type="button">Graphics: 3D WebGL</button>
           <button id="btn-pause-hitboxes" class="btn btn-secondary" type="button">Toggle Hitboxes</button>
-          <button id="btn-pause-mute" class="btn btn-secondary" type="button">Toggle Sound</button>
+          <button id="btn-pause-mute" class="btn btn-secondary" type="button">Sound: On</button>
           <button id="btn-pause-css" class="btn btn-ghost" type="button">Character Select</button>
           <button id="btn-pause-title" class="btn btn-ghost" type="button">Title Screen</button>
         </div>
@@ -470,6 +505,8 @@
         </div>
       </div>
       <div class="touch-buttons">
+        <button class="touch-btn touch-sh" data-touch="shortHop" type="button" aria-label="Short Hop">SH</button>
+        <button class="touch-btn touch-smash" data-touch="smash" type="button" aria-label="C-Stick Smash or Aerial">C</button>
         <button class="touch-btn touch-shield" data-touch="shield" type="button" aria-label="Shield or Wavedash">SHLD</button>
         <button class="touch-btn touch-grab" data-touch="grab" type="button" aria-label="Grab or Throw Item">GRAB</button>
         <button class="touch-btn touch-jump" data-touch="jump" type="button" aria-label="Jump">JUMP</button>

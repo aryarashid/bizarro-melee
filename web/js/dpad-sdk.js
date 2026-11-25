@@ -528,3 +528,355 @@ export function createDpadBridge() {
     createOnlineLobby, findPublicLobby, leaveOnlineLobby, sendP2P, drainP2P, pollP2P, getOnlineState,
   };
 }
+
+// ============================================================================
+// DETERMINISTIC ONLINE LOCKSTEP PROTOCOL (HANDSHAKE, 3F DELAY, REDUNDANCY, CHECKSUM)
+// ============================================================================
+const WIRE_AXES = ['moveX', 'moveY', 'rawMoveX', 'rawMoveY', 'cStickX', 'cStickY', 'shieldAnalog'];
+const WIRE_FLAGS = [
+  'jump', 'jumpPressed', 'tapJumpPressed', 'attack', 'attackPressed',
+  'special', 'specialPressed', 'shield', 'shieldPressed', 'grab', 'grabPressed',
+  'lightShield', 'shortHopPressed', 'tiltMod', 'cStickTilt', 'tauntPressed', 'pausePressed',
+];
+const NEUTRAL_WIRE = [0, 0, 0, 0, 0, 0, 0, 0];
+
+function neutralInputFrame() {
+  return {
+    moveX: 0, moveY: 0, rawMoveX: 0, rawMoveY: 0,
+    jump: false, jumpPressed: false, tapJumpPressed: false,
+    attack: false, attackPressed: false,
+    special: false, specialPressed: false,
+    shield: false, shieldPressed: false,
+    grab: false, grabPressed: false,
+    shieldAnalog: 0, lightShield: false, shortHopPressed: false,
+    tiltMod: false, cStickTilt: false, tauntPressed: false,
+    cStickX: 0, cStickY: 0, pausePressed: false,
+  };
+}
+
+export function packOnlineInput(inp) {
+  const src = inp || neutralInputFrame();
+  const a = WIRE_AXES.map((k) => {
+    const v = Number(src[k]);
+    return Number.isFinite(v) ? Math.round(Math.max(-1, Math.min(1, v)) * 1000) : 0;
+  });
+  let b = 0;
+  for (let i = 0; i < WIRE_FLAGS.length; i++) {
+    if (src[WIRE_FLAGS[i]]) b |= (1 << i);
+  }
+  return { a, b };
+}
+
+function packCompactTuple(inp) {
+  const { a, b } = packOnlineInput(inp);
+  return [...a, b];
+}
+
+export function unpackOnlineInput(entry) {
+  const out = neutralInputFrame();
+  if (Array.isArray(entry) && entry.length >= WIRE_AXES.length + 1) {
+    for (let i = 0; i < WIRE_AXES.length; i++) {
+      const v = Number(entry[i]);
+      out[WIRE_AXES[i]] = Number.isFinite(v) ? Math.max(-1, Math.min(1, v / 1000)) : 0;
+    }
+    const b = Number(entry[WIRE_AXES.length]) | 0;
+    for (let i = 0; i < WIRE_FLAGS.length; i++) {
+      out[WIRE_FLAGS[i]] = Boolean(b & (1 << i));
+    }
+    return out;
+  }
+  if (entry && Array.isArray(entry.a)) {
+    for (let i = 0; i < WIRE_AXES.length; i++) {
+      const v = Number(entry.a[i]);
+      out[WIRE_AXES[i]] = Number.isFinite(v) ? Math.max(-1, Math.min(1, v / 1000)) : 0;
+    }
+    const b = Number(entry.b) | 0;
+    for (let i = 0; i < WIRE_FLAGS.length; i++) {
+      out[WIRE_FLAGS[i]] = Boolean(b & (1 << i));
+    }
+    return out;
+  }
+  return out;
+}
+
+export function computeMatchChecksum(match) {
+  let h = 2166136261 >>> 0;
+  const mix = (n) => {
+    const v = Number.isFinite(n) ? (Math.round(n) | 0) : 0;
+    h ^= v & 0xff; h = Math.imul(h, 16777619) >>> 0;
+    h ^= (v >>> 8) & 0xff; h = Math.imul(h, 16777619) >>> 0;
+    h ^= (v >>> 16) & 0xff; h = Math.imul(h, 16777619) >>> 0;
+    h ^= (v >>> 24) & 0xff; h = Math.imul(h, 16777619) >>> 0;
+  };
+  mix(match?.frame || 0);
+  mix(match?.rng || 0);
+  mix(match?.timeLeftFrames || 0);
+  mix(match?.winnerPort ?? -1);
+  mix(match?.projectiles?.length || 0);
+  for (const f of match?.fighters || []) {
+    mix(f.port);
+    mix(f.x * 100);
+    mix(f.y * 100);
+    mix(f.vx * 100);
+    mix(f.vy * 100);
+    mix(f.kbVx * 100);
+    mix(f.kbVy * 100);
+    mix(f.percent * 10);
+    mix(f.stocks);
+    mix(f.facing);
+    mix(f.stateFrame);
+    mix(f.shieldHp * 10);
+    mix(f.moveFrame);
+  }
+  return h >>> 0;
+}
+
+export function createOnlineSession({
+  isHost = false,
+  delayFrames = 3,
+  send = () => false,
+  onConfigReady = null,
+  onPeerPick = null,
+  onDesync = null,
+} = {}) {
+  const clampedDelay = Math.max(1, Math.min(8, Math.round(delayFrames || 3)));
+  const localInputs = new Map();
+  const remoteInputs = new Map();
+  const localChecksums = new Map();
+  const remoteChecksums = new Map();
+
+  let active = false;
+  let config = null;
+  let pendingConfig = null;
+  let handshakeTick = 0;
+  let simFrame = 0;
+  let stallFrames = 0;
+  let totalStallFrames = 0;
+  let packetsSent = 0;
+  let packetsReceived = 0;
+  let checksumsMatched = 0;
+  let checksumMismatches = 0;
+  let syncState = 'idle';
+  let guestPick = null;
+
+  function activate(agreed) {
+    config = { ...agreed, delayFrames: Math.max(1, Math.min(8, Math.round(agreed.delayFrames || clampedDelay))) };
+    pendingConfig = null;
+    localInputs.clear();
+    remoteInputs.clear();
+    localChecksums.clear();
+    remoteChecksums.clear();
+    simFrame = 0;
+    stallFrames = 0;
+    totalStallFrames = 0;
+    checksumsMatched = 0;
+    checksumMismatches = 0;
+    syncState = 'synced';
+    for (let f = 0; f < config.delayFrames; f++) {
+      localInputs.set(f, [...NEUTRAL_WIRE]);
+      remoteInputs.set(f, [...NEUTRAL_WIRE]);
+    }
+    active = true;
+    onConfigReady?.(config);
+  }
+
+  function startHandshake(matchCfg) {
+    if (!isHost) return false;
+    pendingConfig = {
+      seed: (Number(matchCfg.seed) >>> 0) || ((Date.now() ^ 0x9e3779b9) >>> 0),
+      stageId: String(matchCfg.stageId || 'arguefield'),
+      stocks: Math.max(1, Math.min(9, Number(matchCfg.stocks) || 4)),
+      timeSeconds: Math.max(0, Math.min(999, Number(matchCfg.timeSeconds) || 300)),
+      itemFrequency: String(matchCfg.itemFrequency || 'medium'),
+      hostFighter: String(matchCfg.hostFighter || 'faux'),
+      hostPalette: Math.max(0, Math.min(3, Number(matchCfg.hostPalette) || 0)),
+      guestFighter: String(guestPick?.fighterId || matchCfg.guestFighter || 'captain-pigeon'),
+      guestPalette: Math.max(0, Math.min(3, Number(guestPick?.paletteIndex ?? matchCfg.guestPalette) || 0)),
+      delayFrames: clampedDelay,
+    };
+    handshakeTick = 0;
+    syncState = 'handshaking';
+    packetsSent++;
+    return send(0, { t: 'cfg', ...pendingConfig }, true);
+  }
+
+  function sendGuestPick(fighterId, paletteIndex = 0) {
+    if (isHost) return false;
+    packetsSent++;
+    return send(0, { t: 'pick', fighterId: String(fighterId || 'faux'), paletteIndex: Number(paletteIndex) || 0 }, true);
+  }
+
+  function tickHandshake() {
+    if (!isHost || !pendingConfig || active) return;
+    handshakeTick++;
+    if (handshakeTick % 30 === 0) {
+      packetsSent++;
+      send(0, { t: 'cfg', ...pendingConfig }, true);
+    }
+  }
+
+  function sendWindow(topFrame, count = 4) {
+    const r = [];
+    for (let i = 0; i < count; i++) {
+      const f = topFrame - i;
+      if (f < 0 || !localInputs.has(f)) break;
+      r.push(localInputs.get(f));
+    }
+    if (!r.length) return false;
+    packetsSent++;
+    return send(1, { t: 'in', f: topFrame, r }, false);
+  }
+
+  function checkFrameHash(frame) {
+    if (!localChecksums.has(frame) || !remoteChecksums.has(frame)) return;
+    const lh = localChecksums.get(frame);
+    const rh = remoteChecksums.get(frame);
+    localChecksums.delete(frame);
+    remoteChecksums.delete(frame);
+    if (lh === rh) {
+      checksumsMatched++;
+      if (syncState !== 'desync') syncState = 'synced';
+    } else {
+      checksumMismatches++;
+      syncState = 'desync';
+      onDesync?.({ frame, localHash: lh, remoteHash: rh });
+    }
+  }
+
+  function recordLocalChecksum(frame, hash) {
+    if (!active) return;
+    const f = frame | 0;
+    const h = hash >>> 0;
+    localChecksums.set(f, h);
+    packetsSent++;
+    send(0, { t: 'chk', f, h }, true);
+    checkFrameHash(f);
+  }
+
+  function handlePacket(data) {
+    if (!data || typeof data !== 'object') return;
+    packetsReceived++;
+    if (data.t === 'pick' && isHost && typeof data.fighterId === 'string') {
+      guestPick = { fighterId: data.fighterId, paletteIndex: Math.max(0, Math.min(3, Number(data.paletteIndex) || 0)) };
+      onPeerPick?.(guestPick);
+      return;
+    }
+    if (data.t === 'cfg' && !isHost && typeof data.stageId === 'string') {
+      const seed = Number(data.seed) >>> 0;
+      packetsSent++;
+      send(0, { t: 'ack', seed }, true);
+      if (!active || config?.seed !== seed) {
+        activate({
+          seed,
+          stageId: data.stageId,
+          stocks: Math.max(1, Math.min(9, Number(data.stocks) || 4)),
+          timeSeconds: Math.max(0, Math.min(999, Number(data.timeSeconds) || 300)),
+          itemFrequency: String(data.itemFrequency || 'medium'),
+          hostFighter: String(data.hostFighter || 'faux'),
+          hostPalette: Math.max(0, Math.min(3, Number(data.hostPalette) || 0)),
+          guestFighter: String(data.guestFighter || 'captain-pigeon'),
+          guestPalette: Math.max(0, Math.min(3, Number(data.guestPalette) || 0)),
+          delayFrames: Math.max(1, Math.min(8, Number(data.delayFrames) || clampedDelay)),
+        });
+      }
+      return;
+    }
+    if (data.t === 'ack' && isHost && pendingConfig && (Number(data.seed) >>> 0) === pendingConfig.seed) {
+      activate(pendingConfig);
+      return;
+    }
+    if (data.t === 'in' && active && Number.isInteger(data.f) && Array.isArray(data.r)) {
+      const maxLen = Math.min(6, data.r.length);
+      for (let i = 0; i < maxLen; i++) {
+        const f = data.f - i;
+        if (f >= simFrame && !remoteInputs.has(f)) {
+          const raw = data.r[i];
+          if (Array.isArray(raw) && raw.length >= WIRE_AXES.length + 1) {
+            remoteInputs.set(f, raw);
+          }
+        }
+      }
+      return;
+    }
+    if (data.t === 'req' && active && Number.isInteger(data.f)) {
+      let top = -1;
+      for (let f = data.f + 3; f >= data.f; f--) {
+        if (localInputs.has(f)) { top = f; break; }
+      }
+      if (top >= data.f) sendWindow(top, Math.min(6, top - data.f + 1));
+      return;
+    }
+    if (data.t === 'chk' && active && Number.isInteger(data.f)) {
+      remoteChecksums.set(data.f | 0, Number(data.h) >>> 0);
+      checkFrameHash(data.f | 0);
+    }
+  }
+
+  function step(localRawInput) {
+    if (!active) return { ready: false, stallFrames: 0, simFrame };
+    const delay = config?.delayFrames || clampedDelay;
+    const targetFrame = simFrame + delay;
+    if (!localInputs.has(targetFrame)) {
+      localInputs.set(targetFrame, packCompactTuple(localRawInput));
+      sendWindow(targetFrame, 4);
+    }
+    if (!remoteInputs.has(simFrame)) {
+      stallFrames++;
+      totalStallFrames++;
+      if (stallFrames % 2 === 1) {
+        packetsSent++;
+        send(1, { t: 'req', f: simFrame }, false);
+      }
+      return { ready: false, stallFrames, simFrame };
+    }
+    const localInp = unpackOnlineInput(localInputs.get(simFrame));
+    const remoteInp = unpackOnlineInput(remoteInputs.get(simFrame));
+    const inputs = isHost ? [localInp, remoteInp] : [remoteInp, localInp];
+    const steppedFrame = simFrame;
+    simFrame++;
+    stallFrames = 0;
+    const pruneBefore = simFrame - 90;
+    if (pruneBefore > 0 && simFrame % 30 === 0) {
+      for (const k of localInputs.keys()) if (k < pruneBefore) localInputs.delete(k);
+      for (const k of remoteInputs.keys()) if (k < pruneBefore) remoteInputs.delete(k);
+    }
+    return { ready: true, inputs, simFrame: steppedFrame };
+  }
+
+  function stop() {
+    active = false;
+    pendingConfig = null;
+    syncState = 'idle';
+  }
+
+  function getStats() {
+    return {
+      isHost,
+      localPort: isHost ? 0 : 1,
+      remotePort: isHost ? 1 : 0,
+      active,
+      handshaking: Boolean(pendingConfig && !active),
+      delayFrames: config?.delayFrames || clampedDelay,
+      simFrame,
+      stallFrames,
+      totalStallFrames,
+      packetsSent,
+      packetsReceived,
+      checksumsMatched,
+      checksumMismatches,
+      syncState,
+      config: config ? { ...config } : null,
+    };
+  }
+
+  return {
+    startHandshake,
+    sendGuestPick,
+    tickHandshake,
+    handlePacket,
+    step,
+    recordLocalChecksum,
+    stop,
+    getStats,
+  };
+}

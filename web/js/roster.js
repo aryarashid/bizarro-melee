@@ -1,9 +1,4 @@
-/**
- * Complete 26-character Bizarro Parody Roster (+ Sagging Bag & Master Mitt boss),
- * mapping every single playable fighter in src/melee/ft/kinds/ to an original,
- * hilarious Bizarro parody with Melee-faithful physics profiles, frame data,
- * special moves, alt palettes, and procedural rig metadata.
- */
+/** Playable fighters, challenge opponents and their combat profiles. */
 
 import { MOVE } from './constants.js';
 
@@ -176,9 +171,22 @@ function makeFighter(cfg) {
       if (patch.projGravity === 0 && patch.projBounce == null) moves[k].projBounce = false;
     }
   }
+  // Build the regions after applying fighter overrides so reach and damage follow the move.
+  for (const key of [MOVE.JAB, MOVE.FTILT, MOVE.FAIR, MOVE.BAIR, MOVE.DAIR]) {
+    const move = moves[key];
+    const down = key === MOVE.DAIR;
+    const hilt = cfg.id === 'troy';
+    const inner = { offsetX: move.offsetX * 0.50, offsetY: move.offsetY + (down ? 14 : 0) };
+    const outer = { offsetX: move.offsetX * 1.25, offsetY: move.offsetY - (down ? 15 : 0) };
+    const [tip = {}, base = {}] = move.hitboxes ?? [];
+    const sourAngle = key === MOVE.BAIR ? 120 : down ? 62 : move.angle === 62 ? 48 : 62;
+    move.hitboxes = sweetAndSour(
+      { ...(hilt ? inner : outer), radius: move.radius * 0.54, ...tip },
+      { ...(hilt ? outer : inner), radius: move.radius * 0.83, damage: Math.floor(move.damage * 0.65),
+        bkb: move.bkb * 0.78, kbg: move.kbg * 0.78, angle: sourAngle, ...base });
+  }
   return {
     id: cfg.id,
-    meleeKind: cfg.meleeKind,
     voiceType: cfg.voiceType, voicePitch: cfg.voicePitch,
     canFloat: !!cfg.canFloat, doubleJumpArmor: cfg.doubleJumpArmor ?? 0,
     name: cfg.name,
@@ -225,7 +233,7 @@ function makeFighter(cfg) {
 export const ROSTER = [
   // Row 1: Dr. Bario, Bario, Squeegi, Sourzer, Screech, Broshee, Wonky Kong, Captain Pigeon, Dadondorf
   makeFighter({
-    id: 'dr-bario', meleeKind: 'ftDrMario', name: 'Dr. Bario', parodyOf: 'Dr. Mario',
+    id: 'dr-bario', name: 'Dr. Bario', parodyOf: 'Dr. Mario',
     voiceType: 'snarky', voicePitch: 0.91,
     epithet: 'Unlicensed Megavitamin Dealer',
     bio: 'Lost his plumbing license and immediately opened an alley clinic. Prescribes suspiciously bouncy giant capsules.',
@@ -253,7 +261,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'bario', meleeKind: 'ftMario', name: 'Bario', parodyOf: 'Mario',
+    id: 'bario', name: 'Bario', parodyOf: 'Mario',
     voiceType: 'hero', voicePitch: 1.14,
     epithet: 'Overqualified Corporate Plumber',
     bio: 'Wears inverted cyan overalls and a yellow bowler hat. Never fixes pipes—only invoices them.',
@@ -280,7 +288,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'squeegi', meleeKind: 'ftLuigi', name: 'Squeegi', parodyOf: 'Luigi',
+    id: 'squeegi', name: 'Squeegi', parodyOf: 'Luigi',
     voiceType: 'cute', voicePitch: 1.23,
     epithet: 'Frictionless Window-Washer',
     bio: 'Wears industrial soap shoes with near-zero traction. One wavedash crosses the entire zip code.',
@@ -304,7 +312,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'sourzer', meleeKind: 'ftKoopa', name: 'Sourzer', parodyOf: 'Bowser',
+    id: 'sourzer', name: 'Sourzer', parodyOf: 'Bowser',
     voiceType: 'heavy', voicePitch: 0.61,
     epithet: 'Grumpy HOA Dragon-Turtle',
     bio: 'Enormous, heavy, and furious about your lawn height. Spiked lawnmower shell and nuclear dropkicks.',
@@ -331,7 +339,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'screech', meleeKind: 'ftPeach', name: 'Screech', parodyOf: 'Peach',
+    id: 'screech', name: 'Screech', parodyOf: 'Peach',
     voiceType: 'snarky', voicePitch: 1.4, canFloat: true,
     epithet: 'Passive-Aggressive Aristocrat',
     bio: 'Levitates through sheer entitlement. Yanks horrifically grumpy turnip-potatoes straight out of thin air.',
@@ -357,7 +365,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'broshee', meleeKind: 'ftYoshi', name: 'Broshee', parodyOf: 'Yoshi',
+    id: 'broshee', name: 'Broshee', parodyOf: 'Yoshi',
     voiceType: 'cute', voicePitch: 1.32, doubleJumpArmor: 120,
     epithet: 'Tax-Evading Dino Bro',
     bio: 'Backwards snapback, neon shades, armored double-jump, and an inexplicable trail of offshore eggs.',
@@ -382,7 +390,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'wonky-kong', meleeKind: 'ftDonkey', name: 'Wonky Kong', parodyOf: 'Donkey Kong',
+    id: 'wonky-kong', name: 'Wonky Kong', parodyOf: 'Donkey Kong',
     voiceType: 'heavy', voicePitch: 0.76,
     epithet: 'Anxious Accountant Ape',
     bio: 'Overworked CPA gorilla with oversized reading glasses and a tiny red tie. Charges an apocalyptic binder punch.',
@@ -409,7 +417,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'captain-pigeon', meleeKind: 'ftCaptain', name: 'Captain Pigeon', parodyOf: 'Captain Falcon',
+    id: 'captain-pigeon', name: 'Captain Pigeon', parodyOf: 'Captain Falcon',
     voiceType: 'hero', voicePitch: 0.93,
     epithet: 'Unlicensed Bread-Racer',
     bio: 'Mach-2 street-racer wearing a feathered golden helmet. Screams about breadcrumbs while landing frame-perfect Knees.',
@@ -436,7 +444,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'dadondorf', meleeKind: 'ftGanon', name: 'Dadondorf', parodyOf: 'Ganondorf',
+    id: 'dadondorf', name: 'Dadondorf', parodyOf: 'Ganondorf',
     voiceType: 'heavy', voicePitch: 0.67,
     epithet: 'Grill-Master Warlock',
     bio: 'Socks, sandals, cargo shorts, and a cursed stainless-steel spatula. Every single hit feels like a cinderblock.',
@@ -465,7 +473,7 @@ export const ROSTER = [
 
   // Row 2: Falcon't, Faux, Mess, Slush Shovelers, Flurby, Shamus, Velda, Zink, Tiny Zink
   makeFighter({
-    id: 'falcont', meleeKind: 'ftFalco', name: "Falcon't", parodyOf: 'Falco',
+    id: 'falcont', name: "Falcon't", parodyOf: 'Falco',
     voiceType: 'snarky', voicePitch: 1.08,
     epithet: 'Snarky Lounge-Lizard Toucan',
     bio: 'Obnoxiously huge beak, sky-high jump, stun-lasers, vertical Shine, and an illegal Frame-5 spike.',
@@ -481,7 +489,7 @@ export const ROSTER = [
     rig: { silhouette: 'bird', hat: 'toucanBeak', prop: 'shades', eyes: 'shades' },
     moves: {
       [MOVE.DAIR]: { name: 'Toucan Guillotine', startup: 5, active: 8, endlag: 14, landingLag: 12, damage: 13, bkb: 34, kbg: 100, angle: 270, meteor: true,
-        hitboxes: sweetAndSour({ through: 3 }, { from: 4, damage: 8, angle: 56, kbg: 72 }) },
+        hitboxes: sweetAndSour({ through: 3 }, { damage: 8, angle: 56, kbg: 72 }) },
       [MOVE.BAIR]: { name: 'Beak Back-Kick', startup: 4, active: 6, endlag: 13, landingLag: 11, damage: 14, bkb: 40, kbg: 106, angle: 144 },
       [MOVE.NEUTRAL_B]: { name: 'Snark Stun-Laser', kind: 'projectile', startup: 8, active: 2, endlag: 12, damage: 4, bkb: 16, kbg: 10, angle: 40, projSpeed: 21, projLife: 46, projGravity: 0, projAngle: 0, projStyle: 'laser', hitstunOnly: true },
       [MOVE.SIDE_B]: { name: 'Toucan Phantasm', kind: 'dashBurst', technique: 'illusion', style: 'electric', startup: 10, active: 7, endlag: 16, speed: 25, damage: 9, bkb: 30, kbg: 72, angle: 72, airMeteor: true },
@@ -491,7 +499,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'faux', meleeKind: 'ftFox', name: 'Faux', parodyOf: 'Fox',
+    id: 'faux', name: 'Faux', parodyOf: 'Fox',
     voiceType: 'hero', voicePitch: 1.31,
     epithet: '20XX Caffeine Coyote',
     bio: 'Vibrating at 600 BPM on quad-shot espresso. Frame-1 Shine, blinding dash-dance, and a terrifying Up-Smash.',
@@ -519,7 +527,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'mess', meleeKind: 'ftNess', name: 'Mess', parodyOf: 'Ness',
+    id: 'mess', name: 'Mess', parodyOf: 'Ness',
     voiceType: 'mystic', voicePitch: 1.36,
     epithet: 'Psychic Laundry Kid',
     bio: 'Wears an oversized hoodie and fights with tangled earbuds, a broomstick, and unstable appliance telekinesis.',
@@ -546,7 +554,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'slush-shovelers', meleeKind: 'ftPopo', name: 'Slush Shovelers', parodyOf: 'Ice Climbers',
+    id: 'slush-shovelers', name: 'Slush Shovelers', parodyOf: 'Ice Climbers',
     voiceType: 'cute', voicePitch: 1.48,
     epithet: 'Suburban Snow-Clearer Duo',
     bio: 'Pops and his chaotic cardboard sidekick Nana-Bot swing twin plastic snow shovels and fling frozen driveway slush.',
@@ -571,7 +579,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'flurby', meleeKind: 'ftKirby', name: 'Flurby', parodyOf: 'Kirby',
+    id: 'flurby', name: 'Flurby', parodyOf: 'Kirby',
     voiceType: 'cute', voicePitch: 1.73,
     epithet: 'Existential Lint Ball',
     bio: 'Perpetually unimpressed pink dust-bunny with 6 jumps. Turns into an expired block of extra-firm tofu on command.',
@@ -598,7 +606,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'shamus', meleeKind: 'ftSamus', name: 'Shamus', parodyOf: 'Samus',
+    id: 'shamus', name: 'Shamus', parodyOf: 'Samus',
     voiceType: 'robot', voicePitch: 0.84,
     epithet: 'Discount Space HVAC Tech',
     bio: 'Armor cobbled together from dryer ducts and chrome tape. Charges massive lukewarm air-blasts and drops Roombas.',
@@ -622,7 +630,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'velda', meleeKind: 'ftZelda', name: 'Velda', parodyOf: 'Zelda',
+    id: 'velda', name: 'Velda', parodyOf: 'Zelda',
     voiceType: 'mystic', voicePitch: 1.17,
     epithet: 'Dramatic Astrologer',
     bio: 'Blames every missed tech on Mercury retrograde. Delivers absurdly lethal Lightning-Heel kicks.',
@@ -651,7 +659,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'zink', meleeKind: 'ftLink', name: 'Zink', parodyOf: 'Link',
+    id: 'zink', name: 'Zink', parodyOf: 'Link',
     voiceType: 'hero', voicePitch: 0.99,
     epithet: 'Hardware Store Hero',
     bio: 'Left-handed legend armed with a galvanized pipe wrench, trash-can lid shield, and paint-roller boomerangs.',
@@ -677,7 +685,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'tiny-zink', meleeKind: 'ftCLink', name: 'Tiny Zink', parodyOf: 'Young Link',
+    id: 'tiny-zink', name: 'Tiny Zink', parodyOf: 'Young Link',
     voiceType: 'hero', voicePitch: 1.56,
     epithet: 'Hyperactive Hardware Intern',
     bio: 'Faster, smaller, and armed with a plastic spork-sword, flaming marshmallows, and endless lukewarm milk.',
@@ -702,7 +710,7 @@ export const ROSTER = [
 
   // Row 3: Spitzu, Chikapu, Gigglefluff, Mewtooth, Mr. Beep & Blob, Garth, Troy, Shriek
   makeFighter({
-    id: 'spitzu', meleeKind: 'ftPichu', name: 'Spitzu', parodyOf: 'Pichu',
+    id: 'spitzu', name: 'Spitzu', parodyOf: 'Pichu',
     voiceType: 'cute', voicePitch: 1.8,
     epithet: 'Overclocked Battery Gremlin',
     bio: 'Teeny-tiny hurtbox, blistering speed, and zero insulation—literally zaps himself on every special move.',
@@ -727,7 +735,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'chikapu', meleeKind: 'ftPikachu', name: 'Chikapu', parodyOf: 'Pikachu',
+    id: 'chikapu', name: 'Chikapu', parodyOf: 'Pikachu',
     voiceType: 'cute', voicePitch: 1.61,
     epithet: 'Static-Cling Hamster',
     bio: 'Bootleg dryer-sheet rodent with a cardboard zigzag tail, lightning-fast Up-Smash, and ridiculous edgeguards.',
@@ -753,7 +761,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'gigglefluff', meleeKind: 'ftPurin', name: 'Gigglefluff', parodyOf: 'Jigglypuff',
+    id: 'gigglefluff', name: 'Gigglefluff', parodyOf: 'Jigglypuff',
     voiceType: 'cute', voicePitch: 1.68,
     epithet: 'Insomnia Marshmallow',
     bio: '6 midair jumps, outrageous aerial drift, Wall-of-Pain Back Air, and a Frame-1 "NAPTIME" instant KO nuke.',
@@ -778,7 +786,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'mewtooth', meleeKind: 'ftMewtwo', name: 'Mewtooth', parodyOf: 'Mewtwo',
+    id: 'mewtooth', name: 'Mewtooth', parodyOf: 'Mewtwo',
     voiceType: 'mystic', voicePitch: 0.71,
     epithet: 'Grumpy Floating Dentist Cat',
     bio: 'Levitation, a comically huge tail hurtbox, glowing Dental X-Ray Orbs, and ruthless teleport mindgames.',
@@ -804,7 +812,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'mr-beep-blob', meleeKind: 'ftGameWatch', name: 'Mr. Beep & Blob', parodyOf: 'Mr. Game & Watch',
+    id: 'mr-beep-blob', name: 'Mr. Beep & Blob', parodyOf: 'Mr. Game & Watch',
     voiceType: 'robot', voicePitch: 1.51,
     epithet: 'Flat 2D Calculator Gremlin',
     bio: 'Strictly two-dimensional LCD silhouette. Flips pixelated pancakes, hoards projectiles, and gambles for Judge 9.',
@@ -828,7 +836,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'garth', meleeKind: 'ftMars', name: 'Garth', parodyOf: 'Marth',
+    id: 'garth', name: 'Garth', parodyOf: 'Marth',
     voiceType: 'snarky', voicePitch: 1.01,
     epithet: 'Unreasonably Long-Armed Fencer',
     bio: 'Wields an absurdly long brass yardstick-rapier with a glowing tipper sweetspot and an illegal 10-foot grab.',
@@ -859,7 +867,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'troy', meleeKind: 'ftEmblem', name: 'Troy', parodyOf: 'Roy',
+    id: 'troy', name: 'Troy', parodyOf: 'Roy',
     voiceType: 'hero', voicePitch: 1.06,
     epithet: 'Flaming-Broom Pyromaniac',
     bio: 'Garth\'s chaotic cousin who set a broomstick on fire. Hits like a wet noodle at the tip, but nukes point-blank.',
@@ -885,7 +893,7 @@ export const ROSTER = [
   }),
 
   makeFighter({
-    id: 'shriek', meleeKind: 'ftSeak', name: 'Shriek', parodyOf: 'Sheik',
+    id: 'shriek', name: 'Shriek', parodyOf: 'Sheik',
     voiceType: 'snarky', voicePitch: 1.21,
     epithet: 'Over-Caffeinated Mall Ninja',
     bio: 'Wrapped in duct tape and sports-wrap. Combos effortlessly with frame-3 slaps, thumbtack needles, and lethal F-Air.',
@@ -915,7 +923,7 @@ export const ROSTER = [
 
 /** Special NPC fighter for Home-Run Derby */
 export const SAGGING_BAG = makeFighter({
-  id: 'sagging-bag', meleeKind: 'ftSandbag', name: 'Sagging Bag', parodyOf: 'Sandbag',
+  id: 'sagging-bag', name: 'Sagging Bag', parodyOf: 'Sandbag',
   voiceType: 'heavy', voicePitch: 0.83,
   epithet: 'Existential Punching Sack',
   bio: 'Wears a sticky note that says "KICK ME (GENTLY)". Only appears in Home-Run Derby.',
@@ -927,7 +935,7 @@ export const SAGGING_BAG = makeFighter({
 
 /** Special Classic Mode Final Boss */
 export const MASTER_MITT = makeFighter({
-  id: 'master-mitt', meleeKind: 'ftMasterHand', name: 'Master Mitt', parodyOf: 'Master Hand',
+  id: 'master-mitt', name: 'Master Mitt', parodyOf: 'Master Hand',
   voiceType: 'heavy', voicePitch: 0.6,
   epithet: 'Giant Sentient Oven Mitt',
   bio: 'The supreme quilted kitchen glove ruling the Bizarro Melee universe.',
@@ -937,15 +945,21 @@ export const MASTER_MITT = makeFighter({
   palettes: [{ body: '#f8fafc', outfit: '#ef4444', accent: '#facc15', skin: '#f8fafc' }],
   rig: { silhouette: 'ovenMitt', hat: 'quilted', eyes: 'none' },
   moves: {
-    [MOVE.NEUTRAL_B]: { name: 'Finger-Gun Peppers', bossTell: 'gun', startup: 23, active: 15, endlag: 23, shotInterval: 7, kind: 'projectile', damage: 5, projSpeed: 16, projLife: 62, projGravity: 0, projAngle: 0, projStyle: 'laser' },
-    [MOVE.SIDE_B]: { name: 'Rocket Mitt Slap', bossTell: 'slap', startup: 19, active: 10, endlag: 26, kind: 'dashBurst', damage: 17, bkb: 56, kbg: 102, burstX: 20, burstY: 0, sweetspot: true },
-    [MOVE.DOWN_B]: { name: 'Countertop Slam', bossTell: 'slam', startup: 23, active: 12, endlag: 32, kind: 'stone', damage: 20, bkb: 60, kbg: 110, radius: 64, sweetspot: true },
+    [MOVE.NEUTRAL_B]: { name: 'Finger-Gun Peppers', bossTell: 'gun', startup: 23, active: 6, endlag: 43, kind: 'projectile', damage: 5, projSpeed: 16, projLife: 62, projGravity: 0, projAngle: 0, projStyle: 'laser' },
+    [MOVE.SIDE_B]: { name: 'Rocket Mitt Slap', bossTell: 'slap', startup: 19, active: 10, endlag: 38, kind: 'dashBurst', damage: 16, bkb: 51, kbg: 96, burstX: 20, burstY: 0, sweetspot: true },
+    [MOVE.FSMASH]: { name: 'Oven Sweep', bossTell: 'sweep', startup: 32, active: 52, endlag: 34,
+      damage: 12, bkb: 34, kbg: 83, angle: 28, offsetX: 47, offsetY: 21, radius: 30, chargeable: false },
+    [MOVE.DAIR]: { name: 'Iron Knuckle Drill', bossTell: 'drill', startup: 27, active: 20, endlag: 35,
+      damage: 14, bkb: 39, kbg: 82, angle: 48, offsetX: 33, offsetY: 8, radius: 36, meteor: false },
+    [MOVE.DSMASH]: { name: 'Quilted Shockwave Clap', bossTell: 'clap', startup: 25, active: 6, endlag: 30,
+      damage: 12, bkb: 49, kbg: 90, angle: 66, offsetX: 26, offsetY: 35, radius: 64, bothSides: true, chargeable: false },
+    [MOVE.DOWN_B]: { name: 'Countertop Slam', bossTell: 'slam', startup: 23, active: 12, endlag: 45, kind: 'stone', damage: 18, bkb: 55, kbg: 100, radius: 64, sweetspot: true },
   },
 });
 
 /** Lightweight Wireframe Minion for Multi-Man Bizarro Brawl */
 export const BIZARRO_INTERN = makeFighter({
-  id: 'bizarro-intern', meleeKind: 'ftZakoBoy', name: 'Unpaid Intern', parodyOf: 'Fighting Wireframe',
+  id: 'bizarro-intern', name: 'Unpaid Intern', parodyOf: 'Fighting Wireframe',
   voiceType: 'robot', voicePitch: 1.19,
   epithet: 'Polygon Temp Worker',
   bio: 'Low-poly wireframe intern hired exclusively to get launched off Arguefield in bulk.',

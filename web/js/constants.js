@@ -1,7 +1,4 @@
-/**
- * Shared physics constants, Melee decomp-derived formulas, action states, and enums.
- * Knockback math mirrors `KNOCKBACK` / `ftColl_80079AB0` in src/melee/ft/ftcoll.c.
- */
+/** Shared combat constants, action states and enums. */
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -46,7 +43,7 @@ export const MELEE = {
   AIRDODGE_INTANGIBLE_START: 4,
   AIRDODGE_INTANGIBLE_END: 22,
   AIRDODGE_SPEED: 3.1,
-  WAVEDASH_FRICTION_MULT: 1.0,
+  WAVEDASH_LANDING_SPEED: 15.3,
   SPOTDODGE_FRAMES: 22,
   ROLL_FRAMES: 30,
   STALE_QUEUE_LEN: 9,
@@ -54,7 +51,7 @@ export const MELEE = {
 };
 
 /**
- * Exact Melee knockback formula from src/melee/ft/ftcoll.c (`KNOCKBACK` macro).
+ * Calculate launch force after damage, weight, move scaling and charge.
  */
 export function computeMeleeKnockback(percent, damage, weight, bkb, kbg, setKb = 0, ratio = 1.0) {
   let inner;

@@ -1,6 +1,6 @@
 /**
  * Bizarro Melee v2 — Main Application Shell, 3D WebGL + 2D Fallback Renderer,
- * 26 Fighters, 16 Stages, 18 Items, 4P FFA/Teams, Break the Targets, Multi-Man Brawl,
+ * 26 Fighters, 29 Stages, 18 Items, 4P FFA/Teams, Break the Targets, Multi-Man Brawl,
  * Home-Run Derby, Classic Arcade, Training Lab, and dpad.games SDK Integration.
  */
 
@@ -15,7 +15,7 @@ import { InputManager, createEmptyInput } from './input.js';
 import { GameRenderer } from './render.js';
 import { GameRenderer3D } from './render3d.js';
 import { SoundEngine } from './audio.js';
-import { createDpadBridge } from './dpad-sdk.js';
+import { createDpadBridge, computeMatchChecksum, createOnlineSession } from './dpad-sdk.js';
 import { preloadPortraits } from './portraits.js';
 import { preloadStageArt, drawStageThumb } from './stage-art.js';
 
@@ -24,7 +24,24 @@ const TEAM_ORDER = ['red', 'blue', 'green'];
 const TEAM_COLORS = { red: '#ff4b5c', blue: '#3898ff', green: '#42e695' };
 const EVENT_MODE = () => MODE.EVENT || 'event';
 
-const CLASSIC_GAUNTLET = ['bario', 'wonky-kong', 'faux', 'garth', 'master-mitt'];
+const reducedMotionMq = window.matchMedia?.('(prefers-reduced-motion: reduce)') || null;
+const isReducedMotion = () => Boolean(reducedMotionMq?.matches);
+
+function buildClassicGauntlet(excludeFighterId = null) {
+  const pool = ROSTER.filter((f) => f.id !== excludeFighterId);
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const pick = (i) => shuffled[i % shuffled.length]?.id || ROSTER[i % ROSTER.length].id;
+  const tourneyStages = STAGES.filter((s) => s.category === 'tourney' && s.id !== 'final-obligation');
+  const generalStages = STAGES.filter((s) => s.id !== 'final-obligation');
+  const pickStage = (list) => list[Math.floor(Math.random() * list.length)]?.id || STAGES[0].id;
+  return [
+    { fighterId: pick(0), stageId: pickStage(generalStages), label: '1V1 DUEL', cpuLevel: 4, itemFrequency: ITEM_FREQUENCY.LOW },
+    { fighterId: pick(1), stageId: pickStage(generalStages), label: 'GIANT RIVAL', cpuLevel: 5, itemFrequency: ITEM_FREQUENCY.LOW, giantPorts: [1] },
+    { fighterId: pick(2), stageId: pickStage(generalStages), label: 'ITEM CHAOS', cpuLevel: 6, itemFrequency: ITEM_FREQUENCY.HIGH },
+    { fighterId: pick(3), stageId: pickStage(tourneyStages.length ? tourneyStages : generalStages), label: 'RIVAL DUEL', cpuLevel: 7, itemFrequency: ITEM_FREQUENCY.OFF },
+    { fighterId: MASTER_MITT.id, stageId: 'final-obligation', label: 'FINAL BOSS', cpuLevel: 8, itemFrequency: ITEM_FREQUENCY.LOW },
+  ];
+}
 const $ = (id) => document.getElementById(id);
 
 const canvas3d = $('game-canvas-3d');
@@ -55,8 +72,10 @@ const app = {
   classicScore: 0,
   classicRoundBaseScore: 0,
   classicRunCleared: false,
+  classicGauntlet: buildClassicGauntlet('faux'),
   hitboxesVisible: false,
   shakeEnabled: true,
+  flashEnabled: true,
   techFeedEnabled: true,
   rebindAction: null,
   use3D: renderer3d.ready,
@@ -80,7 +99,8 @@ const app = {
   match: null,
   attractMatch: null,
   hudRefs: [],
-  onlineRemoteInput: createEmptyInput(),
+  onlineSession: null,
+  onlineGuestPick: null,
   seenPhysicalKey: false,
   padFocusEl: null,
   lastTickMs: 0,
@@ -154,7 +174,10 @@ function showScreen(name) {
   }
 
   clearPadFocus();
+  input.setMenuMode?.(name !== 'match');
   input.syncMenuButtons?.();
+  sound.setPaused?.(name === 'pause');
+  $('css-bio-panel')?.classList.remove('bio-open');
   updateTouchVisibility();
 
   if (name === 'title' || name === 'css' || name === 'stage' || name === 'events' || name === 'online' || name === 'records' || name === 'controller') {
@@ -231,7 +254,7 @@ function buildCssGrid() {
 
     const subEl = document.createElement('div');
     subEl.className = 'css-tile-sub';
-    subEl.textContent = `(${def.parodyOf})`;
+    subEl.textContent = def.epithet || 'Bizarro Fighter';
     btn.appendChild(subEl);
 
     btn.addEventListener('mouseenter', () => renderBioPanel(def, 0));
@@ -255,7 +278,7 @@ function buildCssGrid() {
 function renderBioPanel(def, paletteIndex = 0) {
   if (!def) return;
   renderer2d.drawPortrait($('bio-portrait'), def, paletteIndex);
-  $('bio-parody').textContent = `BIZARRO PARODY OF ${def.parodyOf.toUpperCase()}`;
+  $('bio-parody').textContent = `${String(def.rig?.silhouette || 'bizarro').toUpperCase()} FIGHTER`;
   $('bio-name').textContent = def.name;
   $('bio-epithet').textContent = def.epithet;
   $('bio-desc').textContent = def.bio;
@@ -476,7 +499,7 @@ function buildStageGrid(filterCat = 'all') {
 
     const h3 = document.createElement('h3'); h3.textContent = st.name;
     const par = document.createElement('div'); par.className = 'stage-parody';
-    par.textContent = `Parody of ${st.parodyOf}${st.hazard ? ' • HAZARD' : ''}`;
+    par.textContent = `${String(st.category || 'arena').toUpperCase()} ARENA${st.hazard ? ' • HAZARD' : ''}`;
     const p = document.createElement('p'); p.textContent = st.tagline;
 
     btn.append(sw, h3, par, p);
@@ -548,7 +571,7 @@ function launchEventMatch(eventId) {
 // ============================================================================
 // MATCH LAUNCH & HUD
 // ============================================================================
-function launchConfiguredMatch() {
+function launchConfiguredMatch(onlineCfg = null) {
   const dpadPlayer = dpad.getPlayer();
   const p1Name = dpadPlayer?.name ? dpadPlayer.name.slice(0, 14) : 'P1';
 
@@ -609,14 +632,18 @@ function launchConfiguredMatch() {
       { port: 3, fighterId: BIZARRO_INTERN.id, paletteIndex: 0, isCpu: true, cpuLevel: 4, name: 'Intern #3', team: null },
     ];
   } else if (app.selectedMode === MODE.CLASSIC) {
-    const oppId = CLASSIC_GAUNTLET[app.classicStep % CLASSIC_GAUNTLET.length];
-    const oppDef = getFighterById(oppId);
-    stageId = oppId === MASTER_MITT.id ? 'final-obligation' : STAGES[(app.classicStep * 3) % STAGES.length].id;
-    stocks = 3; timeSeconds = 180; itemFrequency = ITEM_FREQUENCY.LOW;
+    if (!app.classicGauntlet || !app.classicGauntlet.length) {
+      app.classicGauntlet = buildClassicGauntlet(app.ports[0].fighterId);
+    }
+    const round = app.classicGauntlet[app.classicStep % app.classicGauntlet.length];
+    const oppDef = getFighterById(round.fighterId);
+    stageId = round.stageId;
+    stocks = 3; timeSeconds = 180; itemFrequency = round.itemFrequency || ITEM_FREQUENCY.LOW;
     players = [
       { ...app.ports[0], port: 0, isCpu: false, name: p1Name, team: null },
-      { port: 1, fighterId: oppId, paletteIndex: 0, isCpu: true, cpuLevel: Math.min(9, 4 + app.classicStep), name: oppDef.name, team: null },
+      { port: 1, fighterId: round.fighterId, paletteIndex: 0, isCpu: true, cpuLevel: round.cpuLevel || Math.min(9, 4 + app.classicStep), name: oppDef.name, team: null },
     ];
+    if (round.giantPorts) extraConfig.giantPorts = round.giantPorts;
   } else if (app.selectedMode === MODE.TRAINING) {
     stocks = 99; timeSeconds = 0; itemFrequency = ITEM_FREQUENCY.OFF;
     players = [
@@ -625,10 +652,25 @@ function launchConfiguredMatch() {
     ];
   } else if (app.selectedMode === MODE.ONLINE) {
     const online = dpad.getOnlineState();
-    players = [
-      { ...app.ports[0], port: 0, isCpu: false, name: p1Name, team: null },
-      { ...app.ports[1], port: 1, isCpu: !online.connected, cpuLevel: 6, name: online.peers?.[0]?.username || 'Online Rival', team: null },
-    ];
+    const peerName = online.peers?.[0]?.username || 'Online Rival';
+    if (onlineCfg) {
+      stageId = onlineCfg.stageId;
+      stocks = onlineCfg.stocks;
+      timeSeconds = onlineCfg.timeSeconds;
+      itemFrequency = onlineCfg.itemFrequency;
+      extraConfig.seed = onlineCfg.seed;
+      const hostName = online.isHost ? p1Name : peerName;
+      const guestName = online.isHost ? peerName : p1Name;
+      players = [
+        { port: 0, fighterId: onlineCfg.hostFighter, paletteIndex: onlineCfg.hostPalette, isCpu: false, name: hostName, team: null },
+        { port: 1, fighterId: onlineCfg.guestFighter, paletteIndex: onlineCfg.guestPalette, isCpu: false, name: guestName, team: null },
+      ];
+    } else {
+      players = [
+        { ...app.ports[0], port: 0, isCpu: false, name: p1Name, team: null },
+        { ...app.ports[1], port: 1, isCpu: !online.connected, cpuLevel: 6, name: peerName, team: null },
+      ];
+    }
   } else {
     players = app.ports.slice(0, app.playerCount).map((p, idx) => ({
       ...p,
@@ -662,21 +704,22 @@ function launchConfiguredMatch() {
   if (document.activeElement && typeof document.activeElement.blur === 'function') {
     document.activeElement.blur();
   }
-  sound.setMusic(players.some((p) => p.fighterId === MASTER_MITT.id) ? 'boss' : 'battle');
+  sound.setMusic(players.some((p) => p.fighterId === MASTER_MITT.id) ? 'boss' : 'battle', app.match.stage.id);
   sound.playUi('ready');
 }
 
 function buildMatchHud(match) {
+  const classicRound = app.classicGauntlet?.[app.classicStep % (app.classicGauntlet?.length || 1)];
   const modeLabel = {
     [MODE.VS_STOCK]: `${match.stage.name} • ${app.teamBattle ? 'TEAMS • ' : ''}${app.stocks} STOCK • ITEMS ${app.itemFrequency.toUpperCase()}`,
     [MODE.VS_TIME]: `${match.stage.name} • ${app.teamBattle ? 'TEAMS • ' : ''}TIME`,
     [EVENT_MODE()]: `EVENT: ${(match.eventTitle || 'BIZARRO EVENT').toUpperCase()} • ${match.stage.name}`,
-    [MODE.CLASSIC]: `CLASSIC ${app.classicStep + 1}/${CLASSIC_GAUNTLET.length} • ${match.stage.name}`,
+    [MODE.CLASSIC]: `CLASSIC ${app.classicStep + 1}/${app.classicGauntlet?.length || 5} • ${classicRound?.label || 'DUEL'} • ${match.stage.name}`,
     [MODE.HOMERUN]: 'HOME-RUN DERBY • GRAB THE PLUNGER!',
     [MODE.TARGETS]: 'BREAK THE TARGETS • SMASH ALL 10!',
     [MODE.MULTIMAN]: 'MULTI-MAN BIZARRO BRAWL • 25 INTERNS',
     [MODE.TRAINING]: `TRAINING LAB • ${match.stage.name}`,
-    [MODE.ONLINE]: `ONLINE MATCH • ${match.stage.name}`,
+    [MODE.ONLINE]: `ONLINE LOCKSTEP (3F) • ${match.stage.name}`,
   }[match.mode] || match.stage.name;
   $('hud-mode-info').textContent = modeLabel;
 
@@ -721,6 +764,7 @@ function buildMatchHud(match) {
     const nameEl = document.createElement('div');
     nameEl.className = 'hud-card-name';
     const isBoss = f.def.id === MASTER_MITT.id || (f.bossMaxHp || 0) > 0;
+    if (isBoss) card.classList.add('hud-card-boss');
     const isIntern = f.def.id === BIZARRO_INTERN.id;
     const sameName = String(f.name || '').trim().toUpperCase() === String(f.def.name || '').trim().toUpperCase();
     const showTeamTag = f.team && f.team !== 'player' && f.team !== 'interns';
@@ -904,14 +948,15 @@ function updateMatchHud(match) {
 
     const isBoss = ref.isBoss || f.def.id === MASTER_MITT.id || (f.bossMaxHp || 0) > 0;
     const pct = Math.floor(f.percent);
-    if (pct > ref.lastPct) ref.shake = 10;
+    if (pct > ref.lastPct) ref.shake = (app.shakeEnabled && !isReducedMotion()) ? 10 : 0;
     ref.lastPct = pct;
 
-    if (ref.shake > 0) {
+    if (ref.shake > 0 && app.shakeEnabled && !isReducedMotion()) {
       ref.shake--;
       ref.card.style.transform = `translate(${(Math.random() - 0.5) * ref.shake * 1.4}px, ${(Math.random() - 0.5) * ref.shake * 1.4}px)`;
-    } else if (ref.card.style.transform) {
-      ref.card.style.transform = '';
+    } else {
+      ref.shake = 0;
+      if (ref.card.style.transform) ref.card.style.transform = '';
     }
 
     if (isBoss) {
@@ -1028,10 +1073,12 @@ function openResults(match) {
     if (won) {
       const roundGain = 10000 + p1.stocks * 2500 + p1.kos * 1500;
       app.classicScore = app.classicRoundBaseScore + roundGain;
-      if (app.classicStep < CLASSIC_GAUNTLET.length - 1) {
+      const totalRounds = app.classicGauntlet?.length || 5;
+      if (app.classicStep < totalRounds - 1) {
         kicker = `STAGE ${app.classicStep + 1} CLEARED`;
         nextBtnVisible = true;
-        sub = `Score: ${app.classicScore.toLocaleString()} — Next up: ${getFighterById(CLASSIC_GAUNTLET[app.classicStep + 1]).name}`;
+        const nextRound = app.classicGauntlet[app.classicStep + 1];
+        sub = `Score: ${app.classicScore.toLocaleString()} — Next up: ${getFighterById(nextRound.fighterId).name} (${nextRound.label})`;
       } else {
         kicker = 'CLASSIC ARCADE CHAMPION!';
         title = 'MASTER MITT DE-QUILTED!';
@@ -1188,6 +1235,7 @@ function syncControllerScreen() {
   const list = $('ctrl-rebind-list');
   if (!list) return;
   list.textContent = '';
+  const defaultPad = input.getDefaultPadBindings ? input.getDefaultPadBindings() : {};
   for (const [act, title] of REBIND_ACTIONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1197,7 +1245,8 @@ function syncControllerScreen() {
     const keys = cfg.keyBinds?.[act];
     const displayKey = String(Array.isArray(keys) ? keys[0] : (keys || 'Default')).replace('Key', '');
     const pBind = cfg.padBinds?.[act];
-    const padTag = Array.isArray(pBind) && pBind.length ? ` / B${pBind[0]}` : '';
+    const effectivePad = (Array.isArray(pBind) && pBind.length) ? pBind : (PAD_REBINDABLE.has(act) ? defaultPad[act] : null);
+    const padTag = Array.isArray(effectivePad) && effectivePad.length ? ` / B${effectivePad[0]}` : '';
     if (app.rebindAction === act) {
       right.textContent = PAD_REBINDABLE.has(act) ? 'Press key or btn...' : 'Press key...';
     } else {
@@ -1436,9 +1485,9 @@ function handleGamepadMenus() {
     updatePadHintBar(false);
     return;
   }
-  const nav = input.pollMenu ? input.pollMenu() : { connected: false };
+  const nav = input.pollMenu ? input.pollMenu() : { connected: false, keyboardActive: false };
   updatePadHintBar(Boolean(nav.connected), nav.padName || '');
-  if (!nav.connected) return;
+  if (!nav.connected && !nav.keyboardActive) return;
   if (!app.padFocusEl || !getFocusableInActiveScreen().includes(app.padFocusEl)) {
     focusDefaultForScreen();
   }
@@ -1559,12 +1608,62 @@ function handleGamepadMenus() {
 // ============================================================================
 // ONLINE & RECORDS UI
 // ============================================================================
+function ensureOnlineSession() {
+  const st = dpad.getOnlineState();
+  if (!st.inLobby || !st.connected) {
+    app.onlineSession?.stop();
+    app.onlineSession = null;
+    return null;
+  }
+  if (app.onlineSession && app.onlineSession.getStats().isHost === Boolean(st.isHost)) {
+    return app.onlineSession;
+  }
+  app.onlineSession?.stop();
+  app.onlineSession = createOnlineSession({
+    isHost: Boolean(st.isHost),
+    delayFrames: 3,
+    send: (ch, payload, reliable) => dpad.sendP2P(ch, payload, reliable),
+    onPeerPick: (pick) => {
+      app.onlineGuestPick = pick;
+    },
+    onConfigReady: (cfg) => {
+      app.selectedMode = MODE.ONLINE;
+      app.selectedStageId = cfg.stageId;
+      launchConfiguredMatch(cfg);
+      refreshOnlineUi();
+    },
+    onDesync: ({ frame }) => {
+      if ($('hud-mode-info') && app.match?.mode === MODE.ONLINE) {
+        setStableText($('hud-mode-info'), `ONLINE DESYNC @ F${frame} • ${app.match.stage.name}`);
+      }
+    },
+  });
+  if (!st.isHost) {
+    app.onlineSession.sendGuestPick(app.ports[0].fighterId, app.ports[0].paletteIndex);
+  }
+  return app.onlineSession;
+}
+
 function refreshOnlineUi() {
   const st = dpad.getOnlineState();
-  $('online-status').textContent = st.statusText;
+  const sess = ensureOnlineSession();
+  const net = sess?.getStats();
+  $('online-status').textContent = net?.handshaking
+    ? 'Syncing match seed & rules with opponent...'
+    : st.statusText;
   $('btn-lobby-leave').hidden = !st.inLobby;
   $('online-invite-wrap').hidden = !st.inviteLink;
   if (st.inviteLink) $('online-invite-link').value = st.inviteLink;
+
+  const metaEl = $('online-net-meta');
+  if (metaEl) {
+    metaEl.hidden = !st.inLobby;
+    if (st.inLobby) {
+      const role = st.isHost ? 'HOST (P1)' : 'GUEST (P2)';
+      const syncLbl = net ? `${net.delayFrames}f Delay • ${net.syncState.toUpperCase()}` : 'Waiting for P2P';
+      metaEl.textContent = `${role} • Lockstep ${syncLbl}`;
+    }
+  }
 
   const peersEl = $('online-peers');
   peersEl.textContent = '';
@@ -1576,7 +1675,8 @@ function refreshOnlineUi() {
     row.append(n, r);
     peersEl.appendChild(row);
   }
-  $('btn-online-launch').hidden = !(st.inLobby && (st.peers?.length || 0) >= 1);
+  const canLaunch = Boolean(st.inLobby && st.connected && (st.peers?.length || 0) >= 1 && st.isHost);
+  $('btn-online-launch').hidden = !canLaunch;
 }
 
 async function openRecordsBoard(boardId = 'homerun-distance') {
@@ -1631,8 +1731,12 @@ function wireTouchControls() {
   let stickId = null, originX = 0, originY = 0;
   const maxDist = 42;
 
+  let touchStickX = 0, touchStickY = 0;
+
   function resetStick() {
     stickId = null;
+    touchStickX = 0;
+    touchStickY = 0;
     knob.style.transform = 'translate(0px, 0px)';
     input.setTouchState({ moveX: 0, moveY: 0 });
   }
@@ -1641,7 +1745,9 @@ function wireTouchControls() {
     const dist = Math.hypot(dx, dy);
     if (dist > maxDist) { dx = (dx / dist) * maxDist; dy = (dy / dist) * maxDist; }
     knob.style.transform = `translate(${dx}px, ${dy}px)`;
-    input.setTouchState({ moveX: dx / maxDist, moveY: -dy / maxDist });
+    touchStickX = dx / maxDist;
+    touchStickY = -dy / maxDist;
+    input.setTouchState({ moveX: touchStickX, moveY: touchStickY });
   }
 
   zone.addEventListener('pointerdown', (e) => {
@@ -1664,9 +1770,26 @@ function wireTouchControls() {
       sound.unlock();
       btn.setPointerCapture(e.pointerId);
       btn.classList.add('pressed');
-      input.setTouchState({ [key]: true });
+      if (key === 'smash') {
+        const mag = Math.hypot(touchStickX, touchStickY);
+        if (mag >= 0.25) {
+          input.setTouchState({ cStickX: touchStickX / mag, cStickY: touchStickY / mag });
+        } else {
+          const facing = app.match?.fighters?.[0]?.facing || 1;
+          input.setTouchState({ cStickX: facing, cStickY: 0 });
+        }
+      } else {
+        input.setTouchState({ [key]: true });
+      }
     });
-    const release = () => { btn.classList.remove('pressed'); input.setTouchState({ [key]: false }); };
+    const release = () => {
+      btn.classList.remove('pressed');
+      if (key === 'smash') {
+        input.setTouchState({ cStickX: 0, cStickY: 0 });
+      } else {
+        input.setTouchState({ [key]: false });
+      }
+    };
     btn.addEventListener('pointerup', release);
     btn.addEventListener('pointercancel', release);
   }
@@ -1743,7 +1866,14 @@ function wireUi() {
   });
   $('btn-events')?.addEventListener('click', () => { sound.unlock(); sound.playUi('select'); buildEventsGrid(); showScreen('events'); });
   $('btn-events-back')?.addEventListener('click', () => { sound.playUi('back'); showScreen('title'); });
-  $('btn-classic').addEventListener('click', () => { app.classicStep = 0; app.classicScore = 0; app.classicRoundBaseScore = 0; app.classicRunCleared = false; openCssFor(MODE.CLASSIC, 'CLASSIC ARCADE', false, 'Start Classic →'); });
+  $('btn-classic').addEventListener('click', () => {
+    app.classicStep = 0;
+    app.classicScore = 0;
+    app.classicRoundBaseScore = 0;
+    app.classicRunCleared = false;
+    app.classicGauntlet = buildClassicGauntlet(app.ports[0].fighterId);
+    openCssFor(MODE.CLASSIC, 'CLASSIC ARCADE', false, 'Start Classic →');
+  });
   $('btn-targets').addEventListener('click', () => openCssFor(MODE.TARGETS, 'BREAK THE TARGETS', false, 'Start Targets →'));
   $('btn-homerun').addEventListener('click', () => openCssFor(MODE.HOMERUN, 'HOME-RUN DERBY', false, 'Launch Derby →'));
   $('btn-multiman').addEventListener('click', () => openCssFor(MODE.MULTIMAN, 'MULTI-MAN BRAWL', false, 'Fight 25 Interns →'));
@@ -1808,19 +1938,29 @@ function wireUi() {
       use3D: app.use3D,
       hitboxes: app.hitboxesVisible,
       shake: app.shakeEnabled,
+      flash: app.flashEnabled,
     }, 'settings');
+  };
+
+  const syncMuteUi = (muted) => {
+    if ($('inp-mute')) $('inp-mute').checked = muted;
+    if ($('btn-mute-title')) $('btn-mute-title').textContent = `Sound: ${muted ? 'Off' : 'On'}`;
+    if ($('btn-pause-mute')) $('btn-pause-mute').textContent = `Sound: ${muted ? 'Off' : 'On'}`;
   };
 
   const toggleMute = () => {
     sound.unlock();
     const next = !sound.isMuted();
     sound.setMuted(next);
-    $('inp-mute').checked = next;
-    $('btn-mute-title').textContent = `Sound: ${next ? 'Off' : 'On'}`;
+    syncMuteUi(next);
     persistSettings();
   };
   $('btn-mute-title').addEventListener('click', toggleMute);
   $('btn-pause-mute').addEventListener('click', toggleMute);
+  $('btn-css-bio-toggle')?.addEventListener('click', () => {
+    sound.playUi('move');
+    $('css-bio-panel')?.classList.toggle('bio-open');
+  });
 
   const toggle3D = () => {
     app.use3D = !app.use3D;
@@ -1848,9 +1988,10 @@ function wireUi() {
     syncCssSelection();
   });
 
-  // Populate Training Lab spawn-any-item selector (all 18 items)
-  const itemSel = $('sel-train-item');
-  if (itemSel) {
+  // Populate Training Lab spawn-any-item selectors (HUD toolbar + Pause menu)
+  for (const selId of ['sel-train-item', 'sel-pause-train-item']) {
+    const itemSel = $(selId);
+    if (!itemSel) continue;
     itemSel.textContent = '';
     for (const def of Object.values(ITEM_DEF)) {
       const opt = document.createElement('option');
@@ -1864,24 +2005,67 @@ function wireUi() {
       document.activeElement.blur();
     }
   };
-  $('sel-train-speed')?.addEventListener('change', (e) => {
-    app.trainingSpeed = Number(e.target.value) || 1;
+  const setTrainingSpeed = (val) => {
+    app.trainingSpeed = Number(val) || 1;
     if (app.match) app.match.timeScale = app.trainingSpeed;
-    returnFocusToArena();
-  });
-  $('sel-train-cpu')?.addEventListener('change', (e) => {
-    app.trainingCpuMode = e.target.value || 'stand';
+    if ($('sel-train-speed')) $('sel-train-speed').value = String(app.trainingSpeed);
+    if ($('sel-pause-train-speed')) $('sel-pause-train-speed').value = String(app.trainingSpeed);
+  };
+  const setTrainingCpu = (val) => {
+    app.trainingCpuMode = val || 'stand';
     if (app.match) app.match.trainingCpuMode = app.trainingCpuMode;
-    returnFocusToArena();
-  });
-  $('sel-train-item')?.addEventListener('change', () => returnFocusToArena());
-  $('btn-train-spawn')?.addEventListener('click', () => {
+    if ($('sel-train-cpu')) $('sel-train-cpu').value = app.trainingCpuMode;
+    if ($('sel-pause-train-cpu')) $('sel-pause-train-cpu').value = app.trainingCpuMode;
+  };
+  const spawnTrainingSelectedItem = (fromPause = false) => {
     if (!app.match || app.match.mode !== MODE.TRAINING) return;
-    const itemId = $('sel-train-item')?.value || 'plunger_bat';
+    const itemId = $(fromPause ? 'sel-pause-train-item' : 'sel-train-item')?.value || 'plunger_bat';
     Physics.spawnItemNow?.(app.match, itemId);
     sound.playUi('select');
+    if (!fromPause) returnFocusToArena();
+  };
+  const resetTrainingPositions = () => {
+    if (!app.match) return;
+    if (typeof Physics.resetTrainingMatch === 'function') {
+      Physics.resetTrainingMatch(app.match);
+    } else {
+      for (let i = 0; i < app.match.fighters.length; i++) {
+        const f = app.match.fighters[i];
+        const sp = app.match.stage.spawns[i % app.match.stage.spawns.length];
+        f.x = sp.x; f.y = sp.y; f.vx = 0; f.vy = 0; f.kbVx = 0; f.kbVy = 0;
+        f.percent = 0; f.state = STATE.AIRBORNE; f.stateFrame = 0;
+        f.hitlag = 0; f.hitstun = 0; f.shieldStun = 0; f.invulnFrames = 0;
+        f.moveKey = null; f.moveData = null; f.moveFrame = 0;
+        f.grabbing = null; f.grabbedBy = null; f.launchAngle = null;
+        f.squashX = 1; f.squashY = 1; f.comboCount = 0; f.comboTimer = 0;
+        f.fastFalling = false; f.grounded = false;
+        f.heldItemId = null; f.chargeStored = 0; f.sleepFrames = 0; f.sleepImmunity = 0;
+        if (f.inputBuffer) f.inputBuffer = {};
+      }
+      if (Array.isArray(app.match.projectiles)) app.match.projectiles.length = 0;
+      if (Array.isArray(app.match.items)) app.match.items.length = 0;
+      app.match.screenShake = 0;
+      app.match.screenFlash = 0;
+      app.match.hitstopFrames = 0;
+      app.match.slowMoFrames = 0;
+      app.match.events = [];
+    }
+    renderer3d.reset(app.match.stage);
+  };
+  $('sel-train-speed')?.addEventListener('change', (e) => { setTrainingSpeed(e.target.value); returnFocusToArena(); });
+  $('sel-pause-train-speed')?.addEventListener('change', (e) => setTrainingSpeed(e.target.value));
+  $('sel-train-cpu')?.addEventListener('change', (e) => { setTrainingCpu(e.target.value); returnFocusToArena(); });
+  $('sel-pause-train-cpu')?.addEventListener('change', (e) => setTrainingCpu(e.target.value));
+  $('sel-train-item')?.addEventListener('change', (e) => {
+    if ($('sel-pause-train-item')) $('sel-pause-train-item').value = e.target.value;
     returnFocusToArena();
   });
+  $('sel-pause-train-item')?.addEventListener('change', (e) => {
+    if ($('sel-train-item')) $('sel-train-item').value = e.target.value;
+  });
+  $('btn-train-spawn')?.addEventListener('click', () => spawnTrainingSelectedItem(false));
+  $('btn-pause-train-spawn')?.addEventListener('click', () => spawnTrainingSelectedItem(true));
+  $('btn-pause-train-reset')?.addEventListener('click', () => { resetTrainingPositions(); sound.playUi('select'); });
   $('btn-train-focus')?.addEventListener('click', () => returnFocusToArena());
 
   $('btn-random-all').addEventListener('click', () => {
@@ -1924,7 +2108,27 @@ function wireUi() {
     $('btn-copy-invite').textContent = 'Copied!';
     setTimeout(() => { $('btn-copy-invite').textContent = 'Copy'; }, 1500);
   });
-  $('btn-online-launch').addEventListener('click', () => { app.selectedMode = MODE.ONLINE; launchConfiguredMatch(); });
+  $('btn-online-launch').addEventListener('click', () => {
+    app.selectedMode = MODE.ONLINE;
+    const st = dpad.getOnlineState();
+    const sess = ensureOnlineSession();
+    if (st.connected && sess && st.isHost) {
+      sess.startHandshake({
+        seed: (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0,
+        stageId: app.selectedStageId || STAGES[0].id,
+        stocks: app.stocks,
+        timeSeconds: app.timeSeconds,
+        itemFrequency: app.itemFrequency,
+        hostFighter: app.ports[0].fighterId,
+        hostPalette: app.ports[0].paletteIndex,
+        guestFighter: app.onlineGuestPick?.fighterId || app.ports[1].fighterId,
+        guestPalette: app.onlineGuestPick?.paletteIndex ?? app.ports[1].paletteIndex,
+      });
+      refreshOnlineUi();
+    } else {
+      launchConfiguredMatch();
+    }
+  });
 
   // Records & Settings
   $('btn-records-back').addEventListener('click', () => { sound.playUi('back'); showScreen('title'); });
@@ -1934,9 +2138,10 @@ function wireUi() {
   $('btn-settings-back').addEventListener('click', () => { sound.playUi('back'); showScreen(app.prevScreen === 'pause' ? 'pause' : 'title'); });
   $('inp-sfx-vol').addEventListener('input', (e) => { sound.setSfxVolume(Number(e.target.value)); persistSettings(); });
   $('inp-music-vol').addEventListener('input', (e) => { sound.setMusicVolume(Number(e.target.value)); persistSettings(); });
-  $('inp-mute').addEventListener('change', (e) => { sound.setMuted(e.target.checked); $('btn-mute-title').textContent = `Sound: ${e.target.checked ? 'Off' : 'On'}`; persistSettings(); });
+  $('inp-mute').addEventListener('change', (e) => { sound.setMuted(e.target.checked); syncMuteUi(e.target.checked); persistSettings(); });
   $('inp-hitboxes').addEventListener('change', (e) => { app.hitboxesVisible = e.target.checked; persistSettings(); });
   $('inp-shake').addEventListener('change', (e) => { app.shakeEnabled = e.target.checked; persistSettings(); });
+  $('inp-flash')?.addEventListener('change', (e) => { app.flashEnabled = e.target.checked; persistSettings(); });
 
   // HUD / Pause / Results
   $('btn-hud-pause').addEventListener('click', () => togglePause(true));
@@ -1946,27 +2151,7 @@ function wireUi() {
     $('btn-hud-hitboxes').textContent = `Hitboxes: ${app.hitboxesVisible ? 'On' : 'Off'}`;
     persistSettings();
   });
-  $('btn-hud-reset').addEventListener('click', () => {
-    if (!app.match) return;
-    for (let i = 0; i < app.match.fighters.length; i++) {
-      const f = app.match.fighters[i];
-      const sp = app.match.stage.spawns[i % app.match.stage.spawns.length];
-      f.x = sp.x; f.y = sp.y; f.vx = 0; f.vy = 0; f.kbVx = 0; f.kbVy = 0;
-      f.percent = 0; f.state = STATE.AIRBORNE; f.stateFrame = 0;
-      f.hitlag = 0; f.hitstun = 0; f.shieldStun = 0; f.invulnFrames = 0;
-      f.moveKey = null; f.moveData = null; f.moveFrame = 0;
-      f.grabbing = null; f.grabbedBy = null; f.launchAngle = null;
-      f.squashX = 1; f.squashY = 1; f.comboCount = 0; f.comboTimer = 0;
-      f.fastFalling = false; f.grounded = false;
-      if (f.inputBuffer) f.inputBuffer = {};
-    }
-    app.match.screenShake = 0;
-    app.match.screenFlash = 0;
-    app.match.hitstopFrames = 0;
-    app.match.slowMoFrames = 0;
-    app.match.events = [];
-    renderer3d.reset(app.match.stage);
-  });
+  $('btn-hud-reset').addEventListener('click', resetTrainingPositions);
 
   $('btn-pause-resume').addEventListener('click', () => togglePause(false));
   $('btn-pause-restart').addEventListener('click', () => {
@@ -2043,55 +2228,34 @@ function togglePause(pause) {
     if ($('btn-pause-css')) {
       $('btn-pause-css').textContent = app.match.mode === EVENT_MODE() ? 'Event List' : 'Character Select';
     }
+    if ($('btn-pause-mute')) {
+      $('btn-pause-mute').textContent = `Sound: ${sound.isMuted() ? 'Off' : 'On'}`;
+    }
+    const isTraining = app.match.mode === MODE.TRAINING;
+    if ($('pause-training-controls')) $('pause-training-controls').hidden = !isTraining;
+    if (isTraining) {
+      if ($('sel-pause-train-speed')) $('sel-pause-train-speed').value = String(app.trainingSpeed);
+      if ($('sel-pause-train-cpu')) $('sel-pause-train-cpu').value = app.trainingCpuMode;
+      if ($('sel-pause-train-item') && $('sel-train-item')) $('sel-pause-train-item').value = $('sel-train-item').value;
+    }
     showScreen('pause');
   } else {
     app.match.status = app.match._prePauseStatus || (app.match.introTimer > 0 ? 'intro' : 'playing');
     input.clearHolds();
     showScreen('match');
-    sound.setMusic(app.match.fighters.some((p) => p.fighterId === MASTER_MITT.id) ? 'boss' : 'battle');
+    sound.setMusic(app.match.fighters.some((p) => p.fighterId === MASTER_MITT.id) ? 'boss' : 'battle', app.match.stage.id);
   }
 }
 
 // ============================================================================
 // MAIN 60HZ FIXED-TIMESTEP LOOP
 // ============================================================================
-const WIRE_AXES = ['moveX', 'moveY', 'rawMoveX', 'rawMoveY', 'cStickX', 'cStickY', 'shieldAnalog'];
-const WIRE_FLAGS = [
-  'jump', 'jumpPressed', 'tapJumpPressed', 'attack', 'attackPressed',
-  'special', 'specialPressed', 'shield', 'shieldPressed', 'grab', 'grabPressed',
-  'lightShield', 'shortHopPressed', 'tiltMod', 'cStickTilt', 'tauntPressed', 'pausePressed',
-];
-
-function packOnlineInput(inp) {
-  const src = inp || createEmptyInput();
-  const a = WIRE_AXES.map((k) => {
-    const v = Number(src[k]);
-    return Number.isFinite(v) ? Math.round(Math.max(-1, Math.min(1, v)) * 1000) : 0;
-  });
-  let b = 0;
-  for (let i = 0; i < WIRE_FLAGS.length; i++) {
-    if (src[WIRE_FLAGS[i]]) b |= (1 << i);
-  }
-  return { t: 'in', a, b };
-}
-
-function unpackOnlineInput(data) {
-  if (Array.isArray(data?.a)) {
-    const out = createEmptyInput();
-    for (let i = 0; i < WIRE_AXES.length; i++) {
-      const v = Number(data.a[i]);
-      out[WIRE_AXES[i]] = Number.isFinite(v) ? Math.max(-1, Math.min(1, v / 1000)) : 0;
-    }
-    const b = Number(data.b) | 0;
-    for (let i = 0; i < WIRE_FLAGS.length; i++) {
-      out[WIRE_FLAGS[i]] = Boolean(b & (1 << i));
-    }
-    return out;
-  }
-  return data?.inp || createEmptyInput();
-}
-
 function tickSimulation() {
+  if (app.onlineSession?.getStats().handshaking) {
+    dpad.pollP2P([0, 1]);
+    app.onlineSession.tickHandshake();
+  }
+
   if (app.screen === 'match' && app.match) {
     if (app.match.status === 'paused') return;
 
@@ -2104,19 +2268,28 @@ function tickSimulation() {
       return;
     }
 
-    if (app.match.mode === MODE.ONLINE) {
+    let inputsByPort;
+    if (app.match.mode === MODE.ONLINE && app.onlineSession?.getStats().active) {
       dpad.pollP2P([0, 1]);
-      const online = dpad.getOnlineState();
-      if (online.connected) dpad.sendP2P(1, packOnlineInput(polled[0]), false);
+      const stepRes = app.onlineSession.step(polled[0]);
+      if (!stepRes.ready) {
+        if (stepRes.stallFrames > 15 && $('hud-mode-info')) {
+          setStableText($('hud-mode-info'), `ONLINE SYNCING... • ${app.match.stage.name}`);
+        }
+        return;
+      }
+      inputsByPort = stepRes.inputs;
+    } else {
+      inputsByPort = app.match.fighters.map((f) => {
+        if (f.isCpu) return computeCpuInput(app.match, f);
+        return polled[f.port] || createEmptyInput();
+      });
     }
 
-    const inputsByPort = app.match.fighters.map((f, idx) => {
-      if (f.isCpu) return computeCpuInput(app.match, f);
-      if (app.match.mode === MODE.ONLINE && idx === 1) return app.onlineRemoteInput;
-      return polled[f.port] || createEmptyInput();
-    });
-
     stepMatch(app.match, inputsByPort);
+    if (app.match.mode === MODE.ONLINE && app.onlineSession?.getStats().active && app.match.frame > 0 && app.match.frame % 60 === 0) {
+      app.onlineSession.recordLocalChecksum(app.match.frame, computeMatchChecksum(app.match));
+    }
     renderer3d.ingestEvents(app.match.events, app.match);
     sound.playEvents(app.match.events);
     pushTechFeed(app.match.events);
@@ -2152,9 +2325,12 @@ function frameLoop(now) {
     || ((app.screen === 'match' || app.screen === 'pause' || app.screen === 'results')
       ? app.match
       : app.attractMatch);
+  const reduced = isReducedMotion();
   renderer3d.render(activeMatch, {
     showHitboxes: !app.stagePreviewMatch && app.hitboxesVisible && (app.screen === 'match' || app.screen === 'pause'),
-    shakeEnabled: !app.stagePreviewMatch && app.shakeEnabled,
+    shakeEnabled: !app.stagePreviewMatch && app.shakeEnabled && !reduced,
+    flashEnabled: !app.stagePreviewMatch && app.flashEnabled && !reduced,
+    reducedMotion: reduced,
     victoryMode: !app.stagePreviewMatch && app.screen === 'results',
     stagePreview: Boolean(app.stagePreviewMatch),
   });
@@ -2259,8 +2435,8 @@ async function boot() {
 
   const sdk = await dpad.init((ev) => {
     if (ev.type === 'lobby') refreshOnlineUi();
-    if (ev.type === 'p2p' && ev.data?.t === 'in' && (Array.isArray(ev.data.a) || ev.data.inp)) {
-      app.onlineRemoteInput = unpackOnlineInput(ev.data);
+    if (ev.type === 'p2p' && ev.data && typeof ev.data === 'object') {
+      ensureOnlineSession()?.handlePacket(ev.data);
     }
   });
 
@@ -2278,6 +2454,7 @@ async function boot() {
       sound.setMuted(savedSet.muted);
       $('inp-mute').checked = savedSet.muted;
       $('btn-mute-title').textContent = `Sound: ${savedSet.muted ? 'Off' : 'On'}`;
+      if ($('btn-pause-mute')) $('btn-pause-mute').textContent = `Sound: ${savedSet.muted ? 'Off' : 'On'}`;
     }
     if (typeof savedSet.sfx === 'number') { sound.setSfxVolume(savedSet.sfx); $('inp-sfx-vol').value = String(savedSet.sfx); }
     if (typeof savedSet.music === 'number') { sound.setMusicVolume(savedSet.music); $('inp-music-vol').value = String(savedSet.music); }
@@ -2289,6 +2466,10 @@ async function boot() {
     if (typeof savedSet.shake === 'boolean') {
       app.shakeEnabled = savedSet.shake;
       if ($('inp-shake')) $('inp-shake').checked = savedSet.shake;
+    }
+    if (typeof savedSet.flash === 'boolean') {
+      app.flashEnabled = savedSet.flash;
+      if ($('inp-flash')) $('inp-flash').checked = savedSet.flash;
     }
   }
 

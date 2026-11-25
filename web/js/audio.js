@@ -7,9 +7,6 @@
 const TRACKS = {
   menu: { bpm: 101, roots: [48, 53, 45, 43], thirds: [4, 4, 3, 4], lead: 'triangle',
     motif: [76, 0, 0, 79, 0, 74, 0, 72, 0, 0, 67, 0, 71, 0, 74, 0], bass: [0, null, 7, null, 12, null, 7, null] },
-  battle: { bpm: 141, roots: [45, 41, 48, 43, 45, 48, 41, 40], thirds: [3, 4, 4, 4, 3, 4, 4, 4], lead: 'square',
-    answer: [81, 79, 0, 76, 0, 72, 74, 0, 76, 0, 71, 72, 74, 0, 68, 0],
-    motif: [69, 0, 76, 0, 79, 78, 76, 0, 72, 0, 74, 76, 0, 71, 72, 0], bass: [0, 0, 7, 12, 0, 7, 10, 7] },
   boss: { bpm: 126, roots: [39, 40, 35, 38], thirds: [3, 4, 4, 3], lead: 'sawtooth',
     motif: [63, 0, 64, 0, 70, 0, 69, 67, 0, 63, 0, 66, 0, 73, 70, 0], bass: [0, 12, 0, 1, 0, 7, 6, 0] },
   defeat: { bpm: 92, roots: [45, 40, 45], thirds: [3, 4, 3], lead: 'triangle', finalNote: 57,
@@ -19,6 +16,54 @@ const TRACKS = {
   victory: { finalNote: 84, bpm: 132, roots: [48, 53, 55, 48], thirds: [4, 4, 4, 4], lead: 'triangle',
     motif: [72, 0, 0, 72, 76, 0, 79, 0, 84, 0, 0, 0, 79, 0, 0, 0], bass: [0, null, 7, null, 12, null, null, null] },
 };
+// Four eight-bar sections. Pitches are chord-relative semitones above the bass.
+function battleScore(bpm, tonic, minor, lead, changes, bass, phrases) {
+  const scale = minor ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
+  const form = [0,1,2,3,4,5,6,7, 0,1,4,5,2,3,6,7, 4,5,6,7,3,2,1,6, 0,3,4,5,2,6,7,0];
+  const degrees = form.map((i) => changes[i]);
+  return { bpm, lead, bass, roots: degrees.map((d) => tonic + scale[d]),
+    thirds: degrees.map((d) => (scale[(d + 2) % 7] - scale[d] + 12) % 12),
+    phrases: phrases.map((phrase) => phrase.split(' ').map((n) => n === '-' ? null : Number(n))) };
+}
+
+TRACKS.battle_tourney = battleScore(142, 45, true, 'triangle', [0,5,2,6,3,0,5,4], [0,0,7,12,0,7,10,7], [
+  '12 - 19 - 15 17 19 - 22 - 19 - 17 15 - 14',
+  '15 - - 19 22 - 24 - 22 19 - 17 - 15 14 -',
+  '7 - 10 12 - 15 - 17 19 - 17 15 - 14 10 -',
+  '24 - 22 19 - 17 19 - 15 - 17 14 12 - - -',
+]);
+TRACKS.battle_scifi = battleScore(133, 42, true, 'sawtooth', [0,1,5,0,6,3,4,1], [0,12,7,0,12,7,1,7], [
+  '12 - - 13 - 19 18 - 12 - 15 - - 13 10 -',
+  '- 19 20 - 19 - 13 - 10 - - 12 13 - 15 -',
+  '7 - 8 - - 13 12 - 6 - 7 - 13 12 - 10',
+  '24 - - 19 18 - 15 13 - 12 13 - 7 - 12 -',
+]);
+TRACKS.battle_retro = battleScore(156, 48, false, 'square', [0,3,4,0,5,1,3,4], [0,null,7,null,12,null,7,11], [
+  '12 16 19 - 24 - 19 - 16 19 21 19 - 16 14 -',
+  '19 - 16 12 - 14 16 - 21 - 19 16 14 - 12 -',
+  '- 7 12 16 - 19 - 16 7 11 14 - 19 - 14 11',
+  '24 - 21 19 16 - 19 - 14 16 19 14 12 - - -',
+]);
+TRACKS.battle_whimsical = battleScore(119, 53, false, 'sine', [0,5,1,4,3,0,1,4], [0,null,12,7,0,null,7,null], [
+  '- 16 19 - - 21 - 19 - 14 - 16 12 - - -',
+  '19 - - 23 21 - 19 - - 16 17 - 14 - 12 -',
+  '7 - 12 - - 9 14 - 11 - - 14 16 - 12 -',
+  '- 24 21 - 19 - - 16 17 14 - 11 12 - - -',
+]);
+TRACKS.battle_final = battleScore(148, 38, true, 'triangle', [0,5,3,4,0,2,6,4], [0,7,0,12,0,7,3,10], [
+  '12 - - - 15 - 14 12 19 - - 17 15 - 10 -',
+  '19 - 22 - - 24 22 19 17 - 15 14 12 - - -',
+  '7 10 - 12 14 - 15 - 10 12 - 15 17 - 19 -',
+  '24 - - 22 19 17 - 15 14 - 19 14 12 - - -',
+]);
+
+const STAGE_MUSIC = new Map(Object.entries({
+  battle_final: ['final-obligation'],
+  battle_scifi: ['corn-area', 'venom-barge', 'acid-vat-basement', 'acid-vat-depths', 'loud-suburb-highway', 'big-blue-commute'],
+  battle_retro: ['corporate-kingdom', 'corporate-kingdom-2', 'flat-screen-calc', 'retro-jungle-64', 'retro-tax-island-64', 'onett-strip-mall', 'fiveside-skyscrapers'],
+  battle_whimsical: ['randalls-tax-shelter', 'puddle-of-insomnia', 'nightmare-suburb', 'rainbow-highway', 'tropic-condo-falls', 'jungle-japes-hoa', 'yoshis-tax-island', 'green-greens-suburb', 'critter-floats', 'slush-summit'],
+}).flatMap(([track, stages]) => stages.map((stage) => [stage, track])));
+
 const hz = (note) => 440 * 2 ** ((note - 69) / 12);
 const KO_STINGERS = {
   doubleKo: [67, 74],
@@ -39,6 +84,7 @@ export class SoundEngine {
     this.sfxGain = null;
     this.musicGain = null;
     this.muted = false;
+    this.paused = false;
     this.sfxVolume = 0.8;
     this.musicVolume = 0.55;
     this.currentTrack = 'none';
@@ -64,7 +110,12 @@ export class SoundEngine {
       this.sfxGain = this.ctx.createGain();
       this.musicGain = this.ctx.createGain();
       this.sfxGain.connect(this.masterGain);
-      this.musicGain.connect(this.masterGain);
+      this.musicFilter = this.ctx.createBiquadFilter();
+      this.musicFilter.type = 'lowpass';
+      this.musicFilter.frequency.value = 2400;
+      this.musicFilter.Q.value = 0.65;
+      this.musicGain.connect(this.musicFilter);
+      this.musicFilter.connect(this.masterGain);
       const limiter = this.ctx.createDynamicsCompressor();
       limiter.threshold.value = -12;
       limiter.ratio.value = 8;
@@ -96,7 +147,12 @@ export class SoundEngine {
     const now = this.ctx.currentTime;
     this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 1, now, 0.01);
     this.sfxGain.gain.setTargetAtTime(this.sfxVolume, now, 0.01);
-    this.musicGain.gain.setTargetAtTime(this.musicVolume * 0.35, now, 0.02);
+    this.musicGain.gain.setTargetAtTime(this.musicVolume * 0.35 * (this.paused ? 0.25 : 1), now, 0.02);
+  }
+
+  setPaused(paused) {
+    this.paused = Boolean(paused);
+    this._applyGains();
   }
 
   setMuted(muted) {
@@ -289,7 +345,7 @@ export class SoundEngine {
   }
 
   playEvents(events) {
-    if (events?.some((e) => e.type === 'game') && ['battle', 'boss'].includes(this.currentTrack)) this.setMusic('none');
+    if (events?.some((e) => e.type === 'game') && (this.currentTrack.startsWith('battle_') || this.currentTrack === 'boss')) this.setMusic('none');
     if (!this.ctx || this.muted || !events?.length) return;
     for (const e of events) {
       switch (e.type) {
@@ -344,6 +400,28 @@ export class SoundEngine {
           break;
         case 'crowdCheer':
           this._crowdCheer(Number.isFinite(e.intensity) ? Math.max(0, Math.min(1, e.intensity)) : 1);
+          break;
+        case 'counter':
+          this._noise(0.025, 2800, 1.3, 0.18);
+          this._tone(1320, 660, 0.075, 'square', 0.11);
+          this._tone(440, 880, 0.115, 'triangle', 0.16, 0.038);
+          break;
+        case 'reflect':
+          this._tone(620, 2520, 0.09, 'sine', 0.20);
+          this._tone(1180, 3160, 0.07, 'triangle', 0.09, 0.022);
+          break;
+        case 'chargeStored':
+          this._tone(698, 698, 0.06, 'triangle', 0.16);
+          this._tone(1046, 1046, 0.12, 'sine', 0.17, 0.052);
+          break;
+        case 'armor':
+          this._tone(177, 110, 0.13, 'triangle', 0.22);
+          this._tone(927, 913, 0.09, 'sine', 0.13);
+          this._noise(0.026, 1380, 1.9, 0.18);
+          break;
+        case 'jabReset':
+          this._noise(0.022, 3900, 1.0, 0.18);
+          this._tone(870, 290, 0.055, 'triangle', 0.18, 0.02);
           break;
         case 'shieldHit':
           this._tone(740, 420, 0.08, 'triangle', 0.18);
@@ -512,7 +590,8 @@ export class SoundEngine {
     }
   }
 
-  setMusic(track) {
+  setMusic(track, stageId) {
+    if (track === 'battle') track = STAGE_MUSIC.get(stageId) ?? 'battle_tourney';
     if (this.currentTrack === track) return;
     this.currentTrack = track;
     if (this.musicTimer) {
@@ -558,10 +637,10 @@ export class SoundEngine {
     const bus = this.musicGain;
     const lastChord = score.finalNote && bar === score.roots.length - 1;
     if (lastChord && i > 0) return;
-    const motif = bar >= 4 && score.answer ? score.answer : score.motif;
+    const motif = score.phrases?.[bar >> 3] ?? score.motif;
     const melody = motif[i];
-    if (melody) {
-      const f = hz(lastChord ? score.finalNote : melody + root - score.roots[0]);
+    if (score.phrases ? melody != null : melody > 0) {
+      const f = hz(lastChord ? score.finalNote : score.phrases ? root + melody : melody + root - score.roots[0]);
       this._tone(f, f, lastChord ? 1.1 : beat * 1.45, score.lead, 0.115, delay, bus);
     }
     if (i === 0 || i === 8) {
@@ -575,7 +654,7 @@ export class SoundEngine {
       const f = hz(root - 12 + bass);
       this._tone(f * 1.02, f, beat * 1.72, 'triangle', 0.27, delay, bus);
     }
-    if (i === 0 || i === 8 || track === 'battle' && i === 10) this._tone(132, 40, 0.105, 'sine', 0.32, delay, bus);
+    if (i === 0 || i === 8 || score.phrases && i === 10) this._tone(132, 40, 0.105, 'sine', 0.32, delay, bus);
     if (i === 4 || i === 12) {
       this._noise(0.095, 2000, 0.65, 0.22, delay, bus);
       this._tone(188, 119, 0.07, 'triangle', 0.14, delay, bus);

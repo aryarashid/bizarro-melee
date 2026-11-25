@@ -44,8 +44,15 @@ async function runUnitTests() {
       `Fighter ${f.id} must have distinct parody name`);
     assert.ok(f.palettes.length >= 4, `Fighter ${f.id} needs 4 palettes`);
     assert.ok(f.moves[MOVE.JAB] && f.moves[MOVE.UP_B] && f.moves[MOVE.DOWN_B], `Fighter ${f.id} missing moves`);
+    for (const coreKey of [MOVE.JAB, MOVE.FTILT, MOVE.FAIR, MOVE.BAIR, MOVE.DAIR]) {
+      const mv = f.moves[coreKey];
+      assert.ok(mv && Number.isFinite(mv.startup) && Number.isFinite(mv.active) && Number.isFinite(mv.endlag),
+        `Fighter ${f.id} ${coreKey} missing valid frame data`);
+      assert.ok(Array.isArray(mv.hitboxes) && mv.hitboxes.length >= 2,
+        `Fighter ${f.id} ${coreKey} must have multi-region sweet/sour hitboxes`);
+    }
   }
-  console.log('PASS: All 26 Bizarro parody fighters validated');
+  console.log('PASS: All 26 Bizarro fighters + 130 sweet/sour normal frame-data snapshots validated');
 
   const { ITEM_LIST } = await import('../web/js/items.js');
   const { EVENTS } = await import('../web/js/events.js');
@@ -141,7 +148,7 @@ async function runUnitTests() {
   assert.ok(hits > 0, `Expected AI fighters to land hits in 600 frames (got ${hits})`);
   console.log(`PASS: 600-frame AI battle ran cleanly with ${hits} hits landed`);
 
-  // Home-Run Derby & Master Mitt sanity
+  // Home-Run Derby (nonzero launch + 0-ft timeout draw) & Master Mitt sanity
   const hrMatch = createMatch({
     mode: MODE.HOMERUN,
     stageId: HOMERUN_STAGE.id,
@@ -152,13 +159,207 @@ async function runUnitTests() {
   });
   hrMatch.status = 'playing';
   hrMatch.introTimer = 0;
-  for (let i = 0; i < 60; i++) {
+  // Position Dadondorf beside Sagging Bag at 90% and land a clean forward smash launch
+  hrMatch.fighters[0].x = hrMatch.fighters[1].x - 52;
+  hrMatch.fighters[0].y = hrMatch.fighters[1].y;
+  hrMatch.fighters[0].facing = 1;
+  hrMatch.fighters[1].percent = 95;
+  for (let i = 0; i < 150; i++) {
     const inp = createEmptyInput();
-    inp.moveX = 1;
-    if (i === 18) { inp.attack = true; inp.attackPressed = true; }
+    if (i === 0) { inp.cStickX = 1; }
     stepMatch(hrMatch, [inp, createEmptyInput()]);
   }
-  assert.ok(Number.isFinite(hrMatch.homerun.maxDistanceFt), 'Home-run distance finite');
+  assert.ok(Number.isFinite(hrMatch.homerun.maxDistanceFt) && hrMatch.homerun.maxDistanceFt > 50,
+    `Expected nonzero Home-Run Derby launch > 50 ft, got ${hrMatch.homerun.maxDistanceFt}`);
+
+  // 0-ft Home-Run Derby timeout must NOT award winnerPort = 0
+  const hrZero = createMatch({
+    mode: MODE.HOMERUN,
+    stageId: HOMERUN_STAGE.id,
+    timeSeconds: 1,
+    players: [
+      { port: 0, fighterId: 'faux', paletteIndex: 0, isCpu: false, name: 'P1' },
+      { port: 1, fighterId: SAGGING_BAG.id, paletteIndex: 0, isCpu: true, cpuLevel: 1, name: 'Sagging Bag' },
+    ],
+  });
+  hrZero.status = 'playing';
+  hrZero.introTimer = 0;
+  hrZero.timeLeftFrames = 2;
+  for (let i = 0; i < 10 && hrZero.status !== 'ended'; i++) {
+    stepMatch(hrZero, [createEmptyInput(), createEmptyInput()]);
+  }
+  assert.equal(hrZero.status, 'ended', '0-ft Home-Run Derby should end at timeout');
+  assert.equal(hrZero.winnerPort, null, '0-ft Home-Run Derby must finish with winnerPort === null');
+
+  // Multi-Man credited KO alignment: unhit intern falling off does NOT increment multimanKos
+  const mmMatch = createMatch({
+    mode: MODE.MULTIMAN,
+    stageId: 'arguefield',
+    stocks: 1,
+    players: [
+      { port: 0, fighterId: 'faux', paletteIndex: 0, isCpu: false, name: 'P1' },
+      { port: 1, fighterId: BIZARRO_INTERN.id, paletteIndex: 0, isCpu: true, cpuLevel: 3, name: 'Intern #1' },
+      { port: 2, fighterId: BIZARRO_INTERN.id, paletteIndex: 1, isCpu: true, cpuLevel: 4, name: 'Intern #2' },
+    ],
+  });
+  mmMatch.status = 'playing';
+  mmMatch.introTimer = 0;
+  mmMatch.fighters[1].grounded = false;
+  mmMatch.fighters[1].lastHitBy = null;
+  mmMatch.fighters[1].y = mmMatch.stage.blastzones.bottom - 100;
+  stepMatch(mmMatch, mmMatch.fighters.map(() => createEmptyInput()));
+  assert.equal(mmMatch.multimanKos || 0, 0, 'Uncredited intern self-destruct must not credit multimanKos');
+  mmMatch.fighters[2].grounded = false;
+  mmMatch.fighters[2].lastHitBy = 0;
+  mmMatch.fighters[2].lastHitTimer = 60;
+  mmMatch.fighters[2].y = mmMatch.stage.blastzones.bottom - 100;
+  stepMatch(mmMatch, mmMatch.fighters.map(() => createEmptyInput()));
+  assert.equal(mmMatch.multimanKos, 1, 'Credited intern KO must increment multimanKos');
+  assert.equal(mmMatch.fighters[0].kos, 1, 'Credited intern KO must match P1 kos');
+
+  // Online deterministic lockstep test: 10% packet loss + 6-frame (~100ms) one-way delay
+  const { createOnlineSession, computeMatchChecksum, unpackOnlineInput } = await import('../web/js/dpad-sdk.js');
+  const rawBypass = unpackOnlineInput({ inp: { attack: true, moveX: 1 } });
+  assert.equal(rawBypass.attack, false, 'unpackOnlineInput must reject legacy raw data.inp bypass');
+  assert.equal(rawBypass.moveX, 0, 'unpackOnlineInput must reject legacy raw data.inp bypass');
+
+  const wireQueue = [];
+  let wireTick = 0;
+  let lossSeed = 1337;
+  const nextRand = () => { lossSeed = (Math.imul(lossSeed, 1664525) + 1013904223) >>> 0; return lossSeed / 4294967296; };
+  let hostMatch = null;
+  let guestMatch = null;
+  const mkNetMatch = (cfg) => {
+    const m = createMatch({
+      mode: MODE.ONLINE,
+      seed: cfg.seed,
+      stageId: cfg.stageId,
+      stocks: cfg.stocks,
+      timeSeconds: cfg.timeSeconds,
+      itemFrequency: cfg.itemFrequency,
+      players: [
+        { port: 0, fighterId: cfg.hostFighter, paletteIndex: cfg.hostPalette, isCpu: false, name: 'Host' },
+        { port: 1, fighterId: cfg.guestFighter, paletteIndex: cfg.guestPalette, isCpu: false, name: 'Guest' },
+      ],
+    });
+    m.status = 'playing';
+    m.introTimer = 0;
+    return m;
+  };
+  const enqueueNet = (to, ch, payload, reliable) => {
+    const bytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+    assert.ok(bytes <= 512, `Online P2P packet exceeded 512 bytes: ${bytes}`);
+    if (!reliable && nextRand() < 0.10) return true; // 10% unreliable packet drop
+    wireQueue.push({ to, deliverAt: wireTick + 6, payload: JSON.parse(JSON.stringify(payload)) });
+    return true;
+  };
+  const hostSess = createOnlineSession({
+    isHost: true,
+    delayFrames: 3,
+    send: (ch, payload, rel) => enqueueNet('guest', ch, payload, rel),
+    onConfigReady: (cfg) => { hostMatch = mkNetMatch(cfg); },
+  });
+  const guestSess = createOnlineSession({
+    isHost: false,
+    delayFrames: 3,
+    send: (ch, payload, rel) => enqueueNet('host', ch, payload, rel),
+    onConfigReady: (cfg) => { guestMatch = mkNetMatch(cfg); },
+  });
+  hostSess.startHandshake({
+    seed: 424242, stageId: 'arguefield', stocks: 4, timeSeconds: 300,
+    itemFrequency: 'off', hostFighter: 'faux', hostPalette: 0,
+    guestFighter: 'garth', guestPalette: 1,
+  });
+  for (let t = 0; t < 1800 && (!hostMatch || hostMatch.frame < 360 || !guestMatch || guestMatch.frame < 360); t++) {
+    wireTick = t;
+    for (let i = wireQueue.length - 1; i >= 0; i--) {
+      if (wireQueue[i].deliverAt <= t) {
+        const pkt = wireQueue.splice(i, 1)[0];
+        if (pkt.to === 'host') hostSess.handlePacket(pkt.payload);
+        else guestSess.handlePacket(pkt.payload);
+      }
+    }
+    hostSess.tickHandshake();
+    if (hostMatch && hostMatch.frame < 360) {
+      const hInp = createEmptyInput();
+      hInp.moveX = (t % 40 < 20) ? 1 : -1;
+      if (t % 17 === 0) { hInp.attack = true; hInp.attackPressed = true; }
+      const res = hostSess.step(hInp);
+      if (res.ready) {
+        stepMatch(hostMatch, res.inputs);
+        if (hostMatch.frame % 60 === 0) hostSess.recordLocalChecksum(hostMatch.frame, computeMatchChecksum(hostMatch));
+      }
+    }
+    if (guestMatch && guestMatch.frame < 360) {
+      const gInp = createEmptyInput();
+      gInp.moveX = (t % 34 < 17) ? -1 : 1;
+      if (t % 23 === 0) { gInp.jump = true; gInp.jumpPressed = true; }
+      const res = guestSess.step(gInp);
+      if (res.ready) {
+        stepMatch(guestMatch, res.inputs);
+        if (guestMatch.frame % 60 === 0) guestSess.recordLocalChecksum(guestMatch.frame, computeMatchChecksum(guestMatch));
+      }
+    }
+  }
+  // Flush final checksum packets
+  for (let i = 0; i < wireQueue.length; i++) {
+    const pkt = wireQueue[i];
+    if (pkt.to === 'host') hostSess.handlePacket(pkt.payload);
+    else guestSess.handlePacket(pkt.payload);
+  }
+  assert.ok(hostMatch && guestMatch, 'Online handshake must initialize both host and guest matches');
+  assert.equal(hostMatch.frame, 360, 'Host must reach frame 360 under 10% packet loss');
+  assert.equal(guestMatch.frame, 360, 'Guest must reach frame 360 under 10% packet loss');
+  assert.equal(computeMatchChecksum(hostMatch), computeMatchChecksum(guestMatch), 'Host & Guest final match checksums must be bit-identical');
+  assert.ok(hostSess.getStats().checksumsMatched >= 5 && hostSess.getStats().checksumMismatches === 0,
+    `Expected >=5 matched checksums and 0 mismatches, got ${JSON.stringify(hostSess.getStats())}`);
+  console.log('PASS: Deterministic Online Lockstep (handshake + 10% loss + 100ms delay + 0 desyncs) validated');
+
+  // Controller mapping regression test (8BitDo HID button 9 != Start, DualSense 054c raw HID mapping + analog triggers)
+  const { InputManager } = await import('../web/js/input.js');
+  const origNav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  try {
+    let mockPads = [];
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { getGamepads: () => mockPads },
+      configurable: true,
+    });
+    const im = new InputManager();
+    // 8BitDo raw HID: button 9 is shield (RT), NOT menu Start!
+    mockPads = [{
+      index: 0, connected: true, mapping: '',
+      id: '8BitDo Ultimate 2 Wireless (Vendor: 2dc8 Product: 6012)',
+      axes: [0, 0, 0, 0, -1, 0, -1, -1],
+      buttons: Array.from({ length: 16 }, (_, i) => ({ pressed: i === 9, value: i === 9 ? 1 : 0 })),
+    }];
+    const menu8 = im.pollMenu();
+    assert.equal(menu8.start, false, '8BitDo raw HID button 9 (Right Trigger) must NOT trigger menu Start');
+    const poll8 = im.poll(1, false)[0];
+    assert.equal(poll8.shield, true, '8BitDo raw HID button 9 should trigger Shield');
+
+    // DualSense raw HID (054c): button 1 = Cross (attack), axes[3]/axes[4] analog triggers after negative rest
+    mockPads = [{
+      index: 0, connected: true, mapping: '',
+      id: 'DualSense Wireless Controller (Vendor: 054c Product: 0ce6)',
+      axes: [0, 0, 0, -1, -1, 0],
+      buttons: Array.from({ length: 16 }, (_, i) => ({ pressed: i === 1, value: i === 1 ? 1 : 0 })),
+    }];
+    const pollSonyRest = im.poll(1, false)[0];
+    assert.equal(pollSonyRest.attack, true, 'DualSense raw HID button 1 should map to Attack');
+    assert.equal(pollSonyRest.shield, false, 'DualSense raw HID resting triggers (-1) should not trigger Shield');
+    mockPads = [{
+      index: 0, connected: true, mapping: '',
+      id: 'DualSense Wireless Controller (Vendor: 054c Product: 0ce6)',
+      axes: [0, 0, 0, 0.0, -1, 0],
+      buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0 })),
+    }];
+    const pollSonyHalf = im.poll(1, false)[0];
+    assert.equal(pollSonyHalf.lightShield, true, 'DualSense raw HID half-pulled L2 trigger should map to Light Shield');
+    console.log('PASS: 8BitDo HID & DualSense 054c raw HID controller mappings validated');
+  } finally {
+    if (origNav) Object.defineProperty(globalThis, 'navigator', origNav);
+    else delete globalThis.navigator;
+  }
 
   const bossMatch = createMatch({
     mode: MODE.CLASSIC,
@@ -175,7 +376,7 @@ async function runUnitTests() {
     stepMatch(bossMatch, bossMatch.fighters.map((f) => computeCpuInput(bossMatch, f)));
   }
   assert.ok(Number.isFinite(bossMatch.fighters[1].x), 'Master Mitt simulates cleanly');
-  console.log('PASS: Home-Run Derby and Classic Master Mitt modes validated');
+  console.log('PASS: Home-Run Derby (nonzero launch) and Classic Master Mitt modes validated');
 }
 
 function loadPlaywright() {
@@ -366,6 +567,23 @@ async function runBrowserProof() {
     assert.notEqual(padNavResult.launchStatusWhileStartHeld, 'paused', 'Held Start must not immediately pause newly launched match');
     console.log('PASS: Bluetooth Gamepad API + Title->CSS->Title + held-Start launch verified');
 
+    // Keyboard menu navigation check (focus iframe -> ArrowRight -> VS Mode -> Enter -> CSS -> Escape -> Title)
+    await desk.frame.locator('.game-title').click();
+    await desk.page.waitForTimeout(60);
+    await desk.page.keyboard.press('ArrowRight');
+    await desk.page.waitForTimeout(100);
+    const kbFocused = await desk.frame.evaluate(() => document.querySelector('.pad-focus')?.id || '');
+    await desk.page.keyboard.press('Enter');
+    await desk.page.waitForTimeout(120);
+    const kbCss = await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.getState().screen);
+    await desk.page.keyboard.press('Escape');
+    await desk.page.waitForTimeout(120);
+    const kbBack = await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.getState().screen);
+    assert.equal(kbFocused, 'btn-vs-mode', `Keyboard ArrowRight should focus btn-vs-mode, got "${kbFocused}"`);
+    assert.equal(kbCss, 'css', `Keyboard Enter on VS Mode should open CSS, got "${kbCss}"`);
+    assert.equal(kbBack, 'title', `Keyboard Escape on CSS should return to Title, got "${kbBack}"`);
+    console.log('PASS: Keyboard menu navigation (Arrows + Enter + Escape) verified');
+
     // Open CSS and check 26 fighter cards
     await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.openScreen('css'));
     await desk.page.waitForTimeout(400);
@@ -477,17 +695,72 @@ async function runBrowserProof() {
     await desk.page.waitForTimeout(450);
     const resWinner = await desk.frame.locator('#results-winner').textContent();
     assert.ok(resWinner && resWinner.includes('WINS'), `Expected real winner on Results screen, got "${resWinner}"`);
+    // Verify Results action buttons (Rematch, CSS, Title) are fully inside the 1280x720 viewport
+    const podiumBounds = await desk.frame.evaluate(() => {
+      const ids = ['btn-results-rematch', 'btn-results-css', 'btn-results-title'];
+      return ids.map((id) => {
+        const r = document.getElementById(id)?.getBoundingClientRect();
+        return { id, top: r?.top ?? -1, bottom: r?.bottom ?? 9999, height: r?.height ?? 0 };
+      });
+    });
+    for (const b of podiumBounds) {
+      assert.ok(b.height > 20 && b.top >= 0 && b.bottom <= 720,
+        `Results action button ${b.id} clipped outside 720p viewport: ${JSON.stringify(b)}`);
+    }
     await desk.page.screenshot({ path: path.join(OUT_DIR, '11-podium.png') });
-    console.log('PASS: Natural Time Tie -> Sudden Death 300% -> Real KO -> 3D Victory Podium verified');
+    console.log('PASS: Natural Time Tie -> Sudden Death 300% -> Real KO -> 3D Victory Podium (buttons unclipped) verified');
     await desk.ctx.close();
 
-    // B. Mobile portrait 390x844 with touch controls
+    // B. Mobile portrait 390x844: Title unclipped + 4P match touch controls do not overlap HUD
     const mob = await openFrame({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    await mob.frame.evaluate(() => window.__BIZARRO_MELEE__.startQuickMatch());
+    const titleMuteRect = await mob.frame.evaluate(() => {
+      const r = document.getElementById('btn-mute-title')?.getBoundingClientRect();
+      return r ? { top: r.top, bottom: r.bottom } : null;
+    });
+    assert.ok(titleMuteRect && titleMuteRect.bottom <= 844,
+      `Portrait Title footer clipped off 390x844 viewport: ${JSON.stringify(titleMuteRect)}`);
+    await mob.frame.evaluate(() => {
+      window.__BIZARRO_MELEE__.setTeamBattle(false, 4);
+      window.__BIZARRO_MELEE__.startMode('vs-stock', 'arguefield');
+    });
     await mob.page.waitForTimeout(1000);
+    const mobOverlap = await mob.frame.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll('#hud-fighters .hud-card')).map((el) => el.getBoundingClientRect());
+      const btns = Array.from(document.querySelectorAll('#touch-controls .touch-btn')).map((el) => ({
+        lbl: el.textContent,
+        r: el.getBoundingClientRect(),
+      }));
+      const overlaps = [];
+      for (const c of cards) {
+        for (const b of btns) {
+          if (b.r.width <= 0) continue;
+          const ox = Math.min(c.right, b.r.right) - Math.max(c.left, b.r.left);
+          const oy = Math.min(c.bottom, b.r.bottom) - Math.max(c.top, b.r.top);
+          if (ox > 2 && oy > 2) overlaps.push({ btn: b.lbl, ox, oy });
+        }
+      }
+      return overlaps;
+    });
+    assert.equal(mobOverlap.length, 0, `Portrait 4P touch buttons overlap HUD cards: ${JSON.stringify(mobOverlap)}`);
     await mob.page.screenshot({ path: path.join(OUT_DIR, '05-mobile.png') });
     await mob.ctx.close();
-    console.log('PASS: Mobile 390x844 portrait layout renders cleanly');
+    console.log('PASS: Mobile 390x844 portrait Title + 4P HUD/touch clearance verified');
+
+    // B2. Compact landscape phone 667x375 4P HUD readability
+    const land = await openFrame({ viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true });
+    await land.frame.evaluate(() => {
+      window.__BIZARRO_MELEE__.setTeamBattle(false, 4);
+      window.__BIZARRO_MELEE__.startMode('vs-stock', 'arguefield');
+    });
+    await land.page.waitForTimeout(800);
+    const landCardWidths = await land.frame.evaluate(() =>
+      Array.from(document.querySelectorAll('#hud-fighters .hud-card')).map((el) => Math.round(el.getBoundingClientRect().width))
+    );
+    assert.equal(landCardWidths.length, 4, 'Expected 4 HUD cards in 4P landscape');
+    assert.ok(landCardWidths.every((w) => w >= 100), `Compact landscape 4P HUD cards too narrow: ${JSON.stringify(landCardWidths)}`);
+    await land.page.screenshot({ path: path.join(OUT_DIR, '12-landscape-667.png') });
+    await land.ctx.close();
+    console.log(`PASS: Compact landscape 667x375 4P HUD readable (card widths: ${landCardWidths.join(', ')}px)`);
 
     // C. Denied localStorage still plays
     const noStore = await openFrame({}, true, false);

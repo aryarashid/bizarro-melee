@@ -4,8 +4,9 @@ import { MELEE, MODE, MOVE as M, STATE as S, PLAYER_COLORS, WORLD_SCALE } from '
 import { getStageForm, getSurfaceY, resolveStagePlatforms, resolveStageSolids } from './stages.js';
 import { getSurfaceTextures, getFaceTexture, getOutfitTextures, getSkyTexture, getCloudTexture, getCelestialTexture,
   getDamageSmokeTexture, getImpactPuffTexture, getJumbotronTexture, getPodiumRankTexture, getStageSignTexture,
-  addFighterRim, releasePaint, skyStyle, getCombatGlowTexture } from './textures3d.js';
-import { attackVisual, combatPaint, specialVisual, specialEventVisual, legacySpecialEvents, fighterHidden, zipPoints, chargePulse } from './fx.js';
+  addFighterRim, releasePaint, skyStyle, getCombatGlowTexture, getFistSteamTexture } from './textures3d.js';
+import { attackLimb, attackVisual, combatPaint, specialVisual, specialEventVisual, legacySpecialEvents, fighterHidden, zipPoints, chargePulse,
+  combatReaction, fighterArchetype, fighterTag, victoryOrder, flashesAllowed, mittTell, mittGunAim, drawMittTell } from './fx.js';
 
 const TAU = 2 * Math.PI;
 const DEG = Math.PI / 180;
@@ -44,6 +45,15 @@ const FX_BUDGET = 208;
 const STAGE_WARNING_LEAD = 120;
 const LAUNCH_PER_KB = MELEE.KB_TO_VEL * WORLD_SCALE;
 const RECOIL_POP = [1, .82, .39, -.27, -.12];
+// Bodies look along +X locally. A 30° turn toward camera reads as a 60° three-quarter stance.
+const STANCE = Math.PI / 6;
+const proportions = {
+  sword:  { hips: .37, torso: .34, bulk: .91, arm: 1.13, limbs: .89 },
+  heavy:  { hips: .27, torso: .43, bulk: 1.25, arm: 1.21, limbs: 1.18 },
+  spacie: { hips: .37, torso: .34, bulk: .93, arm: .92, limbs: .86 },
+  mascot: { hips: .26, torso: .40, bulk: 1.12, arm: .83, limbs: 1.05 },
+  nimble: { hips: .33, torso: .37, bulk: 1.00, arm: 1.00, limbs: 1.00 },
+};
 const playerColor = (port) => PLAYER_COLORS[(port ?? 0) % PLAYER_COLORS.length] || '#e4e8ff';
 const softenedSpace = (id) => id === 'corn-area' || id === 'venom-barge';
 const deepDaylight = (id) => id === 'yoshis-tax-island' || id === 'foreclosed-castle';
@@ -216,6 +226,48 @@ const strikePoses = {
 };
 
 const pose = (values) => ({ ...neutral, ...values });
+const normalPoses = {
+  sword: {
+    [M.JAB]: [{ arm: .62, elbow: 1.65, tool: .42 }, { arm: 1.27, elbow: .34, tool: .05, leg: .18 }],
+    [M.JAB2]: [{ arm: 2.24, elbow: .50, tool: .19 }, { arm: 1.42, elbow: .12, tool: -.15, off: .67 }],
+    [M.JAB3]: [{ arm: -.61, elbow: 1.35, tool: 1.29 }, { arm: 1.41, elbow: .16, tool: .05, off: -.42, lean: -.23 }],
+    [M.FTILT]: [{ arm: 2.71, elbow: .78, tool: .62, lean: .15 }, { arm: 1.40, elbow: .18, tool: .05, leg: .42 }],
+    [M.FAIR]: [{ arm: 2.61, elbow: .80, tool: .72, leg: .36, knee: -.85 }, { arm: 1.23, elbow: .13, tool: .49, yaw: .47, lean: -.02, slide: -.17 },
+      { arm: .20, elbow: .33, tool: .43, yaw: .37, off: .86 }],
+    [M.BAIR]: [{ arm: 2.71, elbow: .65, tool: 1.68 }, { arm: -1.51, elbow: -.08, tool: Math.PI, yaw: .30, off: 1.37 }],
+    [M.DAIR]: [{ arm: 2.56, elbow: 1.04, tool: 1.50, leg: .44, knee: -1.24 },
+      { arm: .46, elbow: .05, tool: 1.35, yaw: .41, lean: -.18, leg: .10, knee: -.59 }],
+  },
+  spacie: {
+    [M.JAB]: [{ arm: .41, elbow: 1.43, off: 1.06 }, { arm: 1.56, elbow: .05, off: .71, offElbow: 1.07, leg: .32 }],
+    [M.FTILT]: [{ leg: .75, knee: -1.55, arm: .84 }, { leg: 1.72, knee: -.11, offKnee: -.36, arm: -.29, off: 1.03, lift: .04 }],
+    [M.FAIR]: [{ leg: 1.40, knee: -1.81, arm: .50, off: 1.01 }, { leg: 1.84, knee: -.08, yaw: .43, lean: -.11, arm: -.65, offLeg: .28, offKnee: -1.08, lift: .07 },
+      { leg: .67, knee: -1.10, offLeg: 1.18, offKnee: -.25, arm: .30, off: -.21 }],
+    [M.BAIR]: [{ offLeg: .68, offKnee: -1.25, lean: -.15 }, { offLeg: -1.90, offKnee: -.07, leg: .96, knee: -1.47, arm: 2.22, lean: -.49 }],
+    [M.DAIR]: [{ leg: .75, knee: -1.49, offLeg: .38, offKnee: -.90 }, { leg: -.49, knee: -.06, offLeg: -.62, offKnee: -.22, arm: 1.81, off: 1.32 },
+      { leg: .15, knee: -.77, offLeg: -.34, offKnee: -.04, tilt: .21 }],
+  },
+  heavy: {
+    [M.JAB]: [{ arm: -.87, elbow: 1.48 }, { arm: 1.43, elbow: .32, lean: -.36, off: -.52 }],
+    [M.FTILT]: [{ arm: -1.23, elbow: 1.65, yaw: .77 }, { arm: 1.63, elbow: .28, lean: -.42, off: .88 }],
+    [M.FAIR]: [{ arm: 2.38, elbow: 1.09, off: 2.31, lean: .25 }, { arm: 1.26, elbow: .16, off: 1.37, offElbow: .22, lean: -.47 }],
+    [M.BAIR]: [{ arm: 1.88, elbow: .69, off: 1.31 }, { arm: -1.58, elbow: .07, offLeg: -.89, lean: -.12, yaw: .11 }],
+    [M.DAIR]: [{ arm: 2.74, elbow: 1.35, off: 2.56 }, { arm: -.53, elbow: .23, off: -.68, offElbow: .26, lean: -.35, leg: .48 }],
+  },
+  mascot: {
+    [M.JAB]: [{ arm: .24, elbow: .87, off: .68 }, { arm: 1.59, elbow: .04, off: 1.10, lean: -.18 }],
+    [M.FTILT]: [{ arm: -.21, elbow: .77, leg: .26 }, { arm: 1.44, elbow: .11, off: 1.14, leg: .68, knee: -.46, lift: -.12 }],
+    [M.FAIR]: [{ arm: .45, elbow: 1.40, leg: .51, knee: -1.31 }, { arm: 1.58, elbow: .09, off: 1.48, offElbow: .25, leg: .61, knee: -.77, lean: -.32 }],
+    [M.BAIR]: [{ offLeg: .43, offKnee: -.84, arm: .96 }, { offLeg: -1.28, offKnee: -.08, leg: 1.23, arm: 2.07, lean: -.39 }],
+    [M.DAIR]: [{ leg: .64, knee: -1.42, offLeg: .63, offKnee: -1.31, arm: .82 }, { leg: .22, knee: -.08, offLeg: -.14, offKnee: -.14, arm: 2.47, off: 2.31 }],
+  },
+};
+
+const smashCues = {
+  [M.FSMASH]: { arm: -1.48, elbow: 1.58, off: .64, tool: 2.36, yaw: .85, lean: .63, lift: -.12, slide: -.27, leg: -.19, knee: -.44 },
+  [M.USMASH]: { arm: -.66, elbow: 1.32, off: .27, head: .37, lean: -.31, lift: -.34, slide: -.06, leg: .58, knee: -1.10, offLeg: .48, offKnee: -.94 },
+  [M.DSMASH]: { arm: .02, elbow: 1.46, off: 1.02, offElbow: .54, head: -.23, tilt: .38, yaw: .74, lift: -.33, slide: -.12, leg: .79, knee: -1.03, offLeg: -.31, offKnee: -.42 },
+};
 function blendPose(a, b, t, out = {}) {
   for (const k of poseChannels) out[k] = mix(a[k] ?? neutral[k], b[k] ?? neutral[k], t);
   return out;
@@ -223,6 +275,8 @@ function blendPose(a, b, t, out = {}) {
 
 function attackPose(f, key, m, accent) {
   let [wind, hit, follow] = strikePoses[key] || strikePoses[M.SIDE_B];
+  const archetype = fighterArchetype(f), native = normalPoses[archetype]?.[key];
+  if (native) [wind, hit, follow] = native;
   if (key === M.DOWN_B) {
     if (m?.kind === 'counter' || m?.kind === 'reflector') {
       wind = { ...wind, lean: 0.26, arm: 0.84, elbow: 1.43, tool: 1.4 };
@@ -237,7 +291,7 @@ function attackPose(f, key, m, accent) {
     if (accent === 'knee') {
       wind = { ...wind, lean: 0.48, leg: 0.38, knee: -1.56, offLeg: -0.53 };
       hit = { ...hit, lean: -0.57, yaw: -0.46, leg: 1.90, knee: -1.19, offLeg: -0.83, slide: 0.10 };
-    } else if (accent === 'spike' && key === M.DAIR) {
+    } else if (accent === 'spike' && key === M.DAIR && !native) {
       wind = { ...wind, lean: 0.48, lift: 0.11, leg: 1.09, knee: -1.63 };
       hit = { ...hit, lean: -0.33, arm: -0.97, off: -0.79, leg: -0.49, knee: -0.04, offLeg: -0.36, lift: -0.13 };
     } else {
@@ -252,11 +306,12 @@ function attackPose(f, key, m, accent) {
   const twist = key === M.JAB2 || rear ? -1 : 1;
   wind = { ...wind, slide: -reach * (jab ? .14 : power ? .24 : .19),
     yaw: (wind.yaw || 0) + twist * .42, lean: (wind.lean || 0) + reach * .32, lift: Math.min(-.08, wind.lift || 0) };
-  hit = { ...hit, slide: reach * (up || down || sweep ? .20 : jab ? .28 : power ? .46 : .38),
+  hit = { ...hit, slide: hit.slide ?? reach * (up || down || sweep ? .20 : jab ? .28 : power ? .46 : .38),
     lift: up ? (key === M.UP_B ? .28 : .35) : down ? -.34 : hit.lift || 0,
     yaw: (hit.yaw || 0) - twist * .31, lean: (hit.lean || 0) - (up ? .08 : reach * .18) };
   follow = { ...hit, ...follow, yaw: follow?.yaw ?? hit.yaw * .62, lean: follow?.lean ?? hit.lean * .7,
     arm: follow?.arm ?? (hit.arm ?? neutral.arm) + (jab ? .22 : .38), slide: hit.slide * .58, lift: hit.lift * .55 };
+  if (smashes.has(key)) wind = pose(smashCues[key]);
   if (f.state === S.SMASH_CHARGE || f.charging) {
     const tremor = Math.sin((f.smashChargeFrames ?? f.stateFrame) * 2.35) * 0.06;
     return pose({ ...wind, head: tremor, lift: (wind.lift || -0.10) + tremor * 0.3, arm: (wind.arm || 0) + tremor });
@@ -265,7 +320,16 @@ function attackPose(f, key, m, accent) {
   const frame = f.moveFrame ?? f.stateFrame ?? 1;
   const finish = startup + active;
   const recovery = follow || hit;
-  if (frame < startup) return blendPose(neutral, wind, ease(frame / Math.max(1, startup - 1)));
+  if (frame < startup) {
+    if (smashes.has(key)) {
+      // Reserve at least three simulation frames for a readable loading silhouette.
+      const set = Math.max(0, startup - 4);
+      const preload = ease((frame + 1) / (set + 1));
+      const coil = ease(Math.max(0, frame - set) / Math.max(1, startup - set - 1));
+      return blendPose(neutral, wind, preload * (.84 + .16 * coil));
+    }
+    return blendPose(neutral, wind, ease(frame / Math.max(1, startup - 1)));
+  }
   if (frame <= finish) {
     const progress = (frame - startup) / active;
     const activePose = blendPose(hit, recovery, ease(progress));
@@ -362,7 +426,6 @@ export class GameRenderer3D {
     this.canvas = canvas3d;
     this.overlay = overlayCanvas;
     this.renderer2d = renderer2d;
-    renderer2d?.fx?.attachClassic(renderer2d);
     this.T = globalThis.THREE;
     this.ready = false;
     this.enabled = true;
@@ -1998,8 +2061,9 @@ export class GameRenderer3D {
     const turn = this._bone(tumble, 'facing', 0, -h * 0.49);
     const pelvis = this._bone(turn, 'pelvis');
     const torso = this._bone(pelvis, 'torso');
-    const rig = { root, impactAxis, impactRest, tumble, turn, pelvis, torso, pose: { ...neutral }, stride: 0, h, w, pal,
-      yaw: f.facing < 0 ? -Math.PI + 0.86 : -0.86, history: [], trailVectors: [],
+    const archetype = fighterArchetype(f), build = proportions[archetype];
+    const rig = { root, impactAxis, impactRest, tumble, turn, pelvis, torso, pose: { ...neutral }, stride: 0, h, w, pal, archetype,
+      yaw: f.facing < 0 ? -Math.PI + STANCE : -STANCE, history: [], trailVectors: [],
       air: 0, fall: 0 };
     const fur = ['fox', 'bird', 'rodent', 'tinyRodent', 'dino', 'tallCat'].includes(sil);
     const armor = sil === 'armor' || style.prop === 'shellSpikes', isFlat = sil === 'flat2d';
@@ -2012,14 +2076,14 @@ export class GameRenderer3D {
     const detail = this._mat(pal.accent, { emissive: pal.accent, emissiveIntensity: 0.13, metalness: 0.17, roughness: 0.43 });
     const dark = this._mat('#20192b', { roughness: 0.65 });
     const light = this._mat('#f3e6da', { roughness: 0.68 });
-    rig.pelvisHeight = puff ? h * 0.23 : h * 0.31;
+    rig.pelvisHeight = h * (puff ? .23 : build.hips);
     if (sil === 'sandbag' || sil === 'ovenMitt') {
       this._buildSpecialFighter(rig, f, sil, body, pants, gold, dark);
     } else {
-      const bulk = sil.includes('Brute') || sil === 'brute' ? 1.20 : sil === 'stout' || sil === 'armor' ? 1.12 : sil === 'tallCat' ? 0.83 : 1.0;
+      const bulk = puff ? 1 : build.bulk * (sil === 'tallCat' ? .87 : 1);
       const depth = isFlat ? 0.39 : 1;
       const breadth = w * (puff ? 0.49 : 0.39) * bulk * depth;
-      const chestSz = h * (puff ? 0.61 : sil === 'dress' ? 0.39 : 0.38);
+      const chestSz = h * (puff ? .61 : sil === 'dress' ? .39 : build.torso);
       const chestRx = w * (puff ? 0.51 : 0.33) * bulk;
       const shoulders = puff ? chestSz * 0.66 : chestSz * 0.81;
       const profile = puff ? [[0,0],[0.06,0.48],[0.26,0.89],[0.50,1],[0.75,0.92],[0.93,0.53],[1,0]]
@@ -2111,7 +2175,7 @@ export class GameRenderer3D {
         rig.tail = tail;
         rig.tailTip = tip;
       }
-      this._articulate(rig, f, { puff, depth, breadth, chestRx, shoulders, ...mantle });
+      this._articulate(rig, f, { puff, depth, breadth, chestRx, shoulders, build, ...mantle });
       if (style.buddy) this._buildBuddy(rig, pants, detail, light, dark);
     }
     const edged = new Map(), zones = new Map();
@@ -2304,9 +2368,10 @@ export class GameRenderer3D {
     }
   }
 
-  _articulate(rig, f, { puff, depth, breadth, chestRx, shoulders, main, pants, detail, dark, gold, skin, light }) {
+  _articulate(rig, f, { puff, depth, breadth, chestRx, shoulders, build, main, pants, detail, dark, gold, skin, light }) {
     const h = rig.h, w = rig.w, pal = rig.pal, style = f.def.rig || {};
-    const u = h * (puff ? 0.10 : 0.172), l = h * (puff ? 0.083 : 0.15);
+    const u = h * (puff ? .10 : .172 * build.arm), l = h * (puff ? .083 : .15 * build.arm);
+    const girth = w * build.limbs;
     const thigh = rig.pelvisHeight * (puff ? 0.43 : 0.46), calf = rig.pelvisHeight * 0.40;
     const gloveSize = Math.max(4, w * (puff ? 0.15 : 0.137));
     rig.limbs = [];
@@ -2317,11 +2382,11 @@ export class GameRenderer3D {
       const fore = this._bone(arm, label + ' forearm', 0, -u, 0);
       const grip = this._bone(fore, label + ' grip', 0, -l, 0);
       const pauldron = style.silhouette === 'armor';
-      this._shape(arm, 'ball', main, 0, -u * 0.44, 0, w * 0.121, u * 0.67, w * 0.113 * depth);
+      this._shape(arm, 'ball', main, 0, -u * 0.44, 0, girth * 0.121, u * 0.67, girth * 0.113 * depth);
       this._shape(arm, 'ball', pauldron ? detail : main, 0, -u * 0.08, s * w * 0.029 * depth,
-        w * (pauldron ? 0.17 : 0.139), w * 0.145, w * (pauldron ? 0.20 : 0.141) * depth);
+        girth * (pauldron ? 0.17 : 0.139), w * 0.145, girth * (pauldron ? 0.20 : 0.141) * depth);
       this._shape(fore, 'smallBall', pauldron ? dark : main, 0, 0, 0, w * 0.098, w * 0.093, w * 0.099 * depth);
-      this._shape(fore, 'ball', style.stache || style.silhouette === 'parka' ? main : skin, 0, -l * 0.48, 0, w * 0.106, l * 0.73, w * 0.093 * depth);
+      this._shape(fore, 'ball', style.stache || style.silhouette === 'parka' ? main : skin, 0, -l * 0.48, 0, girth * 0.106, l * 0.73, girth * 0.093 * depth);
       this._shape(fore, 'disk', style.silhouette === 'armor' ? gold : pants, 0, -l * 0.76, 0, gloveSize * 0.91, l * 0.21, gloveSize * depth);
       const glove = this._model('characters', 'Part_Glove',
         { CharWhite: style.silhouette === 'armor' ? pal.outfit : style.stache ? '#f3f3ff' : style.silhouette === 'parka' ? pal.accent : pal.skin });
@@ -2336,9 +2401,9 @@ export class GameRenderer3D {
       const shin = this._bone(leg, label + ' shin', 0, -thigh, 0);
       const kneeCap = this._bone(shin, label + ' knee cap');
       const foot = this._bone(shin, label + ' ankle', 0, -calf, 0);
-      this._shape(leg, 'ball', pants, 0, -thigh * 0.40, 0, w * 0.126, thigh * 0.79, w * 0.12 * depth);
+      this._shape(leg, 'ball', pants, 0, -thigh * 0.40, 0, girth * 0.126, thigh * 0.79, girth * 0.12 * depth);
       this._shape(kneeCap, 'smallBall', pauldron ? detail : pants, w * 0.025, 0, 0, w * 0.103, w * 0.111, w * 0.108 * depth);
-      this._shape(shin, 'ball', pants, 0, -calf * 0.42, 0, w * 0.109, calf * 0.77, w * 0.102 * depth);
+      this._shape(shin, 'ball', pants, 0, -calf * 0.42, 0, girth * 0.109, calf * 0.77, girth * 0.102 * depth);
       const leather = style.stache ? new this.T.Color('#704039').lerp(new this.T.Color(pal.outfit), 0.36) : pal.outfit;
       const boot = this._model('characters', 'Part_Boot', { NeutralTint: leather });
       const bootSize = w * (puff ? 0.37 : 0.32);
@@ -2492,7 +2557,7 @@ export class GameRenderer3D {
     const T = this.T, { root, h } = rig, id = f.def.id;
     const moves = Object.values(f.def.moves || {});
     const hand = rig.limbs?.[0].grip;
-    if (hand && moves.some((m) => m.storableCharge)) {
+    if (hand && moves.some((m) => m.kind === 'chargeShot')) {
       const shadow = f.def.rig?.prop === 'xrayOrb', color = shadow ? '#bd61ff' : '#4defff';
       rig.orbMount = this._bone(hand, 'Charge socket');
       rig.orbAtMuzzle = !shadow;
@@ -2505,6 +2570,15 @@ export class GameRenderer3D {
         curl.rotation.z = i ? -0.77 : 0.77;
       }
       rig.orbLevel = 0;
+    }
+    if (hand && moves.some((m) => m.kind === 'chargePunch')) {
+      rig.fistSteam = this._bone(hand, 'Golden fist steam');
+      const map = getFistSteamTexture(T, this);
+      rig.fistVents = Array.from({ length: 4 }, () => this._shape(rig.fistSteam, 'plane',
+        this._energy('#ffc26a', .8, { map, side: T.DoubleSide }), 0, 0, 0, 1, 1, 1, false));
+      rig.fistGleam = this._shape(rig.fistSteam, 'impactStar',
+        this._energy('#ffe6a4', .72, { side: T.DoubleSide }), 0, 0, 0, 1, 1, 1, false);
+      rig.fistSteam.visible = false;
     }
     if (hand && (id === 'captain-pigeon' || id === 'dadondorf')) {
       const bird = id === 'captain-pigeon', flame = this._bone(hand, bird ? 'Pigeon flame' : 'Warlock flame', 5, 0, 4);
@@ -2710,7 +2784,7 @@ export class GameRenderer3D {
     const shotAge = age - (Number.isFinite(cycle) ? Math.min(Math.floor(age / cycle), Math.floor(((move?.active || 1) - 1) / cycle)) * cycle : 0);
     if ((muzzle.visible = tell === 'gun' && (age < 0 || shotAge < 5))) {
       const facing = f.facing || 1;
-      const aim = (move?.projAngle ?? (move?.projBounce ? -6 : 0)) * DEG;
+      const aim = mittGunAim(f, move);
       const reach = Math.max(Math.abs(move?.offsetX ?? 30), w * 0.77 * sc);
       muzzle.position.set((f.x + facing * reach - root.position.x) / sc,
         (f.y + (move?.offsetY ?? h * 0.5) - root.position.y) / sc, w * 0.21);
@@ -2760,7 +2834,7 @@ export class GameRenderer3D {
   _updateSignature(rig, f, tick, delta, attacking, active) {
     const d = f.moveData, frame = f.moveFrame || 0, h = rig.h, startup = d?.startup || 1;
     if (rig.orb) {
-      const charge = clamp(Math.max(f.chargeShotLevel || 0, f.charging && d?.storableCharge ? (f.chargeFrames || 0) / 60 : 0));
+      const charge = clamp(Math.max(f.chargeShotLevel || 0, f.charging && d?.kind === 'chargeShot' ? (f.chargeFrames || 0) / 60 : 0));
       rig.orbLevel = charge > 0 ? mix(rig.orbLevel, charge, 1 - Math.exp(-Math.max(delta, 0.2) * 0.31)) : 0;
       rig.orb.visible = charge > 0;
       if (rig.orb.visible) {
@@ -2769,6 +2843,27 @@ export class GameRenderer3D {
         rig.orb.position.set(muzzle ? 24 : 8, muzzle ? 0 : 5, f.heldItemId != null ? 8 : 0);
         rig.orb.scale.setScalar((3.1 + 14.5 * Math.sqrt(rig.orbLevel)) * (1 + 0.075 * Math.sin(tick * 0.32)));
         rig.orb.rotation.set(tick * 0.12, tick * 0.20, tick * 0.073);
+      }
+    }
+    if (rig.fistSteam) {
+      const stored = clamp(f.chargeShotLevel || 0);
+      const punching = attacking && d?.kind === 'chargePunch';
+      const power = punching ? Math.max(stored, f.specialCharge || 0, (f.chargeFrames || 0) / 60) : stored;
+      rig.fistSteam.visible = Boolean(stored || punching && (f.charging || frame < startup + (d.active || 5)));
+      if (rig.fistSteam.visible) {
+        const strength = clamp(power, .18, 1);
+        const hand = rig.limbs[0];
+        rig.fistSteam.rotation.z = -(rig.pose.arm + rig.pose.elbow);
+        rig.fistVents.forEach((vent, i) => {
+          const drift = this.allowFlash ? phase01(tick / 23 + i / 4) : (i + 1) / 5;
+          vent.position.set(-3 + Math.sin(i * 2.40) * (4 + 13*drift), 7 + drift * (15 + strength * 15), (i % 2 ? 1 : -1) * 7);
+          vent.rotation.set(0, hand.shoulder.rotation.x * .15 + (i % 2 ? .27 : -.35), (i - 1.5) * .36);
+          const size = (8 + 15*drift) * (.65 + .45*strength);
+          vent.scale.set(size, size*1.55, 1);
+          vent.material.opacity = Math.sin(drift * Math.PI) * strength * (active ? .92 : .61);
+        });
+        rig.fistGleam.scale.setScalar(6 + 9*strength);
+        rig.fistGleam.material.opacity = active ? .88 : .34 + .25*strength;
       }
     }
     if (rig.punch && (rig.punch.visible = attacking && f.moveKey === M.NEUTRAL_B && frame >= startup - 11 && frame < startup + (d?.active || 5) + 3)) {
@@ -2844,7 +2939,7 @@ export class GameRenderer3D {
     if (state !== S.TUMBLE) rig.tumbleDir = 0;
     else if (!rig.tumbleDir || hitlag > 0 || rig.poseState !== state) rig.tumbleDir = Math.abs(localX) > .12 ? Math.sign(localX) : -1;
     const sc = showcase?.scale ?? (f.scale || 1);
-    const shiver = hurt && hitlag > 0 ? (hitlag % 2 ? 1 : -1) * mix(6.5, 12.5, clamp((kb + hitlag * 5) / 182)) : 0;
+    const shiver = this.allowFlash && hurt && hitlag > 0 ? (hitlag % 2 ? 1 : -1) * mix(4, 8.5, clamp((kb + hitlag * 5) / 182)) : 0;
     const rattle = shiver && hit?.electric ? (Math.floor(hitlag / 2) % 2 ? 1 : -1) * Math.abs(shiver) * .27 : 0;
     const x = showcase?.x ?? f.x + shiver, y = showcase?.y ?? f.y + rattle - (ledge ? h * sc * 0.87 : 0);
     rig.root.position.set(x, y, showcase?.z ?? 0);
@@ -2868,8 +2963,19 @@ export class GameRenderer3D {
     } else if (tell === 'slam' && activeAge >= (d?.active || 1)) {
       const low = 1 - ease((activeAge - (d?.active || 1)) / Math.max(1, (d?.endlag || 15) - 3));
       target = { ...target, lift: -0.27 * low, lean: 0.52 * low, slide: 0 };
+    } else if (['slam', 'slap', 'sweep', 'drill', 'clap'].includes(tell)) {
+      const windup = ease(1 + activeAge / Math.max(1, d.startup));
+      const settle = activeAge < d.active ? 1 : 1 - ease((activeAge - d.active) / Math.max(1, d.endlag));
+      const power = activeAge < 0 ? windup : settle;
+      const lean = {
+        slam: activeAge < 0 ? -.56 : .29, slap: activeAge < 0 ? .57 : -1.21, sweep: activeAge < 0 ? .44 : -.81,
+        drill: activeAge < 0 ? 1.55 : Math.PI * .91, clap: activeAge < 0 ? -.34 : .40,
+      }[tell];
+      target = { ...target, lean: lean * power, yaw: tell === 'sweep' ? .51 * power : 0,
+        spin: tell === 'drill' && active && this.allowFlash ? activeAge * .57 : 0,
+        lift: (tell === 'slam' ? .41 : tell === 'drill' ? .17 : .02) * (activeAge < 0 ? windup : 0), slide: 0 };
     }
-    if (specialMove?.phase === 'charge') {
+    if (specialMove?.phase === 'charge' && d?.kind !== 'chargePunch') {
       target = pose({ lift: .04 + Math.sin(tick * .54) * .075 + specialMove.charge * .08, lean: .37,
         arm: -.91, elbow: 1.42, off: .66, offElbow: 1.33, leg: 1.08, offLeg: .85, knee: -1.33, offKnee: -1.20, yaw: .48 });
     } else if (launched) {
@@ -2889,9 +2995,9 @@ export class GameRenderer3D {
     const a = rig.initialized ? gain : 1;
     rig.initialized = true;
     const directed = tell === 'gun' || strike && !strike.radial && !launched;
-    const stanceYaw = directed ? .40 : .86;
+    const stanceYaw = directed ? .20 : STANCE;
     const desiredYaw = showcase?.yaw ?? (facing > 0 ? -stanceYaw : -Math.PI + stanceYaw);
-    rig.yaw += angleDelta(rig.yaw, desiredYaw) * (showcase ? a : snap && directed ? .88 : 1 - Math.exp(-delta * 0.52));
+    rig.yaw += angleDelta(rig.yaw, desiredYaw) * (!rig.poseState || snap && directed ? 1 : showcase ? a : 1 - Math.exp(-delta * 0.52));
     const p = rig.pose;
     const frozenAttack = hitlag > 0 && attacking && rig.poseState === state && rig.poseMove === moveKey && rig.poseMoveFrame === f.moveFrame;
     if (!frozenAttack) for (const k of poseChannels) {
@@ -2906,7 +3012,7 @@ export class GameRenderer3D {
     rig.turn.rotation.y = rig.yaw + p.spin;
     const squash = special && f.def.id === 'sagging-bag' && hurt ? Math.sin(tick * 0.48) * 0.10 : 0;
     const invuln = !showcase && f.invulnFrames > 0 && !f.starTimer;
-    rig.turn.position.z = invuln && tick % 6 < 3 ? -3 : 0;
+    rig.turn.position.z = this.allowFlash && invuln && tick % 6 < 3 ? -3 : 0;
     rig.root.scale.setScalar(sc);
     const pulse = recoil ? hitlag ? 1 : RECOIL_POP[clamp(sf, 0, 4)] : 0;
     const stretch = pulse * mix(.28, .44, clamp(kb / 145));
@@ -2960,17 +3066,18 @@ export class GameRenderer3D {
     const held = !showcase && f.heldItemId != null;
     const strikeZone = strike?.limb === 'grip' && rig.limbs
       ? held && moveKey === M.ITEM_SWING ? 'held' : !held && rig.hasWeapon ? 'tool' : 'grip' : strike?.limb;
-    const hitPulse = hurt && hitlag > 0 ? (hit?.frame === tick || hitlag % 2 ? .98 : .48) : 0;
+    const hitPulse = this.allowFlash && hurt && hitlag > 0 ? (hit?.frame === tick || hitlag % 2 ? .53 : .19) : 0;
     const strikePulse = strike ? 1 - ease(strike.age / Math.min(6, strike.duration)) : 0;
     const [strikeRim, strikeCore, strikeSpark] = combatPaint[strike?.style || 'unarmed'];
-    rig.heldFlash = strikeZone === 'held' ? .25 + .67 * strikePulse : 0;
+    rig.heldFlash = this.allowFlash && strikeZone === 'held' ? .18 + .50 * strikePulse : 0;
     rig.heldFlashColor = strikeSpark;
     for (const [zone, slots] of rig.flashMaterials) for (const { flash, flashColor } of slots) {
-      const limbPulse = zone === strikeZone && strike ? .25 + .67 * strikePulse : 0;
+      const limbPulse = this.allowFlash && zone === strikeZone && strike ? .18 + .50 * strikePulse : 0;
       flash.value = Math.max(hitPulse, limbPulse);
       if (flash.value) flashColor.value.set(hitPulse ? hit?.electric ? '#b7f8ff' : '#ffffff' : strikeSpark);
     }
-    const limbScale = strike ? mix(1.65, accent || strikeZone === 'tool' || strikeZone === 'held' ? 2.15 : 1.99, strikePulse) : 1;
+    const limbScale = !strike ? 1 : strikeZone === 'tool' ? mix(1, 1.12, strikePulse)
+      : mix(1.14, accent || strikeZone === 'held' ? 1.56 : 1.40, strikePulse);
     for (const [zone, node] of Object.entries(rig.strikeNodes)) node.scale.setScalar(zone === strikeZone ? limbScale : 1);
     if (rig.limbs) {
       const [right, left] = rig.limbs;
@@ -3004,7 +3111,7 @@ export class GameRenderer3D {
     if (rig.shield.visible = state === S.SHIELD || state === S.SHIELD_STUN) {
       const bubble = clamp((f.shieldHp ?? 60) / MELEE.SHIELD_MAX);
       const light = f.lightShielding === true;
-      const r = (f.def.stats.shieldRadius || 43) * (0.45 + 0.55 * bubble) * (light ? 1.34 : 1);
+      const r = (f.def.stats.shieldRadius || 43) * (0.35 + 0.65 * bubble) * (f.shieldScale ?? (light ? 1.34 : 1));
       const beat = (state === S.SHIELD_STUN ? 1.10 : 1) + Math.sin(tick * 0.27) * 0.027;
       rig.shield.scale.set(r * beat, r * beat * 1.02, r * beat);
       rig.shield.rotation.y = tick * (light ? 0.024 : 0.006);
@@ -3023,7 +3130,7 @@ export class GameRenderer3D {
       rig.shine.scale.setScalar(0.94 + 0.13 * Math.cos(tick * 0.43));
       rig.shineSparks.rotation.z = -tick * 0.31;
     }
-    if (rig.charge.visible = state === S.SMASH_CHARGE || (f.charging === true && !rig.orb)) {
+    if (rig.charge.visible = state === S.SMASH_CHARGE || (f.charging === true && !rig.orb && !rig.fistSteam)) {
       for (let i = 0; i < 3; i++) {
         const phase = ((tick + i * 8) % 24) / 24;
         const ring = rig.chargeRings[i];
@@ -3064,10 +3171,11 @@ export class GameRenderer3D {
       const reach = strike.reach * (.97 + .15 * Math.min(1, strike.age / 3));
       const shift = strike.radial ? 0 : reach * .36;
       const phase = strike.age / Math.max(1, strike.duration);
+      const kick = rig.archetype === 'spacie' && [M.FAIR, M.FTILT, M.BAIR].includes(f.moveKey);
       rig.swingArc.position.set((strike.x - Math.cos(strike.angle) * shift - root.position.x) / sc,
         (strike.y - Math.sin(strike.angle) * shift - root.position.y) / sc, 26 / sc);
-      rig.swingArc.scale.setScalar(reach / sc);
-      rig.swingArc.rotation.set(.20, -.23, strike.angle + (strike.radial ? tick * .26 : (phase - .36) * .72), 'ZYX');
+      rig.swingArc.scale.set(reach / sc, reach / sc * (kick ? .34 : 1), reach / sc);
+      rig.swingArc.rotation.set(.20, -.23, strike.angle + (strike.radial ? tick * .26 : (phase - .36) * (kick ? .28 : .72)), 'ZYX');
       rig.swingRim.geometry = this._unit(strike.radial ? 'sweepRim' : 'swingRim');
       rig.swingCore.geometry = this._unit(strike.radial ? 'sweepCore' : 'swingCore');
       rig.swingRim.material.color.set(rim);
@@ -3087,7 +3195,7 @@ export class GameRenderer3D {
       rig.strikeGlow.material.color.set(spark);
       rig.strikeGlow.material.opacity = .34 + pulse * .52;
     }
-    rig.specialEnergy.visible = root.visible && special?.phase === 'charge';
+    rig.specialEnergy.visible = root.visible && special?.phase === 'charge' && f.moveData?.kind !== 'chargePunch';
     rig.comet.visible = root.visible && Boolean(special?.flight && !special.illusion && ['launch', 'zip1', 'zip2'].includes(special.phase));
     if (!rig.specialEnergy.visible && !rig.comet.visible) return;
     const [outer, white, hot] = combatPaint[special.style];
@@ -3211,9 +3319,9 @@ export class GameRenderer3D {
     rig.ribbonFrame = tick;
     const a = rig.history;
     const prop = f.def.rig?.prop, itemKey = item?.def?.id || item?.itemId;
-    const sword = blades.has(prop);
+    const sword = blades.has(prop) || rig.archetype === 'sword', limb = zone || attackLimb(f);
     const active = Boolean(strike?.melee);
-    const weapon = zone === 'held' || zone === 'tool' || !strike && (itemKey ? f.moveKey === M.ITEM_SWING : sword);
+    const weapon = zone === 'held' || zone === 'tool' || !strike && (itemKey ? f.moveKey === M.ITEM_SWING : sword && limb === 'grip');
     const startup = f.moveData?.startup || 1;
     const sweeping = rig.root.visible && (active || ((f.state === S.ATTACK || f.state === S.THROW) && !f.charging &&
       f.moveFrame >= Math.max(0, startup - 2) && f.moveFrame < startup));
@@ -3222,8 +3330,7 @@ export class GameRenderer3D {
     rig.lastAttack = attackId;
     if (sweeping && rig.limbs) {
       rig.root.updateWorldMatrix(true, true);
-      const node = weapon ? null : rig.strikeNodes[zone || (f.moveKey === M.JAB2 ? 'offGrip' : f.moveKey === M.BAIR ? 'offFoot'
-        : [M.NAIR, M.UAIR, M.DAIR, M.DTILT].includes(f.moveKey) ? 'foot' : 'grip')];
+      const node = weapon ? null : rig.strikeNodes[limb];
       while (a.length >= TRAIL_HISTORY) rig.trailVectors.push(a.pop().pair);
       const pair = rig.trailVectors.pop();
       const [inner, outer] = pair;
@@ -3871,6 +3978,11 @@ export class GameRenderer3D {
   _ingestEvent(e, match) {
     const t = match.frame, x = e.x ?? 0, y = e.y ?? 0;
     if (this._specialEvent(e, match)) return;
+    const reaction = combatReaction(e, match);
+    if (reaction) {
+      this._combatReaction(reaction, t);
+      return;
+    }
     if (e.type === 'stageTransformWarn') {
       const next = match.stage.transformations?.find((f) => f.id === e.formId);
       const current = match.stageForm ?? getStageForm(match.stage, t);
@@ -3998,6 +4110,33 @@ export class GameRenderer3D {
     }
   }
 
+  _combatReaction(p, frame) {
+    const { type, x, cy, rim, core, size, life } = p;
+    const star = (sx, sy, reach, angle, ink, aspect = .7) => this._particle('impactStar', sx, sy, 48,
+      ink, reach, life, 0, 0, 0, frame, { angle, aspect, alpha: .94, solid: true });
+    const ring = (z, start, end, tilt, ink) => this._particle('ring', x, cy, z,
+      ink, start, life, 0, 0, 0, frame, { end, tilt, yaw: -.28, solid: true });
+    if (type === 'reflect') {
+      ring(36, size * .40, size * 1.25, -.22, rim);
+      ring(44, size * .31, size * .92, .61, core);
+    } else if (type === 'counter') {
+      star(x, cy, size, .56 * p.face, rim, .51);
+      star(x, cy, size * .72, .56 * p.face, core, .40);
+    } else if (type === 'chargeStored') {
+      star(x, cy, size * (.70 + p.power * .30), Math.PI / 4, rim);
+      star(x, cy, size * .55, Math.PI / 4, core);
+      ring(39, size * .23, size * .76, .24, rim);
+    } else if (type === 'armor') {
+      for (let i = 0; i < 7; i++) {
+        const a = TAU * (i + .27) / 7, dx = Math.cos(a), dy = Math.sin(a);
+        this._particle('impactSpark', x + dx * 11, cy + dy * 11, 40, i % 2 ? rim : core, 7, life,
+          dx * 5, dy * 5, 0, frame, { angle: a, solid: true });
+      }
+    } else {
+      for (const i of [-1, 0, 1]) star(x + i * 14, cy + (i ? 8 : 19), size * (i ? .49 : .63), Math.PI / 2 + i * .28, i ? rim : core, .58);
+    }
+  }
+
   _startFinish(e, match) {
     const hit = this.hitFocus.get(e.victimPort);
     // A KO event can land at the blast zone, long after the last visible impact.
@@ -4076,11 +4215,11 @@ export class GameRenderer3D {
         }
       }
     }
-    const flash = this.flash;
+    const flash = this.allowFlash && this.flash;
     if (flash && t - flash.frame < flash.life) {
       this.impact.color.set(flash.color);
       this.impact.position.set(flash.x, flash.y + (flash.atContact ? 0 : 11), flash.atContact ? 28 : 35);
-      this.impact.intensity = flash.strength * clamp(1 - (t - flash.frame) / flash.life) ** 2.4;
+      this.impact.intensity = flash.strength * (this.portCount >= 4 ? .55 : .82) * clamp(1 - (t - flash.frame) / flash.life) ** 2.4;
     } else {
       this.impact.intensity = 0;
       this.flash = null;
@@ -4170,12 +4309,7 @@ export class GameRenderer3D {
   }
 
   _victoryOrder(match) {
-    const draw = this._isDraw(match);
-    const won = (f) => match.winningTeam != null ? f.team === match.winningTeam : f.port === match.winnerPort;
-    const score = (f) => match.mode === MODE.VS_TIME ? (f.kos || 0) - (f.falls || 0) : f.stocks || 0;
-    return [...(match.fighters || [])].filter((f) => f.def).sort((a, b) =>
-      draw ? a.port - b.port : Number(won(b)) - Number(won(a)) || score(b) - score(a) ||
-      (a.percent || 0) - (b.percent || 0) || a.port - b.port).slice(0, 4);
+    return victoryOrder(match);
   }
 
   _buildShowcase(fighters, match, now) {
@@ -4362,11 +4496,17 @@ export class GameRenderer3D {
   _updateCamera(match, options, delta) {
     const active = match.fighters.filter((f) => f.state !== S.DEAD);
     const finishAge = this._finishAge(match), finishDuration = this.finish?.duration || 36;
-    const finishActive = options.shakeEnabled !== false && finishAge < finishDuration;
+    const cinematic = this.allowFlash && options.shakeEnabled !== false;
+    const finishActive = cinematic && finishAge < finishDuration;
     const reveal = finishActive ? (0.26 + 0.74 * ease(finishAge / 8)) * (1 - ease((finishAge - finishDuration * 0.56) / (finishDuration * 0.44))) : 0;
     const zones = match.stage.blastzones;
     const bounds = match.stage.cameraBounds || zones;
     const aspect = this.camera.aspect, portrait = aspect < 1;
+    const deck = (match.surfaces || match.stage.solid)?.[0];
+    const closeDeck = portrait && match.stage.id === 'arguefield' && active.length === 2 && deck &&
+      active.every((f) => f.grounded && f.x >= deck.x && f.x <= deck.x + deck.w &&
+        Math.abs(f.y - getSurfaceY(deck, f.x)) < 4) &&
+      Math.abs(active[0].x - active[1].x) < 260;
     let fighters = active;
     // The derby tracks the bag after its launch. Keeping the batter in frame would
     // zoom past the entire arena while the accumulated yardage is still growing.
@@ -4379,7 +4519,7 @@ export class GameRenderer3D {
       const x = clamp(f.x, bounds.left, bounds.right);
       const y = clamp(f.y, bounds.bottom, bounds.top);
       const sc = f.scale || 1, box = f.hurtbox;
-      const halfWidth = Math.max(65, (box?.w ?? f.def.stats.width * sc) * 0.5 + 24);
+      const halfWidth = Math.max(closeDeck ? 44 : 65, (box?.w ?? f.def.stats.width * sc) * 0.5 + (closeDeck ? 16 : 24));
       const bodyBottom = f.state === S.LEDGE_HANG ? y - f.def.stats.height * sc * 0.78 : y;
       minX = Math.min(minX, x - halfWidth);
       maxX = Math.max(maxX, x + halfWidth);
@@ -4392,7 +4532,7 @@ export class GameRenderer3D {
         minX = Math.min(minX, tg.x - 65); maxX = Math.max(maxX, tg.x + 65);
         maxY = Math.max(maxY, tg.y + 62); minY = Math.min(minY, tg.y - 62);
       }
-    } else if (fighters.length > 1 && (match.platforms ?? match.stage.platforms)?.length && match.stage.id !== 'sandbag-yard') {
+    } else if (!closeDeck && fighters.length > 1 && (match.platforms ?? match.stage.platforms)?.length && match.stage.id !== 'sandbag-yard') {
       const highest = Math.max(...(match.platforms ?? match.stage.platforms).map((p) => p.y));
       const focusY = (minY + maxY) * 0.5;
       if (Number.isFinite(highest) && Math.abs(focusY - highest) < 420) maxY = Math.max(maxY, highest + 45);
@@ -4400,11 +4540,12 @@ export class GameRenderer3D {
     const tx = mix(clamp((minX + maxX) * 0.5, bounds.left, bounds.right), this.finish?.x ?? 0, reveal * 0.90);
     const ty = mix(clamp((minY + maxY) * 0.5, bounds.bottom + 48, bounds.top), this.finish?.y ?? 0, reveal * 0.84);
     const halfFov = Math.tan(this.camera.fov * Math.PI / 360);
-    const zForY = Math.max(425, maxY - minY) * 0.55 / halfFov;
-    const zForX = Math.max(portrait ? 280 : 570, maxX - minX) * 0.55 / (halfFov * aspect);
+    const zForY = Math.max(closeDeck ? 300 : 425, maxY - minY) * 0.55 / halfFov;
+    const zForX = Math.max(closeDeck ? 160 : portrait ? 280 : 570, maxX - minX) * 0.55 / (halfFov * aspect);
     const zoom = mix(1, 0.65, reveal);
     const maxZ = portrait ? 5600 : 4100;
-    const tz = clamp(Math.max(zForX, zForY) * zoom, mix(match.stage.id === 'sandbag-yard' ? 685 : 755, 555, reveal), maxZ);
+    const minZ = closeDeck ? 595 : match.stage.id === 'sandbag-yard' ? 685 : 755;
+    const tz = clamp(Math.max(zForX, zForY) * zoom, mix(minZ, 555, reveal), maxZ);
     const step = finishActive && finishAge !== this.lastFinishAge ? Math.max(1, delta) : delta;
     this.lastFinishAge = finishAge;
     this.camX = mix(this.camX, tx, 1 - Math.exp(-step * (finishActive || fighters.length === 1 && match.homerun?.launched ? 0.28 : 0.145)));
@@ -4419,19 +4560,22 @@ export class GameRenderer3D {
     }
     const kickAge = this.cameraKick ? match.frame - this.cameraKick.frame : Infinity;
     if (kickAge >= 13) this.cameraKick = null;
-    const kick = options.shakeEnabled === false ? null : this.cameraKick;
+    const kick = cinematic ? this.cameraKick : null;
     const decay = kick ? 1 - ease(kickAge / 13) : 0;
     const impulse = kick ? kick.shake * decay * (.33 + .67 * Math.cos(kickAge * 1.42)) : 0;
-    const shake = options.shakeEnabled === false ? 0 : (match.screenShake || 0) * (1 - decay * .50);
+    const shake = cinematic ? (match.screenShake || 0) * (1 - decay * .50) : 0;
     const dx = shake * Math.sin(match.frame * 2.71) * .64 + (kick ? kick.x * impulse : 0);
     const dy = shake * Math.cos(match.frame * 3.51) * .47 + (kick ? kick.y * impulse : 0);
     this.camera.position.set(this.camX + dx, this.camY + 103 + dy, this.camZ * (1 - (kick?.zoom ?? 0) * decay));
     this.camera.lookAt(this.camX + (kick ? kick.x * impulse * .82 : 0),
       this.camY + (kick ? kick.y * impulse * .82 : 0), 0);
     this.camera.updateMatrixWorld();
-    // Fog depth is camera-space Z. Move the haze with the camera so it starts behind the arena.
-    this.scene.fog.near = Math.max(1150, this.camera.position.z + 500);
-    this.scene.fog.far = Math.max(3200, this.camera.position.z + 2600);
+    // Compute depth from the arena plane, not the zoom scale. Wide-stage scenery
+    // sits farther behind play than small-stage trim, but the fighters never enter the haze.
+    const arenaDepth = Math.hypot(this.camera.position.z, 103);
+    const hazeStart = match.stage.category === 'huge' || match.stage.id === 'green-greens-suburb' ? 900 : 580;
+    this.scene.fog.near = arenaDepth + hazeStart;
+    this.scene.fog.far = this.scene.fog.near + 2350;
     this.sky.position.copy(this.camera.position);
     this.sun.position.set(this.camX + 370, this.camY + 790, 540);
     this.sun.target.position.set(this.camX, this.camY - 45, 0);
@@ -4439,6 +4583,8 @@ export class GameRenderer3D {
 
   render(match, options = {}) {
     options ??= {};
+    this.allowFlash = flashesAllowed(options);
+    this.portCount = match?.fighters?.length || 0;
     if (this.renderer2d?.fx) this.renderer2d.fx.match = match;
     if (!this.isActive()) {
       if (this.canvas) this.canvas.hidden = true;
@@ -4475,7 +4621,7 @@ export class GameRenderer3D {
           this.showcase.lineup = lineup;
           this.showcase.match = match;
         }
-        this._updateShowcase(match, fighters, now);
+        this._updateShowcase(match, fighters, this.allowFlash ? now : this.showcase.start + 1000);
       } else if (this.showcase) {
         this._remove(this.showcase);
         this.showcase = null;
@@ -4630,7 +4776,13 @@ export class GameRenderer3D {
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
       if (mode !== 'battle') return;
-      if (options.shakeEnabled !== false) this._drawFinishBurst(ctx, match, w, h);
+      if (this.allowFlash && options.shakeEnabled !== false) {
+        this._drawFinishBurst(ctx, match, w, h);
+        if (match.screenFlash > 0.01) {
+          ctx.fillStyle = `rgba(255,245,225,${clamp(match.screenFlash * (this.portCount >= 4 ? .023 : .035), 0, 0.18)})`;
+          ctx.fillRect(0, 0, w, h);
+        }
+      }
       const tags = [];
       for (const f of match.fighters) {
         if (f.state === S.DEAD || fighterHidden(f, specialVisual(f))) continue;
@@ -4638,7 +4790,15 @@ export class GameRenderer3D {
         const top = this.projectToScreen(f.x, f.y + (f.state === S.LEDGE_HANG ? 27 : body + 28));
         const eye = this.projectToScreen(f.x, f.y + (f.state === S.LEDGE_HANG ? -body * 0.35 : body * 0.55));
         const col = playerColor(f.port);
-        const name = f.name || (f.isCpu ? 'CPU' : `P${f.port + 1}`);
+        const name = fighterTag(f, this.portCount);
+        const tell = mittTell(f);
+        if (tell) {
+          const p = this.projectToScreen(tell.x, tell.y, 42);
+          const edge = this.projectToScreen(tell.x + 20, tell.y, 42);
+          const zoom = Math.max(.42, Math.abs(edge.sx - p.sx) / 20) * tell.scale;
+          ctx.save(); ctx.translate(p.sx, p.sy); ctx.scale(tell.face * zoom, zoom);
+          drawMittTell(ctx, tell, !this.allowFlash); ctx.restore();
+        }
         let offscreen = eye.sx < 0 || eye.sx > w || eye.sy < 0 || eye.sy > h;
         if (offscreen && f.hurtbox) {
           const box = f.hurtbox;
@@ -4759,10 +4919,6 @@ export class GameRenderer3D {
       if (age < (this.finish?.duration ?? 0)) {
         const p = this.projectToScreen(this.finish.x, this.finish.y + 77, 15);
         this._drawArcadeBanner(ctx, 'FINISH!!', p.sx, p.sy, age, this.finish.duration, true, w, h);
-      }
-      if (options.shakeEnabled !== false && match.screenFlash > 0.01) {
-        ctx.fillStyle = `rgba(255,245,225,${clamp(match.screenFlash * 0.035, 0, 0.23)})`;
-        ctx.fillRect(0, 0, w, h);
       }
     } finally {
       ctx.restore();

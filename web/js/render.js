@@ -4,8 +4,8 @@
  * for all 26 playable fighters (+ Sagging Bag & Master Mitt) and all 6 stages + Sandbag Yard.
  */
 
-import { MODE, STATE, PLAYER_COLORS, WORLD_SCALE } from './constants.js';
-import { DynamicCamera, FxSystem } from './fx.js';
+import { MELEE, MODE, STATE, PLAYER_COLORS, WORLD_SCALE } from './constants.js';
+import { DynamicCamera, FxSystem, fighterTag, victoryOrder, flashesAllowed, fighterHidden, specialVisual } from './fx.js';
 import { drawIllustratedPortrait } from './portraits.js';
 
 const HAZARD_WARNINGS = {
@@ -13,6 +13,115 @@ const HAZARD_WARNINGS = {
   starshipLaser: { label: 'LASER LOCK!', color: '#8bf3ff' },
   fineRocket: { label: 'FINE ROCKET!', color: '#ff8e89' },
 };
+
+const itemIcons = {
+  barcode_raygun: 'raygun', leafblower_scope: 'super_scope', hotsauce_flower: 'fire_flower',
+  invinci_star: 'star_badge', first_aid: 'heart_box', speed_bump: 'bumper', tupperware_shell: 'green_shell',
+};
+
+// All silhouettes are drawn around the pickup center on the same 40-unit grid.
+function drawItemIcon(ctx, item) {
+  const id = item.def?.id, key = itemIcons[id] || id;
+  const box = (x, y, w, h, r, ink, edge = true) => {
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, r); fill(ink, edge);
+  };
+  const ellipse = (x, y, rx, ry, ink, edge = true) => {
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); fill(ink, edge);
+  };
+  const poly = (points, ink, edge = true) => {
+    ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.closePath(); fill(ink, edge);
+  };
+  const fill = (ink, edge = true) => {
+    ctx.fillStyle = ink; ctx.fill();
+    if (edge) { ctx.strokeStyle = '#1a152c'; ctx.stroke(); }
+  };
+  const gray = '#515672', ivory = '#fff2d4', gold = '#ffcb59', red = '#ff4f6d';
+  ctx.save();
+  ctx.scale((item.def?.radius || 20) / 20, (item.def?.radius || 20) / 20);
+  ctx.lineWidth = 2.3; ctx.lineJoin = ctx.lineCap = 'round';
+  switch (key) {
+    case 'plunger_bat':
+      ctx.rotate(-.66);
+      box(-22, -3, 42, 6, 3, '#d5a171'); box(-22, -3, 10, 6, 2, gray);
+      poly([[8,-4],[14,-5],[18,-13],[23,-13],[23,13],[18,13],[14,5],[8,4]], red);
+      ellipse(24, 0, 3.2, 13, '#b72852');
+      break;
+    case 'alarm_omb':
+      box(-13, 9, 10, 10, 3, gold); box(3, 9, 10, 10, 3, gold);
+      ellipse(0, 0, 14, 14, '#34405d');
+      box(-4, -19, 8, 6, 2, '#b3cee5'); ellipse(9, -19, 5, 3, red);
+      ellipse(0, 0, 8, 8, ivory); poly([[0,-5],[1,-1],[5,1],[0,1]], '#4b3654', false);
+      break;
+    case 'raygun':
+      poly([[-12,0],[1,0],[-5,15],[-14,15]], gray);
+      box(-17, -12, 28, 15, 5, '#89f1ff'); box(8, -9, 13, 9, 2, '#f7f6ff');
+      for (let i = 0; i < 3; i++) box(-11+i*5, -9, 2, 7, 0, '#22677d', false);
+      ellipse(20, -5, 3, 5, '#ffda68');
+      break;
+    case 'super_scope':
+      ctx.rotate(-.2);
+      poly([[-8,1],[3,1],[-2,14],[-9,14]], gray);
+      box(-24, -9, 48, 14, 5, '#929aba'); box(7, -12, 12, 20, 3, gray);
+      ellipse(23, -2, 4, 8, '#ffb43c'); box(-16, -14, 12, 6, 2, '#b4f5df');
+      break;
+    case 'fire_flower':
+      box(-2, -3, 4, 21, 2, '#4cd981');
+      poly([[0,14],[-13,15],[-15,8],[-7,7],[0,13],[6,6],[15,8],[14,12]], '#51dc80');
+      ellipse(0, -6, 15, 12, red); ellipse(0, -6, 10, 8, gold); ellipse(0, -6, 5, 4, ivory, false);
+      break;
+    case 'bigly_shroom': case 'tiny_shroom': {
+      const tiny = key === 'tiny_shroom';
+      box(-8, -1, 16, 17, 5, ivory);
+      ctx.beginPath(); ctx.moveTo(-17, 2); ctx.bezierCurveTo(-19,-23,19,-23,17,2);
+      ctx.quadraticCurveTo(0,10,-17,2); fill(tiny ? '#ad70ee' : red);
+      ellipse(0, -8, tiny ? 4 : 6.5, tiny ? 4 : 7, tiny ? '#77f5db' : '#fff3ed', false);
+      ellipse(-3, 10, 1.4, 2.7, '#3c304c', false); ellipse(3, 10, 1.4, 2.7, '#3c304c', false);
+      break;
+    }
+    case 'star_badge':
+      poly(Array.from({ length: 10 }, (_, i) => {
+        const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 9 : 19;
+        return [Math.cos(a) * r, Math.sin(a) * r];
+      }), gold);
+      ellipse(-3, 0, 1.5, 3.3, '#483144', false); ellipse(3, 0, 1.5, 3.3, '#483144', false);
+      break;
+    case 'heart_box':
+      ctx.beginPath(); ctx.moveTo(0, 17); ctx.bezierCurveTo(-38, -7, -12, -24, 0, -10);
+      ctx.bezierCurveTo(12, -24, 38, -7, 0, 17); fill('#ff77ab');
+      box(-2, -7, 4, 13, 1, '#fff4f0', false); box(-6.5, -2.5, 13, 4, 1, '#fff4f0', false);
+      break;
+    case 'glow_saber':
+      ctx.rotate(-.64);
+      box(-22, -3.5, 15, 7, 2, gray); box(-9, -9, 5, 18, 2, '#f2eeff');
+      ctx.shadowColor = '#64efff'; ctx.shadowBlur = 6;
+      box(-4, -4, 28, 8, 4, '#57efff', false); box(0, -1.8, 23, 3.6, 2, '#edffff', false);
+      break;
+    case 'bumper':
+      ellipse(0, 4, 20, 11, '#9e254e'); ellipse(0, 0, 20, 11, red);
+      ellipse(0, 0, 12, 5.5, gold); ellipse(0, -1, 5, 2, ivory, false);
+      break;
+    case 'green_shell':
+      ctx.beginPath(); ctx.moveTo(-18, 6); ctx.bezierCurveTo(-17,-20,17,-20,18,6); ctx.closePath(); fill('#40c778');
+      poly([[-9,-4],[0,-13],[9,-4],[5,6],[-5,6]], '#93ee87');
+      box(-19, 3, 38, 8, 4, ivory);
+      break;
+    case 'critter_capsule':
+      ellipse(0, 0, 17, 17, '#fff4ee');
+      ctx.beginPath(); ctx.arc(0, 0, 17, Math.PI, 2*Math.PI); ctx.closePath(); fill('#a973f6');
+      box(-16, -2.5, 32, 5, 2, '#372452', false); ellipse(0, 0, 5.5, 5.5, gold);
+      break;
+    case 'mallet_chaos':
+      ctx.rotate(-.34);
+      box(-3, -5, 6, 28, 2, '#d59d66'); box(-19, -19, 38, 19, 5, gray);
+      box(-19, -19, 8, 19, 3, gold); box(11, -19, 8, 19, 3, gold);
+      poly([[1,-16],[-5,-9],[-.5,-9],[-2,-3],[6,-11],[1,-11]], gold, false);
+      break;
+    default: ctx.restore(); return false;
+  }
+  ctx.restore();
+  return true;
+}
 
 export class GameRenderer {
   constructor(canvas) {
@@ -23,6 +132,7 @@ export class GameRenderer {
     this.dpr = 1;
     this.camera = new DynamicCamera();
     this.fx = new FxSystem();
+    this.fx.attachClassic(this);
     this.lastStageId = null;
   }
 
@@ -42,6 +152,7 @@ export class GameRenderer {
 
   ingestEvents(events, match) {
     if (!events || !events.length) return;
+    if (match?.stage && this.lastStageId !== match.stage.id) this.reset(match.stage);
     this.fx.ingestEvents(events, match);
   }
 
@@ -63,7 +174,16 @@ export class GameRenderer {
       this.reset(match.stage);
     }
 
-    const shake = options.shakeEnabled === false ? 0 : (match.screenShake || 0);
+    const flash = flashesAllowed(options);
+    this.fx.allowFlash = flash;
+    this.fx.match = match;
+    if (options.victoryMode) {
+      this._drawVictory(ctx, match, w, h, flash);
+      ctx.restore();
+      return;
+    }
+    this.victoryMatch = null;
+    const shake = !flash || options.shakeEnabled === false ? 0 : (match.screenShake || 0);
     // Like the 3D view, frame the batter and bag together until the launch clears the plate.
     const derbyBag = match.mode === MODE.HOMERUN ? match.fighters.find((f) =>
       f.def.id === 'sagging-bag' && f.state !== STATE.DEAD &&
@@ -76,7 +196,7 @@ export class GameRenderer {
       if ((f.state === STATE.TUMBLE || f.state === STATE.HITSTUN) && (match.frame % 2 === 0)) {
         const speed = Math.hypot((f.kbVx || 0) + (f.vx || 0), (f.kbVy || 0) + (f.vy || 0));
         if (speed > 7) {
-          this.fx.spawnTrail(f.x, f.y + (f.def.stats.height * 0.5), f.palette?.accent || '#ffffff', Math.min(18, 6 + speed * 0.4));
+          this.fx.spawnTrail(f.x, f.y + f.def.stats.height * (f.scale || 1) * .5, f.palette?.accent || '#ffffff', Math.min(18, 6 + speed * 0.4));
         }
       }
     }
@@ -108,16 +228,22 @@ export class GameRenderer {
     this.fx.drawFront(ctx);
     ctx.restore();
 
-    // 3. Screen-space warnings and off-screen fighter indicators
+    if (flash && options.shakeEnabled !== false && match.screenFlash > 0.01) {
+      const intensity = match.fighters.length >= 4 ? .023 : .035;
+      ctx.fillStyle = `rgba(255,245,225,${Math.min(.18, match.screenFlash * intensity)})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 3. Screen-space warnings, port tags and off-screen fighter indicators.
+    ctx.save();
+    this.camera.applyTransform(ctx, w, h);
+    for (const f of match.fighters) {
+      if (f.state !== STATE.DEAD && !fighterHidden(f, specialVisual(f))) this._drawTag(ctx, f, match.fighters.length);
+    }
+    ctx.restore();
     const warning = match.hazards?.find((hz) => hz.warningFrames > 0 && HAZARD_WARNINGS[hz.kind]);
     if (warning) this._drawHazardWarningBanner(ctx, warning, w, h);
     this._drawOffscreenIndicators(ctx, match, w, h, derbyBag);
-
-    // 4. Screen flash on heavy sweetspot/KO
-    if (options.shakeEnabled !== false && match.screenFlash > 0.01) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.45, match.screenFlash)})`;
-      ctx.fillRect(0, 0, w, h);
-    }
 
     ctx.restore();
   }
@@ -226,6 +352,72 @@ export class GameRenderer {
       ctx.moveTo(w * 0.15, 0); ctx.lineTo(w * 0.45, h); ctx.lineTo(w * 0.05, h); ctx.closePath();
       ctx.moveTo(w * 0.85, 0); ctx.lineTo(w * 0.95, h); ctx.lineTo(w * 0.55, h); ctx.closePath();
       ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  _drawVictory(ctx, match, w, h, motion) {
+    if (this.victoryMatch !== match) {
+      this.victoryMatch = match;
+      this.victoryStart = performance.now();
+    }
+    const draw = match.winnerPort == null && match.winningTeam == null;
+    const elapsed = motion ? (performance.now() - this.victoryStart) / 1000 : .84;
+    const fighters = victoryOrder(match);
+    const won = (f) => match.winningTeam == null ? f.port === match.winnerPort : f.team === match.winningTeam;
+    const unit = Math.min(w / (fighters.length > 3 ? 440 : 350), h / 420, 2.4);
+    const baseY = h * (w < h ? .48 : .55);
+    const back = ctx.createLinearGradient(0, 0, 0, h);
+    back.addColorStop(0, '#17112b'); back.addColorStop(.49, '#332354'); back.addColorStop(1, '#0c0b21');
+    ctx.fillStyle = back; ctx.fillRect(0, 0, w, h);
+    const halo = ctx.createRadialGradient(w/2, baseY - 89*unit, 8, w/2, baseY - 73*unit, 162*unit);
+    halo.addColorStop(0, draw ? '#78cbea47' : '#ffd18b48'); halo.addColorStop(1, '#fff6d100');
+    ctx.fillStyle = halo; ctx.fillRect(0, 0, w, h);
+    ctx.save();
+    ctx.translate(w/2, baseY);
+    ctx.scale(unit, unit);
+    ctx.fillStyle = '#d5bde8';
+    ctx.globalAlpha = .20;
+    ctx.beginPath(); ctx.moveTo(-23, -270); ctx.lineTo(23, -270); ctx.lineTo(123, 2); ctx.lineTo(-123, 2); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#16122a';
+    ctx.beginPath(); ctx.ellipse(0, 12, 204, 23, 0, 0, Math.PI * 2); ctx.fill();
+    const spread = fighters.length === 2 ? [-43, 47] : fighters.length === 4 ? [-45, 45, -130, 130] : [0, -89, 89];
+    const podium = fighters.map((f, i) => {
+      const first = !draw && won(f), x = fighters.length === 1 ? 0 : spread[i];
+      return { f, i, x, first, top: draw ? -22 : first ? -57 : -33 + Math.max(0, i - 1) * 8 };
+    });
+    for (const { x, i, top, first, f } of podium) {
+      const face = ctx.createLinearGradient(0, top, 0, 6);
+      face.addColorStop(0, first ? '#ad7435' : '#4b4471'); face.addColorStop(1, first ? '#51304b' : '#231d44');
+      ctx.fillStyle = face; ctx.strokeStyle = '#181329'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(x - 38, top, 76, 6 - top, 5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = first ? '#ffdc81' : '#a799ca'; ctx.fillRect(x - 35, top + 2, 70, 4);
+      ctx.fillStyle = PLAYER_COLORS[f.port % PLAYER_COLORS.length];
+      ctx.fillRect(x - 22, 0, 44, 3);
+      ctx.fillStyle = '#fff4e1'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = '900 17px system-ui';
+      const rank = first ? 1 : match.winningTeam != null ? 2 : i + 1;
+      ctx.fillText(draw ? '–' : String(rank), x, top * .45 + 4);
+    }
+    if (!draw) for (let i = 0; i < 36; i++) {
+      const t = ((i * .618 + elapsed * (.12 + (i % 3) * .025)) % 1);
+      const px = (i * 103 % 383) - 191 + Math.sin(i + t * 7) * 15;
+      ctx.save(); ctx.translate(px, -218 + t*204); ctx.rotate(i + t*9);
+      ctx.globalAlpha = .80 * Math.sin(t*Math.PI);
+      ctx.fillStyle = ['#ffd369', '#b8aaff', '#69caff', '#ff799b'][i % 4];
+      ctx.fillRect(-2, -3, 4, 6); ctx.restore();
+    }
+    for (const { f, x, top, first, i } of podium) {
+      const sc = (first ? 92 : 74) / f.def.stats.height;
+      const phase = elapsed * (first ? 6 : 8) + i;
+      const bounce = first ? Math.abs(Math.sin(phase)) * 9 : 0;
+      ctx.fillStyle = '#160e2460';
+      ctx.beginPath(); ctx.ellipse(x, top - 1, first ? 22 : 18, 4, 0, 0, Math.PI * 2); ctx.fill();
+      const actor = { ...f, state: STATE.IDLE, grounded: false, hitlag: 0, scale: sc, squashX: 1, squashY: 1,
+        facing: x < 0 ? 1 : -1, podiumPose: first ? 'cheer' : draw ? null : 'clap', podiumPhase: phase };
+      this._drawFighterBody(ctx, actor, f.def, f.def.stats, f.palette || f.def.palettes[0], f.def.rig || {},
+        x, top - bounce, { frame: elapsed * 60 });
     }
     ctx.restore();
   }
@@ -467,6 +659,7 @@ export class GameRenderer {
       ctx.save();
       ctx.translate(it.x, -it.y - 10);
       ctx.rotate(it.rot || 0);
+      if (drawItemIcon(ctx, it)) { ctx.restore(); continue; }
       const r = it.def?.radius || 18;
       ctx.fillStyle = it.def?.color || '#ffdf4d';
       ctx.strokeStyle = '#111'; ctx.lineWidth = 2.5;
@@ -656,7 +849,7 @@ export class GameRenderer {
     const py = -f.y; // feet position in canvas space (Y down)
 
     // Invincibility blink
-    if (f.invulnFrames > 0 && Math.floor(match.frame / 3) % 2 === 0) {
+    if (this.fx.allowFlash && f.invulnFrames > 0 && Math.floor(match.frame / 3) % 2 === 0) {
       ctx.save();
       ctx.globalAlpha = 0.55;
       this._drawFighterBody(ctx, f, def, stats, pal, rig, px, py, match);
@@ -667,17 +860,23 @@ export class GameRenderer {
 
     // Shield bubble
     if (f.state === STATE.SHIELD || f.state === STATE.SHIELD_STUN) {
-      const ratio = Math.max(0.2, (f.shieldHp || 0) / 60);
-      const sr = (stats.shieldRadius || 42) * (0.35 + 0.65 * ratio);
+      const scale = f.scale || 1, shield = f.shieldScale ?? 1;
+      const ratio = Math.max(0, Math.min(1, (f.shieldHp ?? MELEE.SHIELD_MAX) / MELEE.SHIELD_MAX));
+      const sr = (stats.shieldRadius || 42) * scale * shield * (0.35 + 0.65 * ratio);
       const pColor = PLAYER_COLORS[f.port % PLAYER_COLORS.length];
       ctx.save();
       ctx.beginPath();
-      ctx.arc(px, py - stats.height * 0.5, sr, 0, Math.PI * 2);
-      ctx.fillStyle = pColor + '44';
+      ctx.arc(px + (f.facing || 1) * 5, py - stats.height * scale * .48, sr, 0, Math.PI * 2);
+      ctx.fillStyle = pColor + (shield > 1 ? '24' : '44');
       ctx.fill();
-      ctx.lineWidth = 3;
+      ctx.lineWidth = shield > 1 ? 2 : 3;
       ctx.strokeStyle = pColor;
       ctx.stroke();
+      if (shield > 1) {
+        ctx.beginPath(); ctx.arc(px + (f.facing || 1) * 5, py - stats.height * scale * .48, sr - 2,
+          Math.PI * 1.08, Math.PI * 1.73);
+        ctx.strokeStyle = '#f2fbff9c'; ctx.lineCap = 'round'; ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -687,7 +886,7 @@ export class GameRenderer {
       for (let i = 0; i < 3; i++) {
         const a = match.frame * 0.14 + i * (Math.PI * 2 / 3);
         const sx = px + Math.cos(a) * 26;
-        const sy = py - stats.height - 16 + Math.sin(a) * 8;
+        const sy = py - stats.height * (f.scale || 1) - 16 + Math.sin(a) * 8;
         ctx.fillStyle = '#ffdf4d';
         ctx.beginPath();
         ctx.arc(sx, sy, 5, 0, Math.PI * 2);
@@ -706,10 +905,13 @@ export class GameRenderer {
       ctx.restore();
     }
 
-    // Player overhead tag (P1 / P2 / CPU) — plain text only!
+  }
+
+  _drawTag(ctx, f, count) {
     ctx.save();
+    const px = f.x;
     const tagColor = PLAYER_COLORS[f.port % PLAYER_COLORS.length];
-    const tagY = py - stats.height - 26;
+    const tagY = -f.y - f.def.stats.height * (f.scale || 1) - 26;
     ctx.fillStyle = tagColor;
     ctx.beginPath();
     ctx.moveTo(px - 7, tagY + 4);
@@ -721,7 +923,7 @@ export class GameRenderer {
     ctx.textAlign = 'center';
     ctx.strokeStyle = 'rgba(0,0,0,0.85)';
     ctx.lineWidth = 3;
-    const label = f.name || (f.isCpu ? 'CPU' : `P${f.port + 1}`);
+    const label = fighterTag(f, count);
     ctx.strokeText(label, px, tagY);
     ctx.fillStyle = '#ffffff';
     ctx.fillText(label, px, tagY);
@@ -732,19 +934,21 @@ export class GameRenderer {
     const h = stats.height;
     const w = stats.width;
     const t = match.frame * 0.16;
+    const scale = f.scale || 1;
 
     // Ground shadow
     if (f.grounded) {
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.34)';
       ctx.beginPath();
-      ctx.ellipse(px, py + 2, w * 0.55, 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(px, py + 2 * scale, w * .55 * scale, 6 * scale, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
 
     ctx.save();
     ctx.translate(px, py);
+    ctx.scale(scale, scale);
 
     // Squash/stretch + tumble rotation + crouch
     let sx = f.squashX || 1;
@@ -932,6 +1136,7 @@ export class GameRenderer {
       ctx.ellipse(18 + armSwing * 0.4, -h * 0.52, 9, 6, 0.2, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
       this._drawHatAndFace(ctx, pal, rig, 0, -h * 0.58, h * 0.44, outline, f);
+      if (f?.podiumPose) this._drawPodiumArms(ctx, f, pal, -h * .52, w * .70, outline);
       return;
     }
 
@@ -994,6 +1199,10 @@ export class GameRenderer {
     // Hat, face & signature Bizarro props
     this._drawHatAndFace(ctx, pal, rig, 0, headY, headR, outline, f);
 
+    if (f?.podiumPose) {
+      this._drawPodiumArms(ctx, f, pal, shoulderY + 8, bodyW, outline);
+      return;
+    }
     // Front Arm + Prop/Weapon
     ctx.save();
     ctx.translate(bodyW * 0.35, shoulderY + 8);
@@ -1005,6 +1214,21 @@ export class GameRenderer {
     ctx.fill(); ctx.stroke();
     this._drawProp(ctx, rig.prop, pal, activeSwing);
     ctx.restore();
+  }
+
+  _drawPodiumArms(ctx, f, pal, y, w, outline) {
+    const wave = Math.sin(f.podiumPhase), cheer = f.podiumPose === 'cheer';
+    const close = (1 + Math.cos(f.podiumPhase * 1.5)) * .5;
+    ctx.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      const x = side * w * .38;
+      const reach = cheer ? side * (w * .62 + 3.5 * wave * side) : 8 + side * (2 + 8 * close);
+      const end = cheer ? y - 20 - side * 4 * wave : y + 8 + close * 2;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + side*8, y + (cheer ? 5 : 14), reach, end);
+      ctx.lineWidth = 11; ctx.strokeStyle = outline; ctx.stroke();
+      ctx.lineWidth = 7; ctx.strokeStyle = pal.body; ctx.stroke();
+      ctx.beginPath(); ctx.arc(reach, end, 4.5, 0, Math.PI * 2); ctx.fillStyle = pal.skin; ctx.fill();
+    }
   }
 
   _drawHatAndFace(ctx, pal, rig, hx, hy, r, outline, f) {
@@ -1219,7 +1443,7 @@ export class GameRenderer {
   _drawOffscreenIndicators(ctx, match, w, h, derbyBag) {
     for (const f of match.fighters) {
       if (f.state === STATE.DEAD) continue;
-      const pt = this.camera.worldToScreen(f.x, f.y + f.def.stats.height * 0.5, w, h);
+      const pt = this.camera.worldToScreen(f.x, f.y + f.def.stats.height * (f.scale || 1) * .5, w, h);
       if (pt.sx >= 12 && pt.sx <= w - 12 && pt.sy >= 12 && pt.sy <= h - 12) continue;
       const cx = Math.max(30, Math.min(w - 30, pt.sx));
       const leftBatter = derbyBag && f !== derbyBag && pt.sx < 12;

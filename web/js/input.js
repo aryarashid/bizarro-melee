@@ -51,10 +51,12 @@ function usesSplitRightY(pad, raw) {
   }
   return false;
 }
-const PRO_KEYS = ['KeyF', 'AltLeft', 'KeyH', 'KeyN', 'KeyO', 'Numpad8', 'Numpad4', 'Numpad2', 'Numpad6'];
+const PRO_KEYS = ['KeyF', 'AltLeft', 'KeyH', 'KeyN', 'KeyO', 'Numpad8', 'Numpad4', 'Numpad2', 'Numpad6', 'Numpad7', 'Numpad9'];
 
 // Standard Xbox / PlayStation / X-Input Bluetooth layout (A/Cross=0 bottom, B/Circle=1 right)
 const PAD_STANDARD = { attack: [0], special: [1], jump: [2, 3], shield: [6, 7], grab: [4, 5], taunt: [8, 12], pause: [9] };
+// DualSense / DualShock raw HID layout (054c when mapping !== 'standard': Cross=1, Circle=2, Square=0, Triangle=3)
+const PAD_SONY_HID = { attack: [1], special: [2], jump: [0, 3], grab: [4, 5], shield: [6, 7], taunt: [8, 12], pause: [9] };
 // 8BitDo BLE / D-Input raw HID layout (e.g. Ultimate 2 Wireless 2dc8:6012 on macOS Chrome)
 const PAD_8BITDO_HID = { attack: [0], special: [1], jump: [3, 4, 2], grab: [6, 7], shield: [8, 9], taunt: [10, 12], pause: [11] };
 // Nintendo Switch Pro / Joy-Con / NSO Bluetooth layout (A=1 right, B=0 bottom, Y=2 left, X=3 top)
@@ -62,6 +64,12 @@ const PAD_NINTENDO = { attack: [1], special: [0], jump: [2, 3], shield: [6, 7], 
 const MAYFLASH = { attack: [1], special: [0], jump: [2, 3], grab: [7], shield: [4, 5], taunt: [12], pause: [9] };
 const WUP = { attack: [0], special: [1], jump: [2, 3], grab: [6], shield: [4, 5], taunt: [8], pause: [7] };
 const COMPACT_GC = { attack: [0], special: [1], jump: [2, 3], grab: [4], shield: [5, 6], taunt: [8], pause: [7] };
+
+const MENU_NAV_KEYS = new Set([
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD',
+  'Enter', 'Escape', 'Backspace',
+]);
 
 const P1 = {
   jump: ['KeyW', 'Space', 'KeyI'], attack: ['KeyJ', 'KeyZ'], special: ['KeyK', 'KeyX'],
@@ -189,6 +197,7 @@ function samplePad(pad, config) {
   const mayflash = raw && /mayflash|0079|1846/i.test(id) && pad.axes?.length >= 6;
   const wup = raw && /0337|wup-028/i.test(id) && pad.axes?.length === 6;
   const is8BitDoHid = !raw && profile !== 'nintendo' && pad.mapping !== 'standard' && HID_8BITDO.test(id);
+  const isSonyHid = !raw && profile !== 'nintendo' && pad.mapping !== 'standard' && SONY_HID.test(id);
 
   const value = (index) => {
     const b = pad.buttons?.[index];
@@ -209,9 +218,11 @@ function samplePad(pad, config) {
         ? COMPACT_GC
         : is8BitDoHid
           ? PAD_8BITDO_HID
-          : profile === 'nintendo'
-            ? PAD_NINTENDO
-            : PAD_STANDARD;
+          : isSonyHid
+            ? PAD_SONY_HID
+            : profile === 'nintendo'
+              ? PAD_NINTENDO
+              : PAD_STANDARD;
 
   // Null follows the hardware profile. Explicit bindings use the raw button indices shown by diagnostics.
   const binds = (key) => config.padBinds?.[key] ?? layout[key] ?? PAD_STANDARD[key];
@@ -220,11 +231,16 @@ function samplePad(pad, config) {
   const cXIdx = mayflash ? 5 : wup ? 3 : 2;
   const cYIdx = mayflash ? 2 : wup ? 4 : hidSplitRightY ? 5 : 3;
 
-  const analogAxes = (raw || is8BitDoHid) && pad.axes?.length >= 6;
+  const analogAxes = (raw || is8BitDoHid || isSonyHid) && pad.axes?.length >= 6;
   const rawTrigger = (left) => {
     if (!analogAxes) return 0;
     if (mayflash) return triggerAxis(left ? 3 : 4);
     if (wup) return triggerAxis(left ? 2 : 5);
+    if (isSonyHid) {
+      const idx = left ? 3 : 4;
+      if (idx !== cYIdx && hasObservedNegRest(pad, idx)) return triggerAxis(idx);
+      return 0;
+    }
     if (is8BitDoHid) {
       // Only decode -1..+1 analog trigger axes once observed resting near -1.0 (never treat dead 0.0 axes as half-held shield!).
       const idx7 = left ? 7 : 6;
@@ -273,9 +289,8 @@ function samplePad(pad, config) {
     pause: pauseBinds.some(pressed),
   };
 
-  const menuStartIndices = is8BitDoHid
-    ? [11, 9]
-    : (layout.pause || PAD_STANDARD.pause);
+  // Never include button 9 on 8BitDo raw HID: button 9 is Right Trigger (shield), not Start (button 11).
+  const menuStartIndices = layout.pause || PAD_STANDARD.pause;
   const menuButtons = {
     confirm: layout.attack.some(pressed),
     back: layout.special.some(pressed),
@@ -314,11 +329,30 @@ export class InputManager {
       rawButtons: new Set(),
     };
     this.menuHold = { up: 0, down: 0, left: 0, right: 0 };
+    this.menuMode = false;
+    this.kbMenuQueue = [];
     this.onPadChange = options.onPadChange || null;
     this.root = null;
     this.onKeyDown = (event) => {
       const { code, target } = event;
-      if ((!USED_KEYS.has(code) && !this.boundKeys.has(code)) || (event.altKey && code !== 'AltLeft' && !this.keys.has('AltLeft')) || event.ctrlKey || event.metaKey ||
+      if (event.ctrlKey || event.metaKey || target?.closest?.('input[type="text"], textarea, [contenteditable="true"]')) return;
+      if (this.menuMode) {
+        if (!MENU_NAV_KEYS.has(code)) return;
+        const onNativeControl = Boolean(target?.closest?.('button, a, select, input'));
+        if (code === 'Enter' && onNativeControl) return;
+        if (target?.tagName === 'SELECT' && (code === 'ArrowUp' || code === 'ArrowDown')) return;
+        if (target?.tagName === 'INPUT' && target.type === 'range' && (code === 'ArrowLeft' || code === 'ArrowRight')) return;
+        this.activeMode = 'keyboard';
+        if (code === 'ArrowUp' || code === 'KeyW') this.kbMenuQueue.push('up');
+        else if (code === 'ArrowDown' || code === 'KeyS') this.kbMenuQueue.push('down');
+        else if (code === 'ArrowLeft' || code === 'KeyA') this.kbMenuQueue.push('left');
+        else if (code === 'ArrowRight' || code === 'KeyD') this.kbMenuQueue.push('right');
+        else if (code === 'Enter' && !event.repeat) this.kbMenuQueue.push('confirm');
+        else if ((code === 'Escape' || code === 'Backspace') && !event.repeat) this.kbMenuQueue.push('back');
+        event.preventDefault();
+        return;
+      }
+      if ((!USED_KEYS.has(code) && !this.boundKeys.has(code)) || (event.altKey && code !== 'AltLeft' && !this.keys.has('AltLeft')) ||
           target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
       if ((code === 'Space' || code === 'Enter') && target?.closest?.('button, a')) return;
       this.activeMode = 'keyboard';
@@ -338,6 +372,21 @@ export class InputManager {
 
   getConfig() {
     return { ...this.config, keyBinds: copyBinds(this.config.keyBinds), padBinds: copyBinds(this.config.padBinds) };
+  }
+
+  setMenuMode(enabled) {
+    this.menuMode = Boolean(enabled);
+    if (!this.menuMode) this.kbMenuQueue.length = 0;
+  }
+
+  getDefaultPadBindings() {
+    const pads = readPads();
+    if (pads.length) {
+      return copyBinds(samplePad(pads[0], this.config).layout);
+    }
+    if (this.config.padProfile === 'nintendo') return copyBinds(PAD_NINTENDO);
+    if (this.config.padProfile === 'gamecube') return copyBinds(MAYFLASH);
+    return copyBinds(PAD_STANDARD);
   }
 
   resetConfig() {
@@ -520,18 +569,27 @@ export class InputManager {
   syncMenuButtons() {
     this.menuPrev = this._sampleMenuState(readPads());
     this.menuHold = { up: 0, down: 0, left: 0, right: 0 };
+    this.kbMenuQueue.length = 0;
   }
 
   pollMenu() {
     const pads = readPads();
     const out = {
       connected: pads.length > 0,
+      keyboardActive: false,
       padCount: pads.length,
       padName: pads[0]?.id ? String(pads[0].id).slice(0, 32) : '',
       up: false, down: false, left: false, right: false,
       confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
       rawPressed: [],
     };
+    if (this.kbMenuQueue.length) {
+      const queued = this.kbMenuQueue.splice(0, this.kbMenuQueue.length);
+      for (const act of queued) {
+        if (act in out) out[act] = true;
+      }
+      out.keyboardActive = true;
+    }
     if (!pads.length) {
       this.menuPrev = this._sampleMenuState([]);
       this.menuHold = { up: 0, down: 0, left: 0, right: 0 };
@@ -552,13 +610,13 @@ export class InputManager {
     }
 
     for (const key of ['confirm', 'back', 'alt', 'start', 'lb', 'rb']) {
-      out[key] = cur[key] && !this.menuPrev[key];
+      out[key] ||= cur[key] && !this.menuPrev[key];
     }
     for (const idx of cur.rawButtons) {
       if (!this.menuPrev.rawButtons.has(idx)) out.rawPressed.push(idx);
     }
 
-    if (out.up || out.down || out.left || out.right || out.confirm || out.back || out.alt || out.start || out.lb || out.rb || out.rawPressed.length) {
+    if (out.rawPressed.length || (pads.length && !out.keyboardActive && (out.up || out.down || out.left || out.right || out.confirm || out.back || out.alt || out.start || out.lb || out.rb))) {
       this.activeMode = 'gamepad';
     }
     this.menuPrev = cur;
@@ -599,6 +657,10 @@ export class InputManager {
           const cKey = (code) => Number(down(code) || this.taps.has(code));
           frame.cStickX = cKey('Numpad6') - cKey('Numpad4');
           frame.cStickY = cKey('Numpad8') - cKey('Numpad2');
+        } else if (port === 1 && localMultiplayer) {
+          const cKey = (code) => Number(down(code) || this.taps.has(code));
+          frame.cStickX = cKey('Numpad9') - cKey('Numpad7');
+          frame.cStickY = cKey('Numpad8') - cKey('Numpad6');
         }
         if (tapJump) {
           const upHeld = down(u) || (port === 0 && !localMultiplayer && down('ArrowUp'));

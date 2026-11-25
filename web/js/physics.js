@@ -252,7 +252,7 @@ function makeState(match, player, stocks) {
     f.bossPhase = 1;
     f.bossAttackCount = 0;
     f.bossTell = null;
-    f.bossMaxHp = 300;
+    f.bossMaxHp = 380;
     f.bossHp = f.bossMaxHp;
     f.y += 125;
     f.grounded = false;
@@ -338,7 +338,19 @@ export function createMatch(config = {}) {
       match.fighters.push(makeIntern(match, port, config.players?.find((p) => p.port === port)));
     }
   }
+  if (mode === MODE.TRAINING) {
+    match.trainingConfig = { ...config, mode, giantPorts: [], startPercent: 0, introFrames: 0,
+      players: [...unique.values()].map((p) => ({ ...p })) };
+  }
   return match;
+}
+
+export function resetTrainingMatch(match) {
+  if (match.mode !== MODE.TRAINING) return match;
+  const fresh = createMatch({ ...match.trainingConfig, hitboxesVisible: match.hitboxesVisible,
+    timeScale: match.timeScale, trainingCpuMode: match.trainingCpuMode });
+  if (match.status === 'paused') fresh.status = 'paused';
+  return Object.assign(match, fresh);
 }
 
 function makeIntern(match, port, template, respawning = false) {
@@ -513,10 +525,18 @@ function startMove(match, f, key, input = EMPTY, data = moveData(f, key)) {
   }
   if (!f.grounded && key === M.SIDE_B && data.kind === 'dashBurst') f.sideBUsed = true;
   if (data.bossTell) {
-    const firstInPair = f.bossAttackCount++ % 2 === 0;
-    if (f.bossPhase === 2) data = { ...data, endlag: firstInPair ? 8 : 48 };
+    f.bossAttackCount++;
+    f.bossLastAttack = data.bossTell;
+    f.bossPlan = null;
+    if (f.bossPhase === 2) data = { ...data, startup: Math.round(data.startup * 0.8), endlag: Math.round(data.endlag * 0.8) };
     const target = match.fighters.filter((v) => rivals(f, v) && v.state !== S.RESPAWN)
       .sort((a, b) => distance(f, a) - distance(f, b))[0];
+    const deck = match.surfaces[0];
+    const targetX = target?.x ?? f.x;
+    f.bossTargetX = data.bossTell === 'gun' ? targetX : clamp(targetX, deck.x + 20, deck.x + deck.w - 20);
+    f.bossTargetY = getSurfaceY(deck, f.bossTargetX);
+    if (target) faceInput(f, target.x - f.x);
+    f.bossSweepEnd = f.facing > 0 ? deck.x + deck.w - 22 : deck.x + 22;
     f.bossAimY = target ? target.y + target.def.stats.height * target.scale * 0.5 - (data.offsetY ?? 38) : f.y;
   }
   f.bReversed = false;
@@ -972,7 +992,13 @@ function tickSpecial(match, f, m, input, frame) {
 }
 
 function activateSpecial(match, f, m) {
-  if (m.kind === 'projectile' || m.kind === 'chargeShot') {
+  if (m.bossTell === 'gun') {
+    const dx = Math.max(1, (f.bossTargetX - f.x) * f.facing - Math.abs(m.offsetX));
+    const angle = clamp(Math.atan2(f.bossAimY - f.y, dx) / RAD, -70, 70);
+    for (const offset of f.bossPhase === 2 ? [-13, 0, 13] : [0]) {
+      spawnProjectile(match, f, { ...m, projAngle: angle + offset });
+    }
+  } else if (m.kind === 'projectile' || m.kind === 'chargeShot') {
     spawnProjectile(match, f, m);
     if (m.storableCharge) f.chargeShotLevel = 0;
   }
@@ -1079,7 +1105,13 @@ function tickAttack(match, f, input) {
     return;
   }
   if (m.kind === 'chargePunch' && f.charging) {
-    if (input.special || !f.chargeFrames) f.chargeFrames++;
+    if (!input.special && f.chargeFrames <= 6) {
+      f.charging = false;
+      f.chargeFrames = f.chargeShotLevel = 0;
+      f.moveFrame = m.startup - 3;
+      return;
+    }
+    if (input.special) f.chargeFrames++;
     f.chargeShotLevel = Math.min(1, f.chargeFrames / 60);
     showCharge(match, f, f.chargeShotLevel, f.facing < 0 ? Math.PI : 0);
     if (input.special && f.chargeFrames < 60) return;
@@ -1440,6 +1472,8 @@ function land(match, f, surface, input, velocity) {
   if (prior === S.HITSTUN) return;
   if (prior === S.AIRDODGE) {
     f.landingLag = 10;
+    const cap = MELEE.WAVEDASH_LANDING_SPEED * Math.sqrt(80 / f.def.stats.weight);
+    f.vx = clamp(f.vx, -cap, cap);
     const dir = Math.sign(f.vx);
     if (dir) {
       f.wavedashCount++;
@@ -1451,7 +1485,7 @@ function land(match, f, surface, input, velocity) {
       }
       if (f.shineJump) event(match, 'tech', f, { tech: 'WAVESHINE' });
     }
-  } else if (activeAerial) {
+  } else if (activeAerial && !f.moveData.bossTell) {
     const m = f.moveData;
     const lag = m.landingLag ?? 12;
     const autoCancel = f.moveFrame < Math.max(2, m.startup - 1) ||
@@ -1866,11 +1900,26 @@ function specialMotion(f) {
   const m = f.moveData;
   if (f.state !== S.ATTACK) return false;
   if (m?.bossTell) {
+    if (m.bossTell === 'sweep' && activeMove(f)) {
+      f.vx = f.facing * (f.bossPhase === 2 ? 23 : 19);
+      if ((f.x + f.vx - f.bossSweepEnd) * f.facing > 0) f.vx = f.bossSweepEnd - f.x;
+      f.vy = 0;
+      return true;
+    }
+    if (m.bossTell === 'drill' && activeMove(f)) {
+      f.vx = f.grounded ? 0 : f.facing * 11;
+      f.vy = f.grounded ? 0 : -16;
+      return true;
+    }
     if (f.moveFrame < m.startup) {
+      if (m.bossTell === 'slam' || m.bossTell === 'drill') {
+        leaveFloor(f);
+        f.vx = m.bossTell === 'slam' ? clamp((f.bossTargetX - f.x) / 5, -10, 10) : 0;
+        f.vy = clamp((f.bossTargetY + 115 - f.y) / 8, -4, 6);
+        return true;
+      }
       f.vx = approach(f.vx, 0, 1.5);
-      if (m.bossTell === 'slam' || m.bossTell === 'gun' && f.bossAimY > f.y + 1) leaveFloor(f);
-      f.vy = m.bossTell === 'slam' ? 3.4 : m.bossTell === 'gun' ? clamp(f.bossAimY - f.y, -5, 5) : 0;
-      if (f.grounded) f.vy = 0;
+      f.vy = 0;
       return true;
     }
     if (m.bossTell === 'gun' && activeMove(f)) {
@@ -1916,8 +1965,7 @@ function integrate(match, f, input, priorTerrain) {
     }
   } else if (f.grounded) {
     if (!GROUND_MOVEMENT.has(f.state) && !DODGES.has(f.state) && !f.moveData?.hammer) {
-      const factor = f.state === S.LANDING ? MELEE.WAVEDASH_FRICTION_MULT : 1;
-      f.vx = approach(f.vx, 0, traction * factor * (kind === 'dashBurst' && activeMove(f) ? 0.45 : 1));
+      f.vx = approach(f.vx, 0, traction * (kind === 'dashBurst' && activeMove(f) ? 0.45 : 1));
     }
   } else {
     const bursting = kind === 'dashBurst' && activeMove(f);
@@ -2304,6 +2352,12 @@ function strike(match, a, v, m, info) {
   const baseDamage = damage / charge;
   let kb = m.noFlinch ? 0 : computeMeleeKnockback(Math.min(999, priorPercent + baseDamage), baseDamage,
     v.def.stats.weight * (v.permanentGiant ? 1.48 : 1), m.bkb, m.kbg, m.setKb, charge);
+  // A fresh stock can contest center stage after an uncharged forward smash.
+  if (key === M.FSMASH && priorPercent < 30) {
+    const openingForce = (65 + priorPercent * 0.30) * charge;
+    const taper = Math.min(1, (30 - priorPercent) / 10);
+    kb -= Math.max(0, kb - openingForce) * 0.94 * taper;
+  }
   if (m.hitstunOnly) kb = Math.min(kb, 17);
   const crouchFactor = v.grounded && v.state === S.CROUCH ? MELEE.CROUCH_CANCEL_MULT : 1;
   kb *= crouchFactor;
@@ -2426,6 +2480,17 @@ function moveHitboxes(f) {
   for (const region of m.hitboxes ?? [EMPTY]) {
     if (!burn && (frame < (region.from ?? 0) || frame > (region.through ?? m.active - 1))) continue;
     let data = region === EMPTY ? contact : { ...contact, ...region };
+    if (pulse && region !== EMPTY) {
+      // Regions scale the current pulse, including the finisher, independently.
+      data.damage = contact.damage * ((region.damage ?? m.damage) / m.damage);
+      if (!final) {
+        data.hitstunOnly = true;
+        data.bkb = contact.bkb;
+        data.kbg = contact.kbg;
+        data.meteor = false;
+        data.angle = region.sweetspot ? 90 : 84;
+      }
+    }
     if (m.kind === 'chargePunch') {
       const power = f.chargeFrames / 60;
       data = { ...data, damage: data.damage * (0.40 + 0.85 * power), bkb: data.bkb * (0.55 + 0.55 * power) };
@@ -2532,7 +2597,15 @@ function projectileSurvivesContact(match, p, old, a) {
   let alive = true;
   let reflectedAway = false;
   for (const f of match.fighters) {
-    if (!rivals(a, f) || !activeMove(f) || !['reflector', 'cape'].includes(f.moveData.kind)) continue;
+    if (!rivals(a, f) || f.state !== S.ATTACK || !activeMove(f)) continue;
+    if (f.moveData?.reflects) {
+      for (const box of f.activeHitboxes) {
+        const contact = circleContact(old, p, box);
+        if (contact) return reflectProjectile(match, p, f, contact);
+      }
+      continue;
+    }
+    if (!['reflector', 'cape'].includes(f.moveData.kind)) continue;
     const reflector = { hurtbox: { x: f.x - 5, y: f.y + 14, w: 10, h: f.def.stats.height * 0.57 } };
     const contact = projectileContact({ ...p, r: p.r + f.moveData.radius * 0.68 }, old, reflector);
     if (contact) {
@@ -3418,7 +3491,7 @@ function updateDerby(match, priorPositions) {
     // still high above the yard after an unusually strong launch.
     const gaining = bag.kbVx + bag.vx > 0.8 || bag.hitlag > 0;
     if ((!inbound && (!d.launched || !gaining)) || bag.x >= match.stage.blastzones.right ||
-        match.derbyFlightFrames >= 420) finish(match, player);
+        match.derbyFlightFrames >= 420) finish(match, d.maxDistanceFt > 0 ? player : null);
   }
 }
 
@@ -3571,8 +3644,8 @@ function endConditions(match) {
       knockout(match, f, dir);
       knockedOut.push(f);
       if (match.mode === MODE.MULTIMAN && f.port !== 0) {
-        match.multimanKos++;
-        match.multimanRemaining--;
+        match.multimanKos = player.kos;
+        match.multimanRemaining = Math.max(0, INTERN_COUNT - player.kos);
       }
     }
   }
