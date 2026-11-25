@@ -690,10 +690,10 @@ export const STAGES = [
     ],
   },
 
-  // 27. Flat Zone — Authentic Multi-Tier LCD Game & Watch Cabinet with Asymmetric Scaffolding!
+  // 27. Flat-Screen Calculator — Multi-Tier Retro LCD Cabinet with Asymmetric Scaffolding
   {
     id: 'flat-screen-calc', name: 'Flat-Screen Calculator', parodyOf: 'Flat Zone', category: 'tourney',
-    tagline: 'Retro monochrome LCD cabinet with asymmetric Game & Watch scaffolding & crisp sightlines.',
+    tagline: 'Retro monochrome LCD cabinet with asymmetric handheld scaffolding & crisp sightlines.',
     theme: 'lcd', props: [],
     palette: { skyTop: '#7f8c72', skyMid: '#98a688', skyBottom: '#aebc9d', accent: '#1e241b', deckTop: '#262e22', deckBody: '#181e15', deckTrim: '#404d3a', platColor: '#2c3528' },
     blastzones: { left: -1080, right: 1080, top: 840, bottom: -560 },

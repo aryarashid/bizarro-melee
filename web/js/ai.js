@@ -8,8 +8,8 @@ const AIR_RECOVERY = new Set(['recovery', 'teleport', 'projectile']);
 const HURT = new Set([S.HITSTUN, S.TUMBLE, S.KNOCKDOWN, S.SHIELD_BREAK]);
 const BLOCKED = new Set([S.ROLL_F, S.ROLL_B, S.SPOTDODGE, S.TECH, S.FREEFALL, S.AIRDODGE]);
 const GROUND_APPROACH = new Set([S.IDLE, S.WALK, S.DASH, S.RUN, S.CROUCH, S.TURN]);
-const THINK_FRAMES = [0, 24, 19, 14, 10, 7, 5, 3, 2, 1];
-const PAUSE_CHANCE = [0, 0.52, 0.38, 0.27, 0.18, 0.12, 0.08, 0.05, 0.025, 0];
+const THINK_FRAMES = [0, 24, 19, 14, 11, 9, 6, 4, 2, 1];
+const PAUSE_CHANCE = [0, 0.52, 0.38, 0.27, 0.18, 0.14, 0.08, 0.045, 0.015, 0];
 const DIRECT_SIDE = new Set(['wonky-kong', 'flurby', 'shriek']);
 const DESIRABLE = new Set(['plunger_bat', 'glow_saber', 'critter_capsule', 'mallet_chaos']);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -242,7 +242,7 @@ function escapeTempleCave(input, match, f, target) {
   const island = match.surfaces.filter((s) => s.y < terrace.y - terrace.h)
     .reduce((a, b) => !a || a.x + a.w < b.x + b.w ? b : a, null);
   if (!island || f.y < island.y - 35) return false;
-  const climbing = f.x >= island.x + island.w - 54;
+  const climbing = f.x >= island.x + island.w - 42;
   if ((f.grounded || !climbing) && f.y >= terrace.y - terrace.h) return false;
   if (!climbing && !match.surfaces.some((s) => s.y < terrace.y - terrace.h && f.x >= s.x)) return false;
   const cave = match.surfaces.find((s) => s.y < terrace.y - terrace.h && s.x < island.x && s.x + s.w < island.x && s.w > island.w);
@@ -253,16 +253,30 @@ function escapeTempleCave(input, match, f, target) {
   }
   const floor = match.surfaces.find((s) => s.id === f.onPlatformId);
   const gap = floor && floor.x + floor.w - f.x <= 58 && floor.x + floor.w < island.x;
-  const outside = edge + 12;
-  input.moveX = f.x < outside ? 1 : clamp((outside - f.x) / 20, -0.6, 0);
+  const halfW = (f.def.stats.width * (f.scale || 1)) * 0.5;
+  const clearX = edge + halfW + 4;
+  const underOverhang = f.x < clearX && f.y < terrace.y - terrace.h + 12;
+  const belowLedge = f.y < top - 24;
+  const aimX = (underOverhang || belowLedge) ? clearX + 8 : edge - 18;
+  input.moveX = Math.abs(aimX - f.x) < 8 ? 0 : sign(aimX - f.x);
   if (f.state === S.JUMPSQUAT) input.jump = true;
-  else if (f.grounded && (gap || climbing)) tap(input, 'jump', input.moveX);
+  else if (f.grounded && (gap || climbing)) tap(input, 'jump', 1);
   else if (!climbing && !f.grounded && cave && f.x >= cave.x + cave.w && f.x < island.x &&
       f.vy < 0 && f.y < cave.y + 35 && f.jumpsUsed < f.def.stats.maxJumps) {
     tap(input, 'jump', 1);
-  } else if (climbing && !f.grounded && f.vy <= 1 && f.state === S.AIRBORNE) {
-    if (f.jumpsUsed < f.def.stats.maxJumps) tap(input, 'jump', input.moveX);
-    else tap(input, 'special', f.x < edge ? 0.45 : 0, 1);
+  } else if (climbing && !f.grounded && f.state === S.AIRBORNE) {
+    // Wait until past the island tip and clear of the overhang (or dipping below island level) before spending double jump / Up-B.
+    const pastIsland = f.x > island.x + island.w + 4;
+    const safeToRise = !underOverhang || (pastIsland && f.y < island.y + 5);
+    if (safeToRise && f.vy <= 1.5) {
+      if (f.jumpsUsed < f.def.stats.maxJumps) tap(input, 'jump', underOverhang ? 1 : input.moveX);
+      else if (!f.upBUsed && (!underOverhang || f.y < island.y - 35)) {
+        tap(input, 'special', underOverhang ? 0.65 : (belowLedge ? clamp((clearX - f.x) / 45, -0.3, 0.55) : -0.45), 1);
+      }
+    }
+  } else if (climbing && f.state === S.ATTACK && f.def.canFloat) {
+    input.moveX = (underOverhang || belowLedge) ? clamp((clearX + 6 - f.x) / 30, -0.4, 1) : -0.8;
+    input.moveY = 0;
   }
   return true;
 }
@@ -710,7 +724,9 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     if (f.charging) input.special = d > 150 && !danger(match, f, level);
     if (f.floating) input.jump = level >= 5 && dy > -55;
     if (level >= 6 && f.moveData?.jumpCancel && (f.moveRecorded || f.moveFrame >= 3)) {
-      f.cpuWavedash = level >= 7 && f.grounded && f.x + dir * 60 > deck.x && f.x + dir * 60 < deck.x + deck.w;
+      // Only wavedash out of shine when safely spaced; at point-blank, jump straight into aerial follow-up!
+      const canWaveshine = level >= 7 && f.grounded && d > 44 && f.x + dir * 75 > deck.x && f.x + dir * 75 < deck.x + deck.w;
+      f.cpuWavedash = canWaveshine && (level === 9 ? phase % 3 !== 0 : phase % 2 === 0);
       return tap(input, 'jump', dir * 0.72);
     }
     if (level >= 7 && f.didShortHop && f.didAerial && f.vy < -0.1 && !f.fastFalling) input.moveY = -1;
@@ -763,6 +779,7 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
   }
   if (threat && f.grounded && f.shieldHp > 14 && (level >= 7 || phase % 5 < level - 2)) {
     const roomBehind = f.x - dir * 85 > deck.x && f.x - dir * 85 < deck.x + deck.w;
+    if (level >= 8 && threat.eta <= MELEE.POWERSHIELD_WINDOW) return tap(input, 'shield');
     if (level !== 9 && level >= 7 && !threat.projectile && roomBehind && d > stats.grabRange * 0.8 &&
         (threat.eta > MELEE.POWERSHIELD_WINDOW || phase % 3 === 0)) {
       input.lightShield = true;
@@ -773,10 +790,10 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     const reflector = [M.DOWN_B, M.NEUTRAL_B, M.SIDE_B].find((key) =>
       ['reflector', 'cape'].includes(f.def.moves[key]?.kind));
     const counter = [M.DOWN_B, M.NEUTRAL_B].find((key) => f.def.moves[key]?.kind === 'counter');
-    if (level >= 7 && threat.projectile && reflector && phase % 3 === 0) return tap(input, 'special',
+    if (level >= 7 && threat.projectile && reflector && (level === 9 || phase % 2 === 0)) return tap(input, 'special',
       reflector === M.SIDE_B ? sign(threat.x - f.x) : 0, reflector === M.DOWN_B ? -1 : 0);
     if (level >= 8 && !threat.projectile && counter && d < 90 && phase % 3 === 0) return tap(input, 'special', 0, counter === M.DOWN_B ? -1 : 0);
-    if (level < 7) return tap(input, 'shield');
+    if (level < 7 || (level >= 8 && threat.eta <= 5)) return tap(input, 'shield');
     // Wait for the next tick rather than starting a committed attack or shielding too early.
     return input;
   }
@@ -868,29 +885,29 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     return input;
   }
   if ((d < attackRange || d < attackRange + 42 && predicted < attackRange) && dy > -48 && dy < 38) {
-    if (level >= 8 && target.state === S.SHIELD && d < stats.grabRange) return tap(input, 'grab', dir * 0.4);
+    if (level >= 8 && (target.state === S.SHIELD || target.state === S.SHIELD_STUN) && d < stats.grabRange + 16) {
+      return tap(input, 'grab', dir * 0.4);
+    }
     if (level >= 7 && f.state === S.DASH && d < stats.grabRange + 22 && target.grounded &&
-        (target.state === S.SHIELD || phase % 4 === 0)) return tap(input, 'jump', dir * 0.7);
-    if (level === 9 && target.percent >= 30 && target.grounded && target.invulnFrames <= 0 &&
-        predicted < attackRange && target.state !== S.SHIELD_STUN && !BLOCKED.has(target.state)) {
+        (target.state === S.SHIELD || (level >= 8 && phase % 5 === 0))) return tap(input, 'jump', dir * 0.7);
+    const hittable = target.invulnFrames <= 0 && !BLOCKED.has(target.state);
+    const committed = target.state === S.LANDING || target.hitstun > 4 ||
+      target.state === S.ATTACK && target.moveFrame >= target.moveData.startup + target.moveData.active;
+    const edgeDistance = dir > 0 ? deck.x + deck.w - target.x : target.x - deck.x;
+    if (level >= 8 && hittable && target.state !== S.SHIELD && target.state !== S.SHIELD_STUN &&
+        predicted < attackRange && d < attackRange && dy < 30 &&
+        (committed || (level === 9 && (target.percent >= 65 || edgeDistance < 200 && target.percent >= 50)) ||
+         (level === 8 && target.percent >= 78))) {
       input.cStickX = dir;
       return input;
     }
-    if (level >= 7 && f.def.moves[M.DOWN_B].jumpCancel && d < 48 && Math.abs(dy) < 36 &&
-        (target.hitstun > 0 || phase % 5 < 3)) return tap(input, 'special', 0, -1);
+    if (level >= 7 && f.def.moves[M.DOWN_B].jumpCancel && d < 46 && Math.abs(dy) < 34 &&
+        target.state !== S.SHIELD && (target.hitstun > 0 || (level === 9 ? phase % 4 < 2 : phase % 6 === 0))) {
+      return tap(input, 'special', 0, -1);
+    }
     if ((target.state === S.SHIELD || target.state === S.SHIELD_STUN || phase % 11 === 0) &&
         level >= 3 && d < stats.grabRange + 18) return tap(input, 'grab', dir * 0.4);
     if (f.def.moves[M.DOWN_B].kind === 'rest' && level >= 7 && d < 30 && phase % 3 === 0) return tap(input, 'special', 0, -1);
-    // Confirm a punish while the opponent is committed, or when a clean hit sends them off the deck.
-    const hittable = target.invulnFrames <= 0 && !BLOCKED.has(target.state);
-    const committed = target.state === S.LANDING || target.hitstun > 5 ||
-      target.state === S.ATTACK && target.moveFrame >= target.moveData.startup + target.moveData.active;
-    const edgeDistance = dir > 0 ? deck.x + deck.w - target.x : target.x - deck.x;
-    if (level >= 8 && hittable && (committed || level === 9 && edgeDistance < 220) &&
-        predicted < attackRange && d < attackRange && dy < 30) {
-      input.cStickX = dir;
-      return input;
-    }
     if (target.percent >= 85 || level >= 5 && phase % 7 <= 1) {
       if (match.mode === MODE.HOMERUN && target.percent > 65 || dy <= 22) input.cStickX = dir;
       else input.cStickY = 1;
@@ -898,11 +915,11 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
       return input;
     }
     if (target.hitstun > 0 && dy > 14) return tap(input, 'attack', 0, 0.61);
-    return tap(input, 'attack', d < 42 && f.facing === dir && phase % 5 < 2 ? 0 : dir * 0.58);
+    return tap(input, 'attack', d < 44 && f.facing === dir && (level >= 8 || phase % 5 < 2) ? 0 : dir * 0.58);
   }
-  if (level >= 8 && d > 140 && d < 245 && Math.abs(dy) < 40 &&
-      f.x + dir * 220 > deck.x && f.x + dir * 220 < deck.x + deck.w &&
-      phase % 13 < (level === 9 ? 8 : 3)) {
+  if (level >= 8 && d > 175 && d < 260 && Math.abs(dy) < 40 && target.state !== S.ATTACK &&
+      f.x + dir * 210 > deck.x && f.x + dir * 210 < deck.x + deck.w &&
+      phase % 29 < (level === 9 ? 5 : 2)) {
     f.cpuWavedash = true;
     return tap(input, 'jump', dir);
   }

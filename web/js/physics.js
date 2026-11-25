@@ -2352,10 +2352,11 @@ function strike(match, a, v, m, info) {
   const baseDamage = damage / charge;
   let kb = m.noFlinch ? 0 : computeMeleeKnockback(Math.min(999, priorPercent + baseDamage), baseDamage,
     v.def.stats.weight * (v.permanentGiant ? 1.48 : 1), m.bkb, m.kbg, m.setKb, charge);
-  // A fresh stock can contest center stage after an uncharged forward smash.
-  if (key === M.FSMASH && priorPercent < 30) {
-    const openingForce = (65 + priorPercent * 0.30) * charge;
-    const taper = Math.min(1, (30 - priorPercent) / 10);
+  // A fresh stock can contest center stage after an uncharged forward smash, tapering smoothly to full power by 32%.
+  if (key === M.FSMASH && priorPercent < 32) {
+    const openingForce = (65 + priorPercent * 0.35) * charge;
+    const t = Math.max(0, Math.min(1, (32 - priorPercent) / 32));
+    const taper = t * t * (3 - 2 * t);
     kb -= Math.max(0, kb - openingForce) * 0.94 * taper;
   }
   if (m.hitstunOnly) kb = Math.min(kb, 17);

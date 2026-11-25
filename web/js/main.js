@@ -101,6 +101,10 @@ const app = {
   hudRefs: [],
   onlineSession: null,
   onlineGuestPick: null,
+  onlineMatchActive: false,
+  onlineReconnecting: false,
+  onlineReconnectFrames: 0,
+  onlineMenuOpen: false,
   seenPhysicalKey: false,
   padFocusEl: null,
   lastTickMs: 0,
@@ -681,6 +685,10 @@ function launchConfiguredMatch(onlineCfg = null) {
   }
 
   app.suddenDeathBannerFrames = 0;
+  app.onlineMatchActive = Boolean(app.selectedMode === MODE.ONLINE && onlineCfg && app.onlineSession?.getStats().active);
+  app.onlineMenuOpen = false;
+  app.onlineReconnecting = false;
+  app.onlineReconnectFrames = 0;
   app.match = createMatch({
     mode: app.selectedMode,
     stageId,
@@ -719,7 +727,7 @@ function buildMatchHud(match) {
     [MODE.TARGETS]: 'BREAK THE TARGETS • SMASH ALL 10!',
     [MODE.MULTIMAN]: 'MULTI-MAN BIZARRO BRAWL • 25 INTERNS',
     [MODE.TRAINING]: `TRAINING LAB • ${match.stage.name}`,
-    [MODE.ONLINE]: `ONLINE LOCKSTEP (3F) • ${match.stage.name}`,
+    [MODE.ONLINE]: `ONLINE LOCKSTEP (${app.onlineSession?.getStats().delayFrames || 3}F) • ${match.stage.name}`,
   }[match.mode] || match.stage.name;
   $('hud-mode-info').textContent = modeLabel;
 
@@ -1015,19 +1023,29 @@ function updateMatchHud(match) {
   }
 }
 
-function openResults(match) {
-  const p1 = match.fighters[0];
-  const isDraw = match.winnerPort == null && !match.winningTeam;
-  const winner = isDraw ? null : (match.fighters.find((f) => f.port === match.winnerPort) || p1);
+function openResults(match, abortReason = null) {
+  const localPort = (match.mode === MODE.ONLINE && app.onlineSession)
+    ? app.onlineSession.getStats().localPort
+    : 0;
+  const me = match.fighters.find((f) => f.port === localPort) || match.fighters[0];
+  const isAborted = Boolean(abortReason);
+  const isDraw = isAborted || (match.winnerPort == null && !match.winningTeam);
+  const winner = isDraw ? null : (match.fighters.find((f) => f.port === match.winnerPort) || me);
 
-  let kicker = isDraw ? 'NO CONTEST' : 'MATCH COMPLETE';
-  let title = isDraw
-    ? 'DRAW!'
-    : (match.winningTeam ? `${match.winningTeam.toUpperCase()} TEAM WINS!` : `${winner.def.name.toUpperCase()} WINS!`);
-  let sub = isDraw ? `Simultaneous KO on ${match.stage.name}!` : `Stage: ${match.stage.name}`;
-  let won = isDraw ? false : (match.winningTeam ? (p1.team === match.winningTeam) : (match.winnerPort === 0));
+  let kicker = isAborted ? 'ONLINE MATCH ENDED' : (isDraw ? 'NO CONTEST' : 'MATCH COMPLETE');
+  let title = isAborted
+    ? abortReason
+    : isDraw
+      ? 'DRAW!'
+      : (match.winningTeam ? `${match.winningTeam.toUpperCase()} TEAM WINS!` : `${winner.def.name.toUpperCase()} WINS!`);
+  let sub = isAborted
+    ? 'No contest recorded. Return to the Online Lobby to reconnect.'
+    : (isDraw ? `Simultaneous KO on ${match.stage.name}!` : `Stage: ${match.stage.name}`);
+  let won = isDraw ? false : (match.winningTeam ? (me.team === match.winningTeam) : (match.winnerPort === localPort));
   if (match.mode === MODE.HOMERUN) won = Math.round(match.homerun?.maxDistanceFt || 0) > 0;
   sound.setMusic(won ? 'victory' : (isDraw ? 'draw' : 'defeat'));
+  app.onlineMatchActive = false;
+  app.onlineMenuOpen = false;
   let classicCleared = false;
   let nextBtnVisible = false;
   let nextBtnLabel = 'Next Classic Stage';
@@ -1064,14 +1082,14 @@ function openResults(match) {
       app.records.targetsBestMs = targetsTimeMs;
     }
   } else if (match.mode === MODE.MULTIMAN) {
-    multimanKos = match.multimanKos || p1.kos || 0;
+    multimanKos = match.multimanKos || me.kos || 0;
     kicker = won ? '25-INTERN BRAWL CLEARED!' : 'INTERN OVERLOAD';
     title = `${multimanKos} INTERNS KO'D!`;
     sub = won ? 'Human Resources has been notified.' : 'You were swarmed by low-poly unpaid interns.';
     if (multimanKos > app.records.multimanBest) app.records.multimanBest = multimanKos;
   } else if (match.mode === MODE.CLASSIC) {
     if (won) {
-      const roundGain = 10000 + p1.stocks * 2500 + p1.kos * 1500;
+      const roundGain = 10000 + me.stocks * 2500 + me.kos * 1500;
       app.classicScore = app.classicRoundBaseScore + roundGain;
       const totalRounds = app.classicGauntlet?.length || 5;
       if (app.classicStep < totalRounds - 1) {
@@ -1136,31 +1154,43 @@ function openResults(match) {
     cards.appendChild(card);
   }
 
-  if (won) app.records.matchesWon++;
-  app.records.kosScored += (p1.kos || 0);
-  app.records.wavedashes += (p1.wavedashCount || 0);
-  Promise.resolve(dpad.saveData(app.records, 'records')).then((res) => {
-    if (match.mode === EVENT_MODE() && won && app.screen === 'results') {
-      const durable = res && typeof res === 'object' ? Boolean(res.durable) : Boolean(res);
-      $('results-sub').textContent = durable
-        ? 'Bizarro Event complete! Progress saved.'
-        : 'Bizarro Event complete! Cleared for this session (storage restricted).';
-    }
-  }).catch(() => {});
-  if ($('btn-results-css')) {
-    $('btn-results-css').textContent = match.mode === EVENT_MODE() ? 'Event List' : 'Character Select';
+  if (!isAborted) {
+    if (won) app.records.matchesWon++;
+    app.records.kosScored += (me.kos || 0);
+    app.records.wavedashes += (me.wavedashCount || 0);
+    Promise.resolve(dpad.saveData(app.records, 'records')).then((res) => {
+      if (match.mode === EVENT_MODE() && won && app.screen === 'results') {
+        const durable = res && typeof res === 'object' ? Boolean(res.durable) : Boolean(res);
+        $('results-sub').textContent = durable
+          ? 'Bizarro Event complete! Progress saved.'
+          : 'Bizarro Event complete! Cleared for this session (storage restricted).';
+      }
+    }).catch(() => {});
   }
-  dpad.recordMatchResult({
-    won,
-    kos: p1.kos || 0,
-    wavedashes: p1.wavedashCount || 0,
-    sweetspotKo: !!(p1.sweetspotKo || p1.sweetspotKos || p1.meteorKo || p1.meteorKos || p1.sweetspotKoScored),
-    classicCleared,
-    classicScore: match.mode === MODE.CLASSIC ? app.classicScore : 0,
-    homerunFeet: match.mode === MODE.HOMERUN ? Math.round(match.homerun?.maxDistanceFt || 0) : 0,
-    targetsTimeMs: won ? targetsTimeMs : 0,
-    multimanKos,
-  });
+  if ($('btn-results-rematch')) {
+    const isOnline = match.mode === MODE.ONLINE && app.onlineSession;
+    const onlineSt = dpad.getOnlineState();
+    $('btn-results-rematch').hidden = Boolean(isAborted || (isOnline && (!onlineSt.connected || !onlineSt.isHost)));
+    $('btn-results-rematch').textContent = isOnline ? 'Online Rematch' : 'Rematch';
+  }
+  if ($('btn-results-css')) {
+    $('btn-results-css').textContent = match.mode === MODE.ONLINE
+      ? 'Online Lobby'
+      : (match.mode === EVENT_MODE() ? 'Event List' : 'Character Select');
+  }
+  if (!isAborted) {
+    dpad.recordMatchResult({
+      won,
+      kos: me.kos || 0,
+      wavedashes: me.wavedashCount || 0,
+      sweetspotKo: !!(me.sweetspotKo || me.sweetspotKos || me.meteorKo || me.meteorKos || me.sweetspotKoScored),
+      classicCleared,
+      classicScore: match.mode === MODE.CLASSIC ? app.classicScore : 0,
+      homerunFeet: match.mode === MODE.HOMERUN ? Math.round(match.homerun?.maxDistanceFt || 0) : 0,
+      targetsTimeMs: won ? targetsTimeMs : 0,
+      multimanKos,
+    });
+  }
 
   showScreen('results');
 }
@@ -1608,9 +1638,34 @@ function handleGamepadMenus() {
 // ============================================================================
 // ONLINE & RECORDS UI
 // ============================================================================
+const VALID_ONLINE_FIGHTERS = ROSTER.map((f) => f.id);
+const VALID_ONLINE_STAGES = STAGES.map((s) => s.id);
+
+function abortOnlineMatch(reason = 'OPPONENT DISCONNECTED') {
+  if (!app.match || app.match.mode !== MODE.ONLINE) return;
+  app.onlineMatchActive = false;
+  app.onlineReconnecting = false;
+  app.onlineReconnectFrames = 0;
+  app.onlineMenuOpen = false;
+  app.onlineSession?.stop();
+  app.match.status = 'ended';
+  app.match.winnerPort = null;
+  app.match.winningTeam = null;
+  openResults(app.match, reason);
+  refreshOnlineUi();
+}
+
 function ensureOnlineSession() {
   const st = dpad.getOnlineState();
-  if (!st.inLobby || !st.connected) {
+  if (!st.inLobby) {
+    app.onlineSession?.stop();
+    app.onlineSession = null;
+    app.onlineReconnecting = false;
+    return null;
+  }
+  if (!st.connected) {
+    // Keep the session alive during brief P2P_PEER_RECONNECTING windows so matches can resume cleanly.
+    if (app.onlineReconnecting && app.onlineSession) return app.onlineSession;
     app.onlineSession?.stop();
     app.onlineSession = null;
     return null;
@@ -1621,10 +1676,17 @@ function ensureOnlineSession() {
   app.onlineSession?.stop();
   app.onlineSession = createOnlineSession({
     isHost: Boolean(st.isHost),
-    delayFrames: 3,
+    delayFrames: 'auto',
+    validFighterIds: VALID_ONLINE_FIGHTERS,
+    validStageIds: VALID_ONLINE_STAGES,
     send: (ch, payload, reliable) => dpad.sendP2P(ch, payload, reliable),
     onPeerPick: (pick) => {
       app.onlineGuestPick = pick;
+    },
+    onPeerLeave: () => {
+      if (app.match?.mode === MODE.ONLINE && app.onlineMatchActive) {
+        abortOnlineMatch('OPPONENT LEFT MATCH');
+      }
     },
     onConfigReady: (cfg) => {
       app.selectedMode = MODE.ONLINE;
@@ -1633,8 +1695,8 @@ function ensureOnlineSession() {
       refreshOnlineUi();
     },
     onDesync: ({ frame }) => {
-      if ($('hud-mode-info') && app.match?.mode === MODE.ONLINE) {
-        setStableText($('hud-mode-info'), `ONLINE DESYNC @ F${frame} • ${app.match.stage.name}`);
+      if (app.match?.mode === MODE.ONLINE && app.onlineMatchActive) {
+        abortOnlineMatch(`SYNC ERROR @ F${frame}`);
       }
     },
   });
@@ -2155,6 +2217,7 @@ function wireUi() {
 
   $('btn-pause-resume').addEventListener('click', () => togglePause(false));
   $('btn-pause-restart').addEventListener('click', () => {
+    if (app.match?.mode === MODE.ONLINE && app.onlineMatchActive) return;
     sound.playUi('start');
     if (app.selectedMode === MODE.CLASSIC) app.classicScore = app.classicRoundBaseScore;
     launchConfiguredMatch();
@@ -2166,9 +2229,19 @@ function wireUi() {
     persistSettings();
   });
   const exitMatchToSelect = () => {
+    const wasOnline = app.match?.mode === MODE.ONLINE || app.selectedMode === MODE.ONLINE;
     const wasEvent = app.match?.mode === EVENT_MODE() || app.selectedMode === EVENT_MODE();
+    if (wasOnline && app.onlineMatchActive) {
+      app.onlineSession?.sendLeave();
+      app.onlineSession?.stop();
+    }
+    app.onlineMatchActive = false;
+    app.onlineMenuOpen = false;
     app.match = null;
-    if (wasEvent) {
+    if (wasOnline) {
+      refreshOnlineUi();
+      showScreen('online');
+    } else if (wasEvent) {
       buildEventsGrid();
       showScreen('events');
     } else {
@@ -2176,10 +2249,41 @@ function wireUi() {
     }
   };
   $('btn-pause-css').addEventListener('click', exitMatchToSelect);
-  $('btn-pause-title').addEventListener('click', () => { app.match = null; showScreen('title'); });
+  $('btn-pause-title').addEventListener('click', () => {
+    if (app.onlineMatchActive) {
+      app.onlineSession?.sendLeave();
+      app.onlineSession?.stop();
+    }
+    app.onlineMatchActive = false;
+    app.onlineMenuOpen = false;
+    app.match = null;
+    showScreen('title');
+  });
 
   $('btn-results-rematch').addEventListener('click', () => {
     sound.playUi('start');
+    if (app.selectedMode === MODE.ONLINE) {
+      const st = dpad.getOnlineState();
+      const sess = ensureOnlineSession();
+      if (st.connected && sess && st.isHost) {
+        sess.startHandshake({
+          seed: (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0,
+          stageId: app.selectedStageId || STAGES[0].id,
+          stocks: app.stocks,
+          timeSeconds: app.timeSeconds,
+          itemFrequency: app.itemFrequency,
+          hostFighter: app.ports[0].fighterId,
+          hostPalette: app.ports[0].paletteIndex,
+          guestFighter: app.onlineGuestPick?.fighterId || app.ports[1].fighterId,
+          guestPalette: app.onlineGuestPick?.paletteIndex ?? app.ports[1].paletteIndex,
+        });
+        $('results-sub').textContent = 'Syncing online rematch with opponent...';
+        return;
+      }
+      refreshOnlineUi();
+      showScreen('online');
+      return;
+    }
     if (app.selectedMode === MODE.CLASSIC) app.classicScore = app.classicRoundBaseScore;
     launchConfiguredMatch();
   });
@@ -2206,12 +2310,12 @@ function wireUi() {
     }
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && app.screen === 'match') togglePause(true);
+    if (document.hidden && app.screen === 'match' && !app.onlineMatchActive) togglePause(true);
   });
   window.addEventListener('resize', () => {
     const prevLayout = document.body.dataset.layout;
     setLayoutAttr();
-    if (prevLayout && prevLayout !== document.body.dataset.layout && app.screen === 'match') {
+    if (prevLayout && prevLayout !== document.body.dataset.layout && app.screen === 'match' && !app.onlineMatchActive) {
       togglePause(true);
     }
   });
@@ -2219,14 +2323,23 @@ function wireUi() {
 
 function togglePause(pause) {
   if (!app.match || app.match.status === 'ended') return;
+  const isOnlineLive = Boolean(app.match.mode === MODE.ONLINE && app.onlineMatchActive);
   if (pause) {
-    if (app.match.status !== 'paused') app.match._prePauseStatus = app.match.status;
-    app.match.status = 'paused';
+    if (!isOnlineLive) {
+      if (app.match.status !== 'paused') app.match._prePauseStatus = app.match.status;
+      app.match.status = 'paused';
+    } else {
+      app.onlineMenuOpen = true;
+    }
     input.clearHolds();
-    const p1 = app.match.fighters[0];
-    $('pause-tech-readout').textContent = `P1 Wavedashes: ${p1.wavedashCount || 0} • L-Cancels: ${p1.lCancelCount || 0} • Max Combo: ${p1.maxCombo || 0}`;
+    const localPort = (isOnlineLive && app.onlineSession) ? app.onlineSession.getStats().localPort : 0;
+    const me = app.match.fighters.find((f) => f.port === localPort) || app.match.fighters[0];
+    $('pause-tech-readout').textContent = `P${localPort + 1} Wavedashes: ${me.wavedashCount || 0} • L-Cancels: ${me.lCancelCount || 0} • Max Combo: ${me.maxCombo || 0}`;
+    if ($('btn-pause-restart')) $('btn-pause-restart').hidden = isOnlineLive;
     if ($('btn-pause-css')) {
-      $('btn-pause-css').textContent = app.match.mode === EVENT_MODE() ? 'Event List' : 'Character Select';
+      $('btn-pause-css').textContent = isOnlineLive
+        ? 'Leave Online Match'
+        : (app.match.mode === EVENT_MODE() ? 'Event List' : 'Character Select');
     }
     if ($('btn-pause-mute')) {
       $('btn-pause-mute').textContent = `Sound: ${sound.isMuted() ? 'Off' : 'On'}`;
@@ -2239,8 +2352,12 @@ function togglePause(pause) {
       if ($('sel-pause-train-item') && $('sel-train-item')) $('sel-pause-train-item').value = $('sel-train-item').value;
     }
     showScreen('pause');
+    if (isOnlineLive) sound.setPaused?.(false);
   } else {
-    app.match.status = app.match._prePauseStatus || (app.match.introTimer > 0 ? 'intro' : 'playing');
+    app.onlineMenuOpen = false;
+    if (!isOnlineLive) {
+      app.match.status = app.match._prePauseStatus || (app.match.introTimer > 0 ? 'intro' : 'playing');
+    }
     input.clearHolds();
     showScreen('match');
     sound.setMusic(app.match.fighters.some((p) => p.fighterId === MASTER_MITT.id) ? 'boss' : 'battle', app.match.stage.id);
@@ -2251,26 +2368,44 @@ function togglePause(pause) {
 // MAIN 60HZ FIXED-TIMESTEP LOOP
 // ============================================================================
 function tickSimulation() {
-  if (app.onlineSession?.getStats().handshaking) {
+  const onlineSt = dpad.getOnlineState();
+  if (onlineSt.connected || app.onlineSession) {
+    ensureOnlineSession();
     dpad.pollP2P([0, 1]);
-    app.onlineSession.tickHandshake();
+    app.onlineSession?.tickHandshake();
   }
 
-  if (app.screen === 'match' && app.match) {
-    if (app.match.status === 'paused') return;
+  const runningOnlineOverlay = Boolean(app.screen === 'pause' && app.onlineMatchActive && app.onlineMenuOpen);
+  if ((app.screen === 'match' || runningOnlineOverlay) && app.match) {
+    if (app.match.status === 'paused' && !runningOnlineOverlay) return;
 
     const localMultiplayer = app.match.mode !== MODE.ONLINE && app.match.fighters.filter((f) => !f.isCpu).length > 1;
-    const polled = input.poll(app.match.fighters.length, localMultiplayer);
+    const polled = runningOnlineOverlay
+      ? app.match.fighters.map(() => createEmptyInput())
+      : input.poll(app.match.fighters.length, localMultiplayer);
     updateTouchVisibility();
 
-    if (polled.some((p) => p.pausePressed)) {
+    if (!runningOnlineOverlay && polled.some((p) => p.pausePressed)) {
       togglePause(true);
       return;
     }
 
     let inputsByPort;
-    if (app.match.mode === MODE.ONLINE && app.onlineSession?.getStats().active) {
-      dpad.pollP2P([0, 1]);
+    if (app.match.mode === MODE.ONLINE && app.onlineMatchActive) {
+      if (app.onlineReconnecting || !onlineSt.connected) {
+        app.onlineReconnectFrames++;
+        if ($('hud-mode-info')) {
+          setStableText($('hud-mode-info'), `OPPONENT RECONNECTING... • ${app.match.stage.name}`);
+        }
+        if (app.onlineReconnectFrames > 600) {
+          abortOnlineMatch('OPPONENT DISCONNECTED');
+        }
+        return;
+      }
+      if (!app.onlineSession?.getStats().active) {
+        abortOnlineMatch('OPPONENT DISCONNECTED');
+        return;
+      }
       const stepRes = app.onlineSession.step(polled[0]);
       if (!stepRes.ready) {
         if (stepRes.stallFrames > 15 && $('hud-mode-info')) {
@@ -2287,7 +2422,7 @@ function tickSimulation() {
     }
 
     stepMatch(app.match, inputsByPort);
-    if (app.match.mode === MODE.ONLINE && app.onlineSession?.getStats().active && app.match.frame > 0 && app.match.frame % 60 === 0) {
+    if (app.match.mode === MODE.ONLINE && app.onlineMatchActive && app.onlineSession?.getStats().active && app.match.frame > 0 && app.match.frame % 60 === 0) {
       app.onlineSession.recordLocalChecksum(app.match.frame, computeMatchChecksum(app.match));
     }
     renderer3d.ingestEvents(app.match.events, app.match);
@@ -2434,7 +2569,26 @@ async function boot() {
   };
 
   const sdk = await dpad.init((ev) => {
-    if (ev.type === 'lobby') refreshOnlineUi();
+    if (ev.type === 'lobby') {
+      if (ev.name === 'P2P_PEER_RECONNECTING') {
+        app.onlineReconnecting = true;
+        app.onlineReconnectFrames = 0;
+      } else if (ev.name === 'P2P_PEER_RECONNECTED' || ev.name === 'P2P_CONNECTION_ESTABLISHED') {
+        app.onlineReconnecting = false;
+        app.onlineReconnectFrames = 0;
+      } else if (
+        ev.name === 'P2P_PEER_DISCONNECTED' ||
+        ev.name === 'P2P_CONNECTION_FAILED' ||
+        ev.name === 'LOBBY_KICKED' ||
+        (ev.name === 'LOBBY_USERS_UPDATED' && (ev.data?.changeType === 'LEFT' || ev.data?.changeType === 'KICKED'))
+      ) {
+        app.onlineReconnecting = false;
+        if (app.match?.mode === MODE.ONLINE && app.onlineMatchActive) {
+          abortOnlineMatch('OPPONENT DISCONNECTED');
+        }
+      }
+      refreshOnlineUi();
+    }
     if (ev.type === 'p2p' && ev.data && typeof ev.data === 'object') {
       ensureOnlineSession()?.handlePacket(ev.data);
     }

@@ -633,13 +633,36 @@ export function computeMatchChecksum(match) {
 
 export function createOnlineSession({
   isHost = false,
-  delayFrames = 3,
+  delayFrames = 'auto',
+  validFighterIds = null,
+  validStageIds = null,
   send = () => false,
   onConfigReady = null,
   onPeerPick = null,
+  onPeerLeave = null,
   onDesync = null,
 } = {}) {
-  const clampedDelay = Math.max(1, Math.min(8, Math.round(delayFrames || 3)));
+  const fixedDelay = typeof delayFrames === 'number' && Number.isFinite(delayFrames)
+    ? Math.max(1, Math.min(12, Math.round(delayFrames)))
+    : null;
+  const fighterWhitelist = validFighterIds ? new Set(validFighterIds) : null;
+  const stageWhitelist = validStageIds ? new Set(validStageIds) : null;
+  const sanitizeFighter = (id, fallback) => {
+    const s = String(id || fallback);
+    if (!fighterWhitelist || fighterWhitelist.has(s)) return s;
+    return fighterWhitelist.has(fallback) ? fallback : [...fighterWhitelist][0];
+  };
+  const sanitizeStage = (id, fallback = 'arguefield') => {
+    const s = String(id || fallback);
+    if (!stageWhitelist || stageWhitelist.has(s)) return s;
+    return stageWhitelist.has(fallback) ? fallback : [...stageWhitelist][0];
+  };
+  const parseTimeSeconds = (val) => {
+    if (val === undefined || val === null || val === '') return 300;
+    const n = Number(val);
+    return Number.isFinite(n) ? Math.max(0, Math.min(999, Math.round(n))) : 300;
+  };
+
   const localInputs = new Map();
   const remoteInputs = new Map();
   const localChecksums = new Map();
@@ -648,6 +671,11 @@ export function createOnlineSession({
   let active = false;
   let config = null;
   let pendingConfig = null;
+  let synPhase = false;
+  let synSeq = 0;
+  let synSentTick = 0;
+  let synSentMs = 0;
+  let measuredRttTicks = 0;
   let handshakeTick = 0;
   let simFrame = 0;
   let stallFrames = 0;
@@ -658,10 +686,36 @@ export function createOnlineSession({
   let checksumMismatches = 0;
   let syncState = 'idle';
   let guestPick = null;
+  let pendingLatch = null;
+
+  function mergeLatchInto(base, latch) {
+    if (!latch) return base;
+    const merged = { ...neutralInputFrame(), ...(base || {}) };
+    for (const k of WIRE_FLAGS) {
+      if (k.endsWith('Pressed') && latch[k]) merged[k] = true;
+    }
+    return merged;
+  }
+
+  function latchInput(inp) {
+    if (!inp) return;
+    if (!pendingLatch) {
+      pendingLatch = { ...neutralInputFrame(), ...inp };
+      return;
+    }
+    for (const k of WIRE_AXES) pendingLatch[k] = inp[k] ?? 0;
+    for (const k of WIRE_FLAGS) {
+      if (k.endsWith('Pressed')) pendingLatch[k] = Boolean(pendingLatch[k] || inp[k]);
+      else pendingLatch[k] = Boolean(inp[k]);
+    }
+  }
 
   function activate(agreed) {
-    config = { ...agreed, delayFrames: Math.max(1, Math.min(8, Math.round(agreed.delayFrames || clampedDelay))) };
+    const delay = Math.max(1, Math.min(12, Math.round(agreed.delayFrames || fixedDelay || 3)));
+    config = { ...agreed, delayFrames: delay };
     pendingConfig = null;
+    synPhase = false;
+    pendingLatch = null;
     localInputs.clear();
     remoteInputs.clear();
     localChecksums.clear();
@@ -680,22 +734,33 @@ export function createOnlineSession({
     onConfigReady?.(config);
   }
 
-  function startHandshake(matchCfg) {
+  function startHandshake(matchCfg = {}) {
     if (!isHost) return false;
+    active = false;
+    pendingLatch = null;
     pendingConfig = {
       seed: (Number(matchCfg.seed) >>> 0) || ((Date.now() ^ 0x9e3779b9) >>> 0),
-      stageId: String(matchCfg.stageId || 'arguefield'),
+      stageId: sanitizeStage(matchCfg.stageId, 'arguefield'),
       stocks: Math.max(1, Math.min(9, Number(matchCfg.stocks) || 4)),
-      timeSeconds: Math.max(0, Math.min(999, Number(matchCfg.timeSeconds) || 300)),
-      itemFrequency: String(matchCfg.itemFrequency || 'medium'),
-      hostFighter: String(matchCfg.hostFighter || 'faux'),
+      timeSeconds: parseTimeSeconds(matchCfg.timeSeconds),
+      itemFrequency: ['off', 'low', 'medium', 'high'].includes(matchCfg.itemFrequency) ? matchCfg.itemFrequency : 'medium',
+      hostFighter: sanitizeFighter(matchCfg.hostFighter, 'faux'),
       hostPalette: Math.max(0, Math.min(3, Number(matchCfg.hostPalette) || 0)),
-      guestFighter: String(guestPick?.fighterId || matchCfg.guestFighter || 'captain-pigeon'),
+      guestFighter: sanitizeFighter(guestPick?.fighterId || matchCfg.guestFighter, 'captain-pigeon'),
       guestPalette: Math.max(0, Math.min(3, Number(guestPick?.paletteIndex ?? matchCfg.guestPalette) || 0)),
-      delayFrames: clampedDelay,
+      delayFrames: fixedDelay ?? 3,
     };
     handshakeTick = 0;
     syncState = 'handshaking';
+    if (fixedDelay == null) {
+      synPhase = true;
+      synSeq++;
+      synSentTick = 0;
+      synSentMs = Date.now();
+      packetsSent++;
+      return send(0, { t: 'syn', seq: synSeq, t0: synSentMs }, true);
+    }
+    synPhase = false;
     packetsSent++;
     return send(0, { t: 'cfg', ...pendingConfig }, true);
   }
@@ -703,21 +768,41 @@ export function createOnlineSession({
   function sendGuestPick(fighterId, paletteIndex = 0) {
     if (isHost) return false;
     packetsSent++;
-    return send(0, { t: 'pick', fighterId: String(fighterId || 'faux'), paletteIndex: Number(paletteIndex) || 0 }, true);
+    return send(0, {
+      t: 'pick',
+      fighterId: sanitizeFighter(fighterId, 'captain-pigeon'),
+      paletteIndex: Math.max(0, Math.min(3, Number(paletteIndex) || 0)),
+    }, true);
+  }
+
+  function sendLeave() {
+    packetsSent++;
+    return send(0, { t: 'leave' }, true);
   }
 
   function tickHandshake() {
     if (!isHost || !pendingConfig || active) return;
     handshakeTick++;
-    if (handshakeTick % 30 === 0) {
+    if (synPhase) {
+      if (handshakeTick - synSentTick >= 45 && handshakeTick % 45 === 0) {
+        synSeq++;
+        synSentTick = handshakeTick;
+        synSentMs = Date.now();
+        packetsSent++;
+        send(0, { t: 'syn', seq: synSeq, t0: synSentMs }, true);
+      }
+      return;
+    }
+    if (handshakeTick % 25 === 0) {
       packetsSent++;
       send(0, { t: 'cfg', ...pendingConfig }, true);
     }
   }
 
-  function sendWindow(topFrame, count = 4) {
+  function sendWindow(topFrame, count = null) {
+    const win = count ?? Math.max(4, Math.min(8, (config?.delayFrames || fixedDelay || 3) + 1));
     const r = [];
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < win; i++) {
       const f = topFrame - i;
       if (f < 0 || !localInputs.has(f)) break;
       r.push(localInputs.get(f));
@@ -756,8 +841,40 @@ export function createOnlineSession({
   function handlePacket(data) {
     if (!data || typeof data !== 'object') return;
     packetsReceived++;
+    if (data.t === 'leave') {
+      active = false;
+      pendingConfig = null;
+      synPhase = false;
+      syncState = 'left';
+      onPeerLeave?.();
+      return;
+    }
+    if (data.t === 'syn' && !isHost) {
+      packetsSent++;
+      send(0, { t: 'synack', seq: Number(data.seq) || 0, t0: Number(data.t0) || 0 }, true);
+      return;
+    }
+    if (data.t === 'synack' && isHost && pendingConfig && synPhase && (Number(data.seq) || 0) === synSeq) {
+      synPhase = false;
+      const tickRtt = Math.max(0, handshakeTick - synSentTick);
+      const msRtt = Math.max(0, Date.now() - (Number(data.t0) || synSentMs));
+      const msTicks = Math.round(msRtt / (1000 / 60));
+      measuredRttTicks = Math.max(tickRtt, msTicks);
+      const oneWayTicks = Math.ceil(measuredRttTicks / 2);
+      pendingConfig.delayFrames = Math.max(3, Math.min(12, oneWayTicks + 1));
+      if (guestPick) {
+        pendingConfig.guestFighter = sanitizeFighter(guestPick.fighterId, pendingConfig.guestFighter);
+        pendingConfig.guestPalette = guestPick.paletteIndex;
+      }
+      packetsSent++;
+      send(0, { t: 'cfg', ...pendingConfig }, true);
+      return;
+    }
     if (data.t === 'pick' && isHost && typeof data.fighterId === 'string') {
-      guestPick = { fighterId: data.fighterId, paletteIndex: Math.max(0, Math.min(3, Number(data.paletteIndex) || 0)) };
+      guestPick = {
+        fighterId: sanitizeFighter(data.fighterId, 'captain-pigeon'),
+        paletteIndex: Math.max(0, Math.min(3, Number(data.paletteIndex) || 0)),
+      };
       onPeerPick?.(guestPick);
       return;
     }
@@ -768,15 +885,15 @@ export function createOnlineSession({
       if (!active || config?.seed !== seed) {
         activate({
           seed,
-          stageId: data.stageId,
+          stageId: sanitizeStage(data.stageId, 'arguefield'),
           stocks: Math.max(1, Math.min(9, Number(data.stocks) || 4)),
-          timeSeconds: Math.max(0, Math.min(999, Number(data.timeSeconds) || 300)),
-          itemFrequency: String(data.itemFrequency || 'medium'),
-          hostFighter: String(data.hostFighter || 'faux'),
+          timeSeconds: parseTimeSeconds(data.timeSeconds),
+          itemFrequency: ['off', 'low', 'medium', 'high'].includes(data.itemFrequency) ? data.itemFrequency : 'medium',
+          hostFighter: sanitizeFighter(data.hostFighter, 'faux'),
           hostPalette: Math.max(0, Math.min(3, Number(data.hostPalette) || 0)),
-          guestFighter: String(data.guestFighter || 'captain-pigeon'),
+          guestFighter: sanitizeFighter(data.guestFighter, 'captain-pigeon'),
           guestPalette: Math.max(0, Math.min(3, Number(data.guestPalette) || 0)),
-          delayFrames: Math.max(1, Math.min(8, Number(data.delayFrames) || clampedDelay)),
+          delayFrames: Math.max(1, Math.min(12, Number(data.delayFrames) || fixedDelay || 3)),
         });
       }
       return;
@@ -786,7 +903,7 @@ export function createOnlineSession({
       return;
     }
     if (data.t === 'in' && active && Number.isInteger(data.f) && Array.isArray(data.r)) {
-      const maxLen = Math.min(6, data.r.length);
+      const maxLen = Math.min(10, data.r.length);
       for (let i = 0; i < maxLen; i++) {
         const f = data.f - i;
         if (f >= simFrame && !remoteInputs.has(f)) {
@@ -799,11 +916,12 @@ export function createOnlineSession({
       return;
     }
     if (data.t === 'req' && active && Number.isInteger(data.f)) {
+      const maxAhead = Math.max(4, (config?.delayFrames || 3) + 2);
       let top = -1;
-      for (let f = data.f + 3; f >= data.f; f--) {
+      for (let f = data.f + maxAhead; f >= data.f; f--) {
         if (localInputs.has(f)) { top = f; break; }
       }
-      if (top >= data.f) sendWindow(top, Math.min(6, top - data.f + 1));
+      if (top >= data.f) sendWindow(top, Math.min(8, top - data.f + 1));
       return;
     }
     if (data.t === 'chk' && active && Number.isInteger(data.f)) {
@@ -814,11 +932,16 @@ export function createOnlineSession({
 
   function step(localRawInput) {
     if (!active) return { ready: false, stallFrames: 0, simFrame };
-    const delay = config?.delayFrames || clampedDelay;
+    const delay = config?.delayFrames || fixedDelay || 3;
     const targetFrame = simFrame + delay;
     if (!localInputs.has(targetFrame)) {
-      localInputs.set(targetFrame, packCompactTuple(localRawInput));
-      sendWindow(targetFrame, 4);
+      const combined = mergeLatchInto(localRawInput, pendingLatch);
+      pendingLatch = null;
+      localInputs.set(targetFrame, packCompactTuple(combined));
+      sendWindow(targetFrame);
+    } else {
+      // Preserve fresh edge presses sampled while stalled so zero inputs are dropped.
+      latchInput(localRawInput);
     }
     if (!remoteInputs.has(simFrame)) {
       stallFrames++;
@@ -846,6 +969,8 @@ export function createOnlineSession({
   function stop() {
     active = false;
     pendingConfig = null;
+    synPhase = false;
+    pendingLatch = null;
     syncState = 'idle';
   }
 
@@ -856,7 +981,8 @@ export function createOnlineSession({
       remotePort: isHost ? 1 : 0,
       active,
       handshaking: Boolean(pendingConfig && !active),
-      delayFrames: config?.delayFrames || clampedDelay,
+      delayFrames: config?.delayFrames || pendingConfig?.delayFrames || fixedDelay || 3,
+      measuredRttTicks,
       simFrame,
       stallFrames,
       totalStallFrames,
@@ -872,6 +998,7 @@ export function createOnlineSession({
   return {
     startHandshake,
     sendGuestPick,
+    sendLeave,
     tickHandshake,
     handlePacket,
     step,

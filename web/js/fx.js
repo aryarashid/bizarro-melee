@@ -306,7 +306,7 @@ export class DynamicCamera {
         const h = (f.def?.stats?.height || 72) * scale + 120;
         if (f.x - halfW < minX) minX = f.x - halfW;
         if (f.x + halfW > maxX) maxX = f.x + halfW;
-        if (f.y - 70 < minY) minY = f.y - 70;
+        if (f.y - 120 < minY) minY = f.y - 120;
         if (f.y + h > maxY) maxY = f.y + h;
       }
       if (Array.isArray(targets)) {
@@ -326,10 +326,10 @@ export class DynamicCamera {
     const cy = Math.max(bounds.bottom + 120, Math.min(bounds.top - 80, (minY + maxY) * 0.5));
 
     const spanX = Math.max(540, maxX - minX);
-    const spanY = Math.max(360, maxY - minY);
+    const spanY = Math.max(380, maxY - minY);
     const zx = (viewportW * 0.86) / spanX;
-    const zy = (viewportH * 0.78) / spanY;
-    const targetZoom = Math.max(0.36, Math.min(1.22, Math.min(zx, zy)));
+    const zy = (viewportH * 0.72) / spanY;
+    const targetZoom = Math.max(0.36, Math.min(1.18, Math.min(zx, zy)));
 
     this.x += (cx - this.x) * 0.14;
     this.y += (cy - this.y) * 0.14;
@@ -337,13 +337,15 @@ export class DynamicCamera {
   }
 
   worldToScreen(wx, wy, viewportW, viewportH) {
+    const anchorY = viewportH > viewportW ? 0.44 : 0.48;
     const sx = viewportW * 0.5 + (wx - this.x) * this.zoom + this.shakeX;
-    const sy = viewportH * 0.56 + (-wy + this.y) * this.zoom + this.shakeY;
+    const sy = viewportH * anchorY + (-wy + this.y) * this.zoom + this.shakeY;
     return { sx, sy };
   }
 
   applyTransform(ctx, viewportW, viewportH) {
-    ctx.translate(viewportW * 0.5 + this.shakeX, viewportH * 0.56 + this.shakeY);
+    const anchorY = viewportH > viewportW ? 0.44 : 0.48;
+    ctx.translate(viewportW * 0.5 + this.shakeX, viewportH * anchorY + this.shakeY);
     ctx.scale(this.zoom, this.zoom);
     ctx.translate(-this.x, this.y);
   }

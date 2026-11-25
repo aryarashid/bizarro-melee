@@ -627,8 +627,14 @@ html, body {
 .hud-fighters[data-count="4"] .hud-pct {
   font-size: clamp(1.35rem, 2.3vw, 1.95rem);
 }
-.hud-boss-hp {
-  font-size: clamp(1.05rem, 1.8vw, 1.45rem);
+.hud-fighters[data-count="3"] .hud-card.hud-card-boss,
+.hud-fighters[data-count="4"] .hud-card.hud-card-boss {
+  min-width: 248px;
+  flex: 1.65 1 268px;
+  max-width: 340px;
+}
+.hud-fighters .hud-pct.hud-boss-hp {
+  font-size: clamp(1rem, 1.6vw, 1.35rem);
   white-space: nowrap;
   flex-shrink: 0;
 }

@@ -253,23 +253,48 @@ async function runUnitTests() {
     wireQueue.push({ to, deliverAt: wireTick + 6, payload: JSON.parse(JSON.stringify(payload)) });
     return true;
   };
+  const validFighters = ROSTER.map((f) => f.id);
+  const validStages = STAGES.map((s) => s.id);
   const hostSess = createOnlineSession({
     isHost: true,
-    delayFrames: 3,
+    delayFrames: 'auto',
+    validFighterIds: validFighters,
+    validStageIds: validStages,
     send: (ch, payload, rel) => enqueueNet('guest', ch, payload, rel),
     onConfigReady: (cfg) => { hostMatch = mkNetMatch(cfg); },
   });
   const guestSess = createOnlineSession({
     isHost: false,
-    delayFrames: 3,
+    delayFrames: 'auto',
+    validFighterIds: validFighters,
+    validStageIds: validStages,
     send: (ch, payload, rel) => enqueueNet('host', ch, payload, rel),
     onConfigReady: (cfg) => { guestMatch = mkNetMatch(cfg); },
   });
+  // Verify unlimited timeSeconds: 0 is preserved AND non-playable fighter / invalid stage IDs are sanitized
   hostSess.startHandshake({
-    seed: 424242, stageId: 'arguefield', stocks: 4, timeSeconds: 300,
+    seed: 424242, stageId: 'arguefield', stocks: 4, timeSeconds: 0,
     itemFrequency: 'off', hostFighter: 'faux', hostPalette: 0,
     guestFighter: 'garth', guestPalette: 1,
   });
+  const badSanitizeSess = createOnlineSession({
+    isHost: true, delayFrames: 3, validFighterIds: validFighters, validStageIds: validStages,
+    send: () => true,
+  });
+  badSanitizeSess.startHandshake({ seed: 7, stageId: 'nonexistent-stage', timeSeconds: 0, hostFighter: 'master-mitt', guestFighter: 'sagging-bag' });
+  let sanitizedCfg = null;
+  const badGuest = createOnlineSession({
+    isHost: false, delayFrames: 3, validFighterIds: validFighters, validStageIds: validStages,
+    send: () => true, onConfigReady: (c) => { sanitizedCfg = c; },
+  });
+  badGuest.handlePacket({ t: 'cfg', seed: 7, stageId: 'nonexistent-stage', stocks: 4, timeSeconds: 0, itemFrequency: 'off', hostFighter: 'master-mitt', guestFighter: 'sagging-bag', delayFrames: 3 });
+  assert.equal(sanitizedCfg.timeSeconds, 0, 'Online config must preserve unlimited timeSeconds: 0');
+  assert.ok(validFighters.includes(sanitizedCfg.hostFighter), `Online config must reject non-playable hostFighter, got ${sanitizedCfg.hostFighter}`);
+  assert.ok(validFighters.includes(sanitizedCfg.guestFighter), `Online config must reject non-playable guestFighter, got ${sanitizedCfg.guestFighter}`);
+  assert.ok(validStages.includes(sanitizedCfg.stageId), `Online config must reject unknown stageId, got ${sanitizedCfg.stageId}`);
+
+  let hostAttackTaps = 0;
+  let guestObservedHostTaps = 0;
   for (let t = 0; t < 1800 && (!hostMatch || hostMatch.frame < 360 || !guestMatch || guestMatch.frame < 360); t++) {
     wireTick = t;
     for (let i = wireQueue.length - 1; i >= 0; i--) {
@@ -283,7 +308,7 @@ async function runUnitTests() {
     if (hostMatch && hostMatch.frame < 360) {
       const hInp = createEmptyInput();
       hInp.moveX = (t % 40 < 20) ? 1 : -1;
-      if (t % 17 === 0) { hInp.attack = true; hInp.attackPressed = true; }
+      if (t % 17 === 0 && hostMatch.frame < 340) { hInp.attack = true; hInp.attackPressed = true; hostAttackTaps++; }
       const res = hostSess.step(hInp);
       if (res.ready) {
         stepMatch(hostMatch, res.inputs);
@@ -296,6 +321,7 @@ async function runUnitTests() {
       if (t % 23 === 0) { gInp.jump = true; gInp.jumpPressed = true; }
       const res = guestSess.step(gInp);
       if (res.ready) {
+        if (res.inputs[0].attackPressed) guestObservedHostTaps++;
         stepMatch(guestMatch, res.inputs);
         if (guestMatch.frame % 60 === 0) guestSess.recordLocalChecksum(guestMatch.frame, computeMatchChecksum(guestMatch));
       }
@@ -308,12 +334,15 @@ async function runUnitTests() {
     else guestSess.handlePacket(pkt.payload);
   }
   assert.ok(hostMatch && guestMatch, 'Online handshake must initialize both host and guest matches');
+  assert.equal(hostSess.getStats().config.timeSeconds, 0, 'Agreed online config must keep timeSeconds: 0');
+  assert.ok(hostSess.getStats().delayFrames >= 6, `Adaptive RTT delay should adapt to 6-frame one-way latency (got ${hostSess.getStats().delayFrames})`);
   assert.equal(hostMatch.frame, 360, 'Host must reach frame 360 under 10% packet loss');
   assert.equal(guestMatch.frame, 360, 'Guest must reach frame 360 under 10% packet loss');
+  assert.equal(guestObservedHostTaps, hostAttackTaps, `Zero attack presses may be dropped (sent=${hostAttackTaps}, got=${guestObservedHostTaps})`);
   assert.equal(computeMatchChecksum(hostMatch), computeMatchChecksum(guestMatch), 'Host & Guest final match checksums must be bit-identical');
   assert.ok(hostSess.getStats().checksumsMatched >= 5 && hostSess.getStats().checksumMismatches === 0,
     `Expected >=5 matched checksums and 0 mismatches, got ${JSON.stringify(hostSess.getStats())}`);
-  console.log('PASS: Deterministic Online Lockstep (handshake + 10% loss + 100ms delay + 0 desyncs) validated');
+  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + 0 desyncs + sanitizer) validated`);
 
   // Controller mapping regression test (8BitDo HID button 9 != Start, DualSense 054c raw HID mapping + analog triggers)
   const { InputManager } = await import('../web/js/input.js');
@@ -361,22 +390,77 @@ async function runUnitTests() {
     else delete globalThis.navigator;
   }
 
+  // Master Mitt 380 HP, Phase 2 transition, and multi-attack tells
   const bossMatch = createMatch({
     mode: MODE.CLASSIC,
     stageId: 'final-obligation',
     stocks: 3,
+    seed: 777,
     players: [
-      { port: 0, fighterId: 'bario', paletteIndex: 0, isCpu: true, cpuLevel: 6, name: 'Bario' },
-      { port: 1, fighterId: MASTER_MITT.id, paletteIndex: 0, isCpu: true, cpuLevel: 7, name: 'Master Mitt' },
+      { port: 0, fighterId: 'bario', paletteIndex: 0, isCpu: true, cpuLevel: 7, name: 'Bario' },
+      { port: 1, fighterId: MASTER_MITT.id, paletteIndex: 0, isCpu: true, cpuLevel: 8, name: 'Master Mitt' },
     ],
   });
   bossMatch.status = 'playing';
   bossMatch.introTimer = 0;
-  for (let i = 0; i < 120; i++) {
+  assert.equal(bossMatch.fighters[1].bossMaxHp, 380, 'Master Mitt must have 380 max HP');
+  const seenTells = new Set();
+  let sawPhase2 = false;
+  for (let i = 0; i < 1200 && bossMatch.status !== 'ended'; i++) {
+    if (i === 500) bossMatch.fighters[1].bossHp = Math.min(bossMatch.fighters[1].bossHp, 175);
     stepMatch(bossMatch, bossMatch.fighters.map((f) => computeCpuInput(bossMatch, f)));
+    if (bossMatch.fighters[1].bossTell) seenTells.add(bossMatch.fighters[1].bossTell);
+    for (const e of bossMatch.events) {
+      if (e.type === 'bossTell' && e.tell) seenTells.add(e.tell);
+      if (e.type === 'bossPhase' && e.phase === 2) sawPhase2 = true;
+    }
   }
-  assert.ok(Number.isFinite(bossMatch.fighters[1].x), 'Master Mitt simulates cleanly');
-  console.log('PASS: Home-Run Derby (nonzero launch) and Classic Master Mitt modes validated');
+  assert.ok(sawPhase2 || bossMatch.fighters[1].bossPhase === 2, 'Master Mitt must enter Phase 2 below half HP');
+  assert.ok(seenTells.size >= 4, `Expected Master Mitt to use diverse attacks (got ${[...seenTells].join(', ')})`);
+
+  // AI Ladder monotonicity check (Lv7 > Lv5, Lv9 > Lv7) + all 26/26 Lv9 Lowrule cave reconnect with 0 SDs
+  for (const [lo, hi] of [[5, 7], [7, 9]]) {
+    let advSum = 0;
+    for (let i = 0; i < 8; i++) {
+      const swap = i % 2 === 1;
+      const lm = createMatch({
+        mode: MODE.VS_STOCK, stageId: 'final-obligation', stocks: 4, seed: 500 + lo * 40 + i * 29,
+        players: [
+          { port: 0, fighterId: 'faux', isCpu: true, cpuLevel: swap ? lo : hi },
+          { port: 1, fighterId: 'faux', isCpu: true, cpuLevel: swap ? hi : lo },
+        ],
+      });
+      lm.status = 'playing'; lm.introTimer = 0;
+      for (let t = 0; t < 2400 && lm.status !== 'ended'; t++) {
+        stepMatch(lm, lm.fighters.map((f) => computeCpuInput(lm, f)));
+      }
+      const fHi = lm.fighters[swap ? 1 : 0];
+      const fLo = lm.fighters[swap ? 0 : 1];
+      advSum += (fHi.damageDealt - fLo.damageDealt) + 90 * ((fHi.kos - fHi.falls) - (fLo.kos - fLo.falls));
+    }
+    assert.ok(advSum > 0, `Expected Lv${hi} to outperform Lv${lo} on Faux mirrors (meanAdv=${(advSum / 8).toFixed(1)})`);
+  }
+  for (const def of ROSTER) {
+    const cm = createMatch({
+      mode: MODE.VS_STOCK, stageId: 'lowrule-temple', stocks: 3,
+      players: [
+        { port: 0, fighterId: def.id, isCpu: true, cpuLevel: 9 },
+        { port: 1, fighterId: 'faux', isCpu: false },
+      ],
+    });
+    cm.status = 'playing'; cm.introTimer = 0;
+    const cf = cm.fighters[0]; const co = cm.fighters[1];
+    cf.x = 0; cf.y = -225; cf.grounded = true; cf.onPlatformId = cm.surfaces.find((s) => s.y === -225)?.id;
+    co.x = 460; co.y = 132; co.grounded = true;
+    let rejoined = false;
+    for (let t = 0; t < 480; t++) {
+      stepMatch(cm, [computeCpuInput(cm, cf), createEmptyInput()]);
+      assert.equal(cf.falls, 0, `Lv9 ${def.id} self-destructed escaping Lowrule Temple cave at t=${t}`);
+      if (cf.y >= 100 && cf.x >= 240) { rejoined = true; break; }
+    }
+    assert.ok(rejoined, `Lv9 ${def.id} failed to rejoin upper-right terrace from Lowrule Temple cave within 8s`);
+  }
+  console.log(`PASS: Home-Run Derby, Master Mitt (380 HP, Phase 2, ${seenTells.size} tells), AI Ladder & 26/26 Lowrule cave validated`);
 }
 
 function loadPlaywright() {
@@ -667,6 +751,38 @@ async function runBrowserProof() {
     await desk.page.screenshot({ path: path.join(OUT_DIR, '10-training.png') });
     console.log('PASS: Training Lab toolbar & on-demand item spawn verified');
 
+    // Event 8 (3P Boss HUD specificity) check: Master Mitt card must not crush name to "..."
+    await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.startEvent('ev-final-audit'));
+    await desk.frame.waitForFunction(() => window.__BIZARRO_MELEE__.getMatch()?.status === 'playing', null, { timeout: 6000 });
+    const bossHudInfo = await desk.frame.evaluate(() => {
+      const card = document.querySelector('#hud-fighters .hud-card-boss');
+      const nameEl = card?.querySelector('.hud-card-name');
+      return card && nameEl ? {
+        cardW: Math.round(card.getBoundingClientRect().width),
+        text: nameEl.textContent,
+        overflowPx: Math.round(nameEl.scrollWidth - nameEl.clientWidth),
+      } : null;
+    });
+    assert.ok(bossHudInfo && bossHudInfo.cardW >= 235 && bossHudInfo.overflowPx <= 4,
+      `Event 8 Boss HUD card truncated: ${JSON.stringify(bossHudInfo)}`);
+    console.log(`PASS: Event 8 3P Boss HUD readable (${bossHudInfo.text}, ${bossHudInfo.cardW}px, overflow ${bossHudInfo.overflowPx}px)`);
+
+    // 2D fallback HUD clearance check at 1280x720 4P
+    await desk.frame.evaluate(() => {
+      const cb = document.getElementById('inp-3d');
+      if (cb && cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+      window.__BIZARRO_MELEE__.setTeamBattle(false, 4);
+      window.__BIZARRO_MELEE__.startMode('vs-stock', 'arguefield');
+    });
+    await desk.frame.waitForFunction(() => window.__BIZARRO_MELEE__.getState().gfx === '2d' && window.__BIZARRO_MELEE__.getMatch()?.status === 'playing', null, { timeout: 6000 });
+    await desk.page.waitForTimeout(350);
+    await desk.page.screenshot({ path: path.join(OUT_DIR, '13-2d-4p.png') });
+    await desk.frame.evaluate(() => {
+      const cb = document.getElementById('inp-3d');
+      if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
+    console.log('PASS: 2D fallback 4P camera renders cleanly');
+
     // Verify VS Time Battle natural tie -> Sudden Death (300% + HUD banner) -> real KO -> Results Podium
     await desk.frame.evaluate(() => {
       window.__BIZARRO_MELEE__.startMode('vs-time', 'fiveside-skyscrapers');
@@ -777,6 +893,145 @@ async function runBrowserProof() {
     assert.ok((await leg.frame.evaluate(() => window.__BIZARRO_MELEE__.getMatch()?.frame || 0)) > 5);
     await leg.ctx.close();
     console.log('PASS: Strict legacy opaque-origin sandbox plays cleanly');
+
+    // E. Live Two-Peer Browser Online Lockstep E2E (Lobby handshake -> Match sync -> Guest Results credit -> Disconnect abort)
+    const p2pQueues = { host: { 0: [], 1: [] }, guest: { 0: [], 1: [] } };
+    const peerRecords = { host: [], guest: [] };
+    const openOnlinePeer = async (role) => {
+      const isHost = role === 'host';
+      const myId = isHost ? 'user-host' : 'user-guest';
+      const peerId = isHost ? 'user-guest' : 'user-host';
+      const ctx = await browser.newContext({ viewport: { width: 960, height: 600 } });
+      await ctx.exposeFunction('__mockSendP2P', (ch, arr) => {
+        const target = isHost ? 'guest' : 'host';
+        p2pQueues[target][ch]?.push({ fromUserId: myId, payload: arr });
+      });
+      await ctx.exposeFunction('__mockDrainP2P', (ch) => {
+        const q = p2pQueues[role][ch] || [];
+        p2pQueues[role][ch] = [];
+        return q;
+      });
+      await ctx.exposeFunction('__mockRecordStat', (stat, val) => {
+        peerRecords[role].push({ stat, val });
+      });
+      await ctx.addInitScript(({ isHost, myId, peerId }) => {
+        const handlers = new Map();
+        const emit = (name, data) => { for (const fn of handlers.get(name) || []) fn(data); };
+        const inbox = { 0: [], 1: [] };
+        window.__emitMockDpad = emit;
+        window.__pushMockInbox = (ch, pkt) => inbox[ch].push({ fromUserId: pkt.fromUserId, payload: new Uint8Array(pkt.payload) });
+        window.dpad = {
+          version: 2,
+          on: (name, fn) => { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(fn); },
+          init: async () => ({ version: 2, player: { id: myId, name: isHost ? 'HostPlayer' : 'GuestPlayer' } }),
+          loadProgress: () => {},
+          loadComplete: () => {},
+          requestStats: async () => true,
+          getStat: async () => 0,
+          setStat: async (k, v) => { window.__mockRecordStat(k, v); return true; },
+          setAchievement: async () => true,
+          storeStats: async () => true,
+          uploadLeaderboardScore: async () => true,
+          player: { get: async () => ({ id: myId, name: isHost ? 'HostPlayer' : 'GuestPlayer' }) },
+          saves: { load: async () => null, save: async () => true },
+          lobbies: {
+            createLobby: async () => ({ lobbyId: 'lobby-e2e' }),
+            listAvailableLobbies: async () => [{ lobbyId: 'lobby-e2e', playerCount: 1, maxPlayers: 2 }],
+            joinLobby: async () => ({ lobbyId: 'lobby-e2e' }),
+            leaveLobby: async () => true,
+            getLobbyInviteLink: async () => 'https://dpad.games/invite/lobby-e2e',
+          },
+          p2p: {
+            getP2PMaxPayloadSize: () => 512,
+            broadcastP2PMessage: (ch, _rel, bytes) => {
+              window.__mockSendP2P(ch, Array.from(bytes));
+              return true;
+            },
+            drainP2PChannel: (ch) => {
+              const out = inbox[ch] || [];
+              inbox[ch] = [];
+              return out;
+            },
+          },
+        };
+      }, { isHost, myId, peerId });
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push(`online-${role} pageerror: ${e.message}`));
+      page.on('console', (msg) => { if (msg.type() === 'error') errors.push(`online-${role} console.error: ${msg.text()}`); });
+      await page.goto(`${gameUrl}/index.html`);
+      await page.waitForFunction(() => Boolean(window.__BIZARRO_MELEE__), { timeout: 10000 });
+      return { ctx, page };
+    };
+
+    const hostPeer = await openOnlinePeer('host');
+    const guestPeer = await openOnlinePeer('guest');
+    const pumpP2P = async () => {
+      for (const [role, peer] of [['host', hostPeer], ['guest', guestPeer]]) {
+        for (const ch of [0, 1]) {
+          const pkts = p2pQueues[role][ch].splice(0);
+          for (const pkt of pkts) {
+            await peer.page.evaluate(({ ch, pkt }) => window.__pushMockInbox(ch, pkt), { ch, pkt });
+          }
+        }
+      }
+    };
+    const joinPayload = {
+      lobbyId: 'lobby-e2e',
+      hostId: 'user-host',
+      users: [
+        { userId: 'user-host', username: 'HostPlayer', isHost: true },
+        { userId: 'user-guest', username: 'GuestPlayer', isHost: false },
+      ],
+    };
+    await hostPeer.page.evaluate((d) => {
+      window.__BIZARRO_MELEE__.openScreen('online');
+      window.__emitMockDpad('LOBBY_JOINED', d);
+      window.__emitMockDpad('P2P_CONNECTION_ESTABLISHED', { userId: 'user-guest', username: 'GuestPlayer' });
+    }, joinPayload);
+    await guestPeer.page.evaluate((d) => {
+      window.__BIZARRO_MELEE__.openScreen('online');
+      window.__emitMockDpad('LOBBY_JOINED', d);
+      window.__emitMockDpad('P2P_CONNECTION_ESTABLISHED', { userId: 'user-host', username: 'HostPlayer' });
+    }, joinPayload);
+    await hostPeer.page.locator('#btn-online-launch').click();
+    for (let i = 0; i < 45; i++) {
+      await pumpP2P();
+      await hostPeer.page.waitForTimeout(35);
+      const hState = await hostPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getState().screen);
+      const gState = await guestPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getState().screen);
+      if (hState === 'match' && gState === 'match') break;
+    }
+    const onlineStart = {
+      hostScreen: await hostPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getState().screen),
+      guestScreen: await guestPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getState().screen),
+      hostFrame0: await hostPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getMatch()?.frame ?? -1),
+      guestFrame0: await guestPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getMatch()?.frame ?? -1),
+    };
+    assert.equal(onlineStart.hostScreen, 'match', 'Host must launch into online match via lobby');
+    assert.equal(onlineStart.guestScreen, 'match', 'Guest must automatically poll P2P and launch into online match');
+    for (let i = 0; i < 30; i++) {
+      await pumpP2P();
+      await hostPeer.page.waitForTimeout(25);
+    }
+    const onlineProg = {
+      hostFrame: await hostPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getMatch()?.frame ?? -1),
+      guestFrame: await guestPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getMatch()?.frame ?? -1),
+    };
+    assert.ok(onlineProg.hostFrame > onlineStart.hostFrame0 + 10, `Online host must advance frames (${JSON.stringify(onlineProg)})`);
+    assert.ok(onlineProg.guestFrame > onlineStart.guestFrame0 + 10, `Online guest must advance frames (${JSON.stringify(onlineProg)})`);
+
+    // Verify disconnect aborts match cleanly (does NOT continue solo)
+    await hostPeer.page.evaluate(() => {
+      window.__emitMockDpad('P2P_PEER_DISCONNECTED', { userId: 'user-guest' });
+    });
+    await hostPeer.page.waitForTimeout(120);
+    const afterDcScreen = await hostPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getState().screen);
+    const afterDcWinner = await hostPeer.page.locator('#results-winner').textContent();
+    assert.equal(afterDcScreen, 'results', 'Disconnect must abort online match to Results No Contest');
+    assert.ok(afterDcWinner && afterDcWinner.includes('DISCONNECTED'), `Expected disconnect notice, got "${afterDcWinner}"`);
+    await hostPeer.ctx.close();
+    await guestPeer.ctx.close();
+    console.log(`PASS: Live two-peer Playwright Online Lockstep E2E (lobby launch + sync + disconnect abort) verified`);
 
     assert.equal(externalRequests.length, 0, `Unexpected external network requests: ${externalRequests.join(', ')}`);
     assert.equal(errors.length, 0, `Browser errors detected:\n${errors.join('\n')}`);

@@ -4,7 +4,7 @@ Bizarro Melee is a standalone, offline-first 3D WebGL (with full 2D Canvas fallb
 
 ## Coordinate System & Fixed Timestep
 - Simulation runs at a fixed `60 Hz` (`DT = 1 / 60`) in **Y-up** world coordinates (`x = 0` stage center, `y = 0` top surface of main deck, `y > 0` above stage, `y < 0` below stage).
-- Simulation RNG (`match.rngState`) is seeded per match (`createMatch({ seed })`) so identical inputs produce bit-identical state across peers.
+- Simulation RNG (`match.rng`) is seeded per match (`createMatch({ seed })`) so identical inputs produce bit-identical state across peers.
 - Both renderers (`render3d.js` Three.js WebGL and `render.js` 2D Canvas) read the immutable simulation frame without mutating physics state.
 
 ## Core Modules (`web/js/`)
