@@ -457,7 +457,105 @@ async function runUnitTests() {
     }];
     const pollSonyHalf = im.poll(1, false)[0];
     assert.equal(pollSonyHalf.lightShield, true, 'DualSense raw HID half-pulled L2 trigger should map to Light Shield');
-    console.log('PASS: 8BitDo HID & DualSense 054c raw HID controller mappings validated');
+
+    // Multi-controller (4P) regression tests:
+    // 1) 4 simultaneous heterogeneous controllers (Xbox P1, DualSense HID P2, Switch Pro P3, 8BitDo HID P4)
+    //    even when P1 has custom padProfile & padBinds, P2-P4 must auto-detect independently with zero cross-talk.
+    const im4 = new InputManager();
+    im4.setConfig({ padProfile: 'gamecube', padBinds: { attack: [3] } }); // P1 custom overrides
+    const mkButtons = (len, pressedMap = {}) => Array.from({ length: len }, (_, i) => ({
+      pressed: Boolean(pressedMap[i] && pressedMap[i] > 0.45),
+      value: pressedMap[i] ?? 0,
+    }));
+    const padXbox = {
+      index: 0, connected: true, mapping: 'standard',
+      id: 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)',
+      axes: [0.9, 0, -0.85, 0], // Right on main stick, Left on C-stick
+      buttons: mkButtons(16, { 3: 1 }), // P1 custom rebound attack = button 3
+    };
+    const padSony = {
+      index: 2, connected: true, mapping: '', // Sparse browser slot index 2!
+      id: 'DualSense Wireless Controller (Vendor: 054c Product: 0ce6)',
+      axes: [-0.85, 0, 0, -1, -1, 0], // Left on main stick, resting triggers (-1)
+      buttons: mkButtons(16, { 1: 1 }), // Sony HID Cross (button 1) = attack
+    };
+    const padSwitch = {
+      index: 5, connected: true, mapping: 'standard', // Sparse slot index 5!
+      id: 'Pro Controller (Vendor: 057e Product: 2009)',
+      axes: [0, -0.8, 0, 0.9], // Down on main stick, Up on C-stick (note axis Y is inverted)
+      buttons: mkButtons(16, { 1: 1, 2: 1 }), // Nintendo A (button 1) = attack, Y (button 2) = jump
+    };
+    const pad8BitDo = {
+      index: 7, connected: true, mapping: '', // Sparse slot index 7!
+      id: '8BitDo Ultimate 2 Wireless (Vendor: 2dc8 Product: 6012)',
+      axes: [0.75, 0, 0, 0, -1, 0, -1, -1], // Right on main stick
+      buttons: mkButtons(16, { 0: 1, 9: 1 }), // 8BitDo HID A=0 (attack), RT=9 (shield, NOT pause!)
+    };
+    mockPads = [padXbox, null, padSony, null, null, padSwitch, null, pad8BitDo];
+    const frames4 = im4.poll(4, true, [0, 1, 2, 3]);
+    assert.equal(frames4.length, 4, 'Expected 4 polled input frames');
+    assert.ok(frames4[0].moveX > 0.7 && frames4[0].cStickX < -0.6 && frames4[0].attackPressed,
+      `P1 Xbox custom rebind failed: ${JSON.stringify(frames4[0])}`);
+    assert.ok(frames4[1].moveX < -0.6 && frames4[1].attackPressed && !frames4[1].shield,
+      `P2 DualSense HID auto-detect failed under P1 custom overrides: ${JSON.stringify(frames4[1])}`);
+    assert.ok(frames4[2].moveY > 0.5 && frames4[2].attackPressed && frames4[2].jumpPressed,
+      `P3 Switch Pro auto-detect failed under P1 custom overrides: ${JSON.stringify(frames4[2])}`);
+    assert.ok(frames4[3].moveX > 0.5 && frames4[3].attackPressed && frames4[3].shield && !frames4[3].pausePressed,
+      `P4 8BitDo HID auto-detect failed: ${JSON.stringify(frames4[3])}`);
+
+    // 2) Human-port routing when P2 is CPU and P3 is Human with only 2 controllers connected
+    mockPads = [
+      { index: 0, connected: true, mapping: 'standard', id: 'Xbox P1', axes: [0.9, 0, 0, 0], buttons: mkButtons(16, {}) },
+      { index: 1, connected: true, mapping: 'standard', id: 'Xbox P2', axes: [-0.9, 0, 0, 0], buttons: mkButtons(16, { 0: 1, 9: 1 }) },
+    ];
+    const imRoute = new InputManager();
+    const routed = imRoute.poll(3, true, [0, 2]); // P1=Human, P2=CPU, P3=Human
+    assert.ok(routed[0].moveX > 0.7, 'P1 must keep Pad 1');
+    assert.equal(routed[1].moveX, 0, 'CPU P2 must not receive Pad 2 input');
+    assert.equal(routed[1].pausePressed, false, 'CPU P2 must not emit pausePressed');
+    assert.ok(routed[2].moveX < -0.7 && routed[2].attackPressed && routed[2].pausePressed,
+      `Human P3 must receive Pad 2 when P2 is CPU: ${JSON.stringify(routed[2])}`);
+    // In 1P vs CPU (activeHumanPorts = [0]), idle Pad 2 pressing Start must NOT leak pausePressed to P2!
+    const routed1p = imRoute.poll(2, false, [0]);
+    assert.equal(routed1p[1].pausePressed, false, 'Unassigned Pad 2 must not pause a 1P vs CPU or Online match');
+
+    // 3) pollMenu() per-pad edge isolation: Pad 1 holding Confirm must NOT swallow Pad 2 pressing Confirm!
+    const imMenu = new InputManager();
+    mockPads = [
+      { index: 0, connected: true, mapping: 'standard', id: 'Pad 1', axes: [0, 0, 0, 0], buttons: mkButtons(16, { 0: 1 }) },
+      { index: 1, connected: true, mapping: 'standard', id: 'Pad 2', axes: [0, 0, 0, 0], buttons: mkButtons(16, {}) },
+    ];
+    const m1 = imMenu.pollMenu();
+    assert.equal(m1.confirm, true, 'Pad 1 initial Confirm edge must fire');
+    assert.equal(m1.sourcePort, 0, 'Pad 1 must be reported as sourcePort 0');
+    // Pad 1 STILL holds Confirm while Pad 2 now presses Confirm
+    mockPads = [
+      { index: 0, connected: true, mapping: 'standard', id: 'Pad 1', axes: [0, 0, 0, 0], buttons: mkButtons(16, { 0: 1 }) },
+      { index: 1, connected: true, mapping: 'standard', id: 'Pad 2', axes: [0, 0, 0, 0], buttons: mkButtons(16, { 0: 1 }) },
+    ];
+    const m2 = imMenu.pollMenu();
+    assert.equal(m2.confirm, true, 'Pad 2 Confirm edge must NOT be swallowed while Pad 1 holds Confirm');
+    assert.equal(m2.sourcePort, 1, 'Pad 2 must be reported as sourcePort 1');
+    assert.equal(m2.perPort[0].confirm, false, 'Held Pad 1 must not re-fire Confirm');
+    assert.equal(m2.perPort[1].confirm, true, 'Fresh Pad 2 press must fire on perPort[1]');
+
+    // 4) Hot-plug disconnect + reconnect mid-match must not emit phantom pause/attack edges when gamepadconnected fires
+    imMenu.setMenuMode(false);
+    mockPads = [
+      { index: 0, connected: true, mapping: 'standard', id: 'Pad 1', axes: [0, 0, 0, 0], buttons: mkButtons(16, {}) },
+      { index: 3, connected: true, mapping: 'standard', id: 'Pad 2 Hotplug', axes: [0, 0, 0, 0], buttons: mkButtons(16, { 0: 1, 9: 1 }) },
+    ];
+    imMenu.onGamepadEvent({ type: 'gamepadconnected', gamepad: mockPads[1] });
+    const hotPoll = imMenu.poll(2, true, [0, 1]);
+    assert.equal(hotPoll[1].pausePressed, false, 'Mid-match hot-plug waking with Start must not fire phantom pause');
+    assert.equal(hotPoll[1].attackPressed, false, 'Mid-match hot-plug waking with A must not fire phantom attack');
+    // Release and press again -> real press works immediately
+    mockPads[1].buttons = mkButtons(16, {});
+    imMenu.poll(2, true, [0, 1]);
+    mockPads[1].buttons = mkButtons(16, { 0: 1 });
+    const realPoll = imMenu.poll(2, true, [0, 1]);
+    assert.equal(realPoll[1].attackPressed, true, 'After releasing wake-up button, real attack press must fire');
+    console.log('PASS: 8BitDo HID, DualSense 054c, 4P mixed controllers, sparse slots, menu isolation & hot-plug validated');
   } finally {
     if (origNav) Object.defineProperty(globalThis, 'navigator', origNav);
     else delete globalThis.navigator;
@@ -1175,6 +1273,103 @@ async function runBrowserProof() {
     await hostPeer.ctx.close();
     await guestPeer.ctx.close();
     console.log(`PASS: Live two-peer Playwright Online Lockstep E2E (lobby launch + sync + disconnect abort) verified`);
+
+    // F. Live 4-Controller Local Multiplayer Browser E2E (CSS auto-4P human + PAD 1-4 badges + simultaneous 4P combat + P3 pause + Controller Config multi-pad tabs)
+    const mpCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await mpCtx.addInitScript(() => {
+      const mkBtns = (pressed = {}) => Array.from({ length: 16 }, (_, i) => ({
+        pressed: Boolean(pressed[i] && pressed[i] > 0.45),
+        value: pressed[i] ?? 0,
+      }));
+      window.__mockGamepads = [
+        { index: 0, connected: true, mapping: 'standard', id: 'Xbox Wireless Controller (STANDARD GAMEPAD)', axes: [0, 0, 0, 0], buttons: mkBtns() },
+        { index: 2, connected: true, mapping: '', id: 'DualSense Wireless Controller (Vendor: 054c Product: 0ce6)', axes: [0, 0, 0, -1, -1, 0], buttons: mkBtns() },
+        { index: 4, connected: true, mapping: 'standard', id: 'Pro Controller (Vendor: 057e Product: 2009)', axes: [0, 0, 0, 0], buttons: mkBtns() },
+        { index: 6, connected: true, mapping: '', id: '8BitDo Ultimate 2 Wireless (Vendor: 2dc8 Product: 6012)', axes: [0, 0, 0, 0, -1, 0, -1, -1], buttons: mkBtns() },
+      ];
+      Object.defineProperty(Navigator.prototype, 'getGamepads', {
+        configurable: true,
+        value: () => {
+          const arr = [null, null, null, null, null, null, null, null];
+          for (const p of window.__mockGamepads || []) if (p) arr[p.index] = p;
+          return arr;
+        },
+      });
+    });
+    const mpPage = await mpCtx.newPage();
+    mpPage.on('pageerror', (e) => errors.push(`mp4 pageerror: ${e.message}`));
+    mpPage.on('console', (msg) => { if (msg.type() === 'error') errors.push(`mp4 console.error: ${msg.text()}`); });
+    await mpPage.goto(`${gameUrl}/index.html`);
+    await mpPage.waitForFunction(() => Boolean(window.__BIZARRO_MELEE__), { timeout: 10000 });
+    await mpPage.locator('#btn-vs-mode').click();
+    await mpPage.waitForTimeout(200);
+    const css4p = await mpPage.evaluate(() => ({
+      playerCount: document.getElementById('sel-player-count')?.value,
+      portCards: Array.from(document.querySelectorAll('#css-ports .port-card')).map((el) => ({
+        port: Number(el.dataset.port),
+        tag: el.querySelector('.port-tag')?.textContent || '',
+        padBadge: el.querySelector('.port-pad-badge')?.textContent || '',
+      })),
+      hintText: document.getElementById('pad-hint-bar')?.textContent || '',
+    }));
+    assert.equal(css4p.playerCount, '4', `VS Mode CSS should auto-expand to 4P with 4 controllers connected: ${JSON.stringify(css4p)}`);
+    assert.equal(css4p.portCards.length, 4, 'Expected 4 port cards in CSS');
+    assert.deepEqual(css4p.portCards.map((c) => c.tag), ['P1', 'P2', 'P3', 'P4'], `All 4 ports should auto-enable as Human: ${JSON.stringify(css4p)}`);
+    assert.deepEqual(css4p.portCards.map((c) => c.padBadge), ['PAD 1', 'PAD 2', 'PAD 3', 'PAD 4'], `Expected PAD 1..4 badges: ${JSON.stringify(css4p)}`);
+    assert.ok(css4p.hintText.includes('4 Pads'), `Hint bar should show 4 Pads, got "${css4p.hintText}"`);
+
+    // Launch 4P match on Final Obligation and drive all 4 heterogeneous controllers simultaneously
+    await mpPage.evaluate(() => {
+      window.__BIZARRO_MELEE__.startMode('vs-stock', 'final-obligation');
+      const m = window.__BIZARRO_MELEE__.getMatch();
+      m.status = 'playing';
+      m.introTimer = 0;
+    });
+    const before4p = await mpPage.evaluate(() => window.__BIZARRO_MELEE__.getMatch().fighters.map((f) => ({
+      port: f.port, isCpu: f.isCpu, x: f.x, y: f.y,
+    })));
+    assert.ok(before4p.every((f) => !f.isCpu), `All 4 fighters in 4P match must be Human: ${JSON.stringify(before4p)}`);
+    await mpPage.evaluate(() => {
+      // P1 right, P2 left, P3 right, P4 left simultaneously across 4 different hardware layouts
+      window.__mockGamepads[0].axes[0] = 0.95;
+      window.__mockGamepads[1].axes[0] = -0.95;
+      window.__mockGamepads[2].axes[0] = 0.95;
+      window.__mockGamepads[3].axes[0] = -0.95;
+    });
+    await mpPage.waitForTimeout(450);
+    const after4p = await mpPage.evaluate(() => window.__BIZARRO_MELEE__.getMatch().fighters.map((f) => ({
+      port: f.port, x: f.x, y: f.y,
+    })));
+    assert.ok(after4p[0].x > before4p[0].x + 25, `P1 (Xbox) must move right (${before4p[0].x} -> ${after4p[0].x})`);
+    assert.ok(after4p[1].x < before4p[1].x - 25, `P2 (DualSense HID) must move left (${before4p[1].x} -> ${after4p[1].x})`);
+    assert.ok(after4p[2].x > before4p[2].x + 25, `P3 (Switch Pro) must move right (${before4p[2].x} -> ${after4p[2].x})`);
+    assert.ok(after4p[3].x < before4p[3].x - 25, `P4 (8BitDo HID) must move left (${before4p[3].x} -> ${after4p[3].x})`);
+
+    // P3 presses Start (button 9 on Switch Pro) -> pauses match and attributes pause readout to P3
+    await mpPage.evaluate(() => {
+      for (const p of window.__mockGamepads) p.axes[0] = 0;
+      window.__mockGamepads[2].buttons[9] = { pressed: true, value: 1 };
+    });
+    await mpPage.waitForTimeout(150);
+    const pause4p = await mpPage.evaluate(() => ({
+      screen: window.__BIZARRO_MELEE__.getState().screen,
+      readout: document.getElementById('pause-tech-readout')?.textContent || '',
+    }));
+    assert.equal(pause4p.screen, 'pause', 'P3 Start must pause 4P local match');
+    assert.ok(pause4p.readout.startsWith('P3 '), `Pause readout should credit P3, got "${pause4p.readout}"`);
+
+    // Open Controller Config from Pause -> verify all 4 pad tabs render & switch cleanly
+    await mpPage.evaluate(() => { window.__mockGamepads[2].buttons[9] = { pressed: false, value: 0 }; });
+    await mpPage.locator('#btn-pause-controller').click();
+    await mpPage.waitForTimeout(150);
+    const ctrlTabs = await mpPage.evaluate(() => Array.from(document.querySelectorAll('#ctrl-pad-tabs .ctrl-pad-tab')).map((b) => b.textContent));
+    assert.deepEqual(ctrlTabs, ['PAD 1', 'PAD 2', 'PAD 3', 'PAD 4'], `Controller Config must expose tabs for all 4 pads: ${JSON.stringify(ctrlTabs)}`);
+    await mpPage.locator('#ctrl-pad-tabs .ctrl-pad-tab').nth(3).click();
+    await mpPage.waitForTimeout(120);
+    const pad4Badge = await mpPage.locator('#ctrl-pad-badge').textContent();
+    assert.ok(pad4Badge && pad4Badge.includes('PAD 4/4') && pad4Badge.includes('8BitDo'), `Selecting PAD 4 tab must inspect 8BitDo controller, got "${pad4Badge}"`);
+    await mpCtx.close();
+    console.log('PASS: Live 4-Controller Playwright E2E (auto-4P CSS + PAD 1-4 + simultaneous mixed-hardware 4P movement + P3 pause + 4-pad tester) verified');
 
     assert.equal(externalRequests.length, 0, `Unexpected external network requests: ${externalRequests.join(', ')}`);
     assert.equal(errors.length, 0, `Browser errors detected:\n${errors.join('\n')}`);

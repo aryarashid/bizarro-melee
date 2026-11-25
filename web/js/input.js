@@ -136,8 +136,8 @@ function readPads() {
   }
 }
 
-function padProfile(pad, config) {
-  if (config?.padProfile && config.padProfile !== 'auto') return config.padProfile;
+function padProfile(pad, config, padSlot = 0) {
+  if (padSlot === 0 && config?.padProfile && config.padProfile !== 'auto') return config.padProfile;
   const id = String(pad.id || '');
   if (GAMECUBE.test(id) && pad.mapping !== 'standard') return 'gamecube';
   if (NINTENDO.test(id)) return 'nintendo';
@@ -190,8 +190,8 @@ function sampleDpad(pad) {
   return { up, down, left, right };
 }
 
-function samplePad(pad, config) {
-  const profile = padProfile(pad, config);
+function samplePad(pad, config, padSlot = 0) {
+  const profile = padProfile(pad, config, padSlot);
   const id = String(pad.id || '');
   const raw = profile === 'gamecube' && pad.mapping !== 'standard';
   const mayflash = raw && /mayflash|0079|1846/i.test(id) && pad.axes?.length >= 6;
@@ -224,8 +224,8 @@ function samplePad(pad, config) {
               ? PAD_NINTENDO
               : PAD_STANDARD;
 
-  // Null follows the hardware profile. Explicit bindings use the raw button indices shown by diagnostics.
-  const binds = (key) => config.padBinds?.[key] ?? layout[key] ?? PAD_STANDARD[key];
+  // Null follows the hardware profile. Custom raw button overrides apply to Pad 1 (slot 0) so mixed P2-P4 controllers auto-detect cleanly.
+  const binds = (key) => (padSlot === 0 ? config.padBinds?.[key] : null) ?? layout[key] ?? PAD_STANDARD[key];
 
   const hidSplitRightY = usesSplitRightY(pad, raw);
   const cXIdx = mayflash ? 5 : wup ? 3 : 2;
@@ -320,15 +320,11 @@ export class InputManager {
     this.touch = createEmptyInput();
     this.touchTaps = new Set();
     this.previous = [];
-    this.padPorts = [];
+    this.padPorts = [null, null, null, null];
     this.padBlocked = new Map();
     this.priorPads = new Map();
-    this.menuPrev = {
-      up: false, down: false, left: false, right: false,
-      confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
-      rawButtons: new Set(),
-    };
-    this.menuHold = { up: 0, down: 0, left: 0, right: 0 };
+    this.menuPrevByPad = new Map();
+    this.menuHoldByPad = new Map();
     this.menuMode = false;
     this.kbMenuQueue = [];
     this.onPadChange = options.onPadChange || null;
@@ -363,8 +359,24 @@ export class InputManager {
     this.onKeyUp = ({ code }) => this.keys.delete(code);
     this.onBlur = () => this.clearHolds();
     this.onTouch = () => { this.activeMode = 'touch'; };
-    this.onGamepadEvent = () => {
-      if (readPads().length > 0) this.activeMode = 'gamepad';
+    this.onGamepadEvent = (event) => {
+      const padsList = readPads();
+      const padsMap = new Map(padsList.map((pad) => [pad.index, pad]));
+      this._syncPadPorts(padsMap);
+      if (padsList.length > 0) this.activeMode = 'gamepad';
+      const evPad = event?.type === 'gamepadconnected' ? (padsMap.get(event.gamepad?.index) || event.gamepad) : null;
+      if (evPad) {
+        const slot = Math.max(0, this.padPorts.indexOf(evPad.index));
+        if (this.menuMode) {
+          this.menuPrevByPad.set(evPad.index, this._sampleSinglePadMenu(evPad, slot));
+          this.menuHoldByPad.set(evPad.index, { up: 0, down: 0, left: 0, right: 0 });
+        } else {
+          const vals = samplePad(evPad, this.config, slot).values;
+          const blocked = {};
+          for (const k of BLOCKABLE_BUTTONS) blocked[k] = !!vals[k];
+          this.padBlocked.set(evPad.index, blocked);
+        }
+      }
       this.onPadChange?.(this.getControllerDiagnostics());
     };
     this.attach(options.rootEl ?? globalThis.window);
@@ -379,13 +391,17 @@ export class InputManager {
     if (!this.menuMode) this.kbMenuQueue.length = 0;
   }
 
-  getDefaultPadBindings() {
-    const pads = readPads();
-    if (pads.length) {
-      return copyBinds(samplePad(pads[0], this.config).layout);
+  getDefaultPadBindings(port = 0) {
+    const padsList = readPads();
+    const padsMap = new Map(padsList.map((pad) => [pad.index, pad]));
+    this._syncPadPorts(padsMap);
+    const pad = padsMap.get(this.padPorts[port]) || padsList[0];
+    if (pad) {
+      const slot = Math.max(0, this.padPorts.indexOf(pad.index));
+      return copyBinds(samplePad(pad, this.config, slot).layout);
     }
-    if (this.config.padProfile === 'nintendo') return copyBinds(PAD_NINTENDO);
-    if (this.config.padProfile === 'gamecube') return copyBinds(MAYFLASH);
+    if (port === 0 && this.config.padProfile === 'nintendo') return copyBinds(PAD_NINTENDO);
+    if (port === 0 && this.config.padProfile === 'gamecube') return copyBinds(MAYFLASH);
     return copyBinds(PAD_STANDARD);
   }
 
@@ -419,8 +435,13 @@ export class InputManager {
   }
 
   getControllerDiagnostics() {
-    const connectedPads = readPads().map((pad) => {
-      const { profile, values, lAnalog, rAnalog } = samplePad(pad, this.config);
+    const padsList = readPads();
+    const padsMap = new Map(padsList.map((pad) => [pad.index, pad]));
+    this._syncPadPorts(padsMap);
+    const connectedPads = padsList.map((pad) => {
+      const port = this.padPorts.indexOf(pad.index);
+      const padSlot = port >= 0 ? port : 0;
+      const { profile, values, lAnalog, rAnalog } = samplePad(pad, this.config, padSlot);
       const { moveX, moveY, cStickX, cStickY } = values;
       const pressedButtons = Array.from(pad.buttons ?? []).flatMap((b, i) =>
         b?.pressed || (b?.value ?? b) > 0.45 ? [i] : []);
@@ -437,6 +458,7 @@ export class InputManager {
       const rawAxes = Array.from(pad.axes ?? []).slice(0, 10).map((v) => Math.round(unit(v) * 100) / 100);
       return {
         index: pad.index,
+        port,
         id: pad.id,
         mapping: pad.mapping || 'raw',
         profile,
@@ -451,7 +473,12 @@ export class InputManager {
         actions,
       };
     });
-    return { mode: this.activeMode, connectedPads };
+    connectedPads.sort((a, b) => {
+      const pa = a.port >= 0 ? a.port : 99;
+      const pb = b.port >= 0 ? b.port : 99;
+      return pa - pb || a.index - b.index;
+    });
+    return { mode: this.activeMode, padPorts: [...this.padPorts], connectedPads };
   }
 
   attach(rootEl = globalThis.window) {
@@ -501,13 +528,26 @@ export class InputManager {
   }
 
   _syncPadPorts(padsMap) {
-    this.padPorts = Array.from({ length: 4 }, (_, i) => padsMap.has(this.padPorts[i]) ? this.padPorts[i] : null);
+    const prevPorts = this.padPorts;
+    this.padPorts = Array.from({ length: 4 }, (_, i) => {
+      const kept = padsMap.has(prevPorts[i]) ? prevPorts[i] : null;
+      if (prevPorts[i] != null && kept == null) this.previous[i] = undefined;
+      return kept;
+    });
     for (const index of padsMap.keys()) {
       if (this.padPorts.includes(index)) continue;
       const free = this.padPorts.indexOf(null);
       if (free !== -1) this.padPorts[free] = index;
     }
     for (const index of this.padBlocked.keys()) if (!padsMap.has(index)) this.padBlocked.delete(index);
+    for (const index of this.menuPrevByPad.keys()) if (!padsMap.has(index)) this.menuPrevByPad.delete(index);
+    for (const index of this.menuHoldByPad.keys()) if (!padsMap.has(index)) this.menuHoldByPad.delete(index);
+  }
+
+  getPadPorts() {
+    const padsMap = new Map(readPads().map((pad) => [pad.index, pad]));
+    this._syncPadPorts(padsMap);
+    return [...this.padPorts];
   }
 
   clearHolds() {
@@ -522,66 +562,79 @@ export class InputManager {
     this.previous = Array.from({ length: 4 }, (_, port) => {
       const pad = padsMap.get(this.padPorts[port]);
       if (!pad) return undefined;
-      const vals = samplePad(pad, this.config).values;
+      const vals = samplePad(pad, this.config, port).values;
       return { shield: !!vals.shield, stickJump: !!vals.stickJump, dedicatedJump: !!vals.jump };
     });
     // Only block held discrete digital buttons (never analog sticks or triggers) until released.
     this.padBlocked = new Map(padsList.map((pad) => {
-      const vals = samplePad(pad, this.config).values;
+      const slot = Math.max(0, this.padPorts.indexOf(pad.index));
+      const vals = samplePad(pad, this.config, slot).values;
       const blocked = {};
       for (const k of BLOCKABLE_BUTTONS) blocked[k] = !!vals[k];
       return [pad.index, blocked];
     }));
   }
 
-  _sampleMenuState(pads) {
-    const cur = {
-      up: false, down: false, left: false, right: false,
-      confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
-      rawButtons: new Set(),
+  _sampleSinglePadMenu(pad, padSlot = 0) {
+    const s = samplePad(pad, this.config, padSlot);
+    // Hardware-profile menu buttons are independent of combat padBinds and Z-jump!
+    // Use un-curved stick axes (0.42 threshold) so menu browsing feels immediate on Bluetooth controllers.
+    const sx = s.values.rawMoveX || s.values.moveX;
+    const sy = s.values.rawMoveY || s.values.moveY;
+    const dHoriz = s.dpad.left || s.dpad.right;
+    const rawButtons = new Set();
+    Array.from(pad.buttons ?? []).forEach((b, i) => {
+      if (b?.pressed || (typeof b === 'number' ? b : b?.value || 0) > 0.45) rawButtons.add(i);
+    });
+    return {
+      up: (s.dpad.up && !dHoriz) || sy >= 0.42,
+      down: (s.dpad.down && !dHoriz) || sy <= -0.42,
+      left: s.dpad.left || sx <= -0.42,
+      right: s.dpad.right || sx >= 0.42,
+      confirm: s.menuButtons.confirm,
+      back: s.menuButtons.back,
+      alt: s.menuButtons.alt,
+      start: s.menuButtons.start,
+      lb: s.menuButtons.lb,
+      rb: s.menuButtons.rb,
+      rawButtons,
     };
-    for (const pad of pads) {
-      const s = samplePad(pad, this.config);
-      // Hardware-profile menu buttons are independent of combat padBinds and Z-jump!
-      // Use un-curved stick axes (0.42 threshold) so menu browsing feels immediate on Bluetooth controllers.
-      const sx = s.values.rawMoveX || s.values.moveX;
-      const sy = s.values.rawMoveY || s.values.moveY;
-      const dHoriz = s.dpad.left || s.dpad.right;
-      cur.up ||= (s.dpad.up && !dHoriz) || sy >= 0.42;
-      cur.down ||= (s.dpad.down && !dHoriz) || sy <= -0.42;
-      cur.left ||= s.dpad.left || sx <= -0.42;
-      cur.right ||= s.dpad.right || sx >= 0.42;
-      cur.confirm ||= s.menuButtons.confirm;
-      cur.back ||= s.menuButtons.back;
-      cur.alt ||= s.menuButtons.alt;
-      cur.start ||= s.menuButtons.start;
-      cur.lb ||= s.menuButtons.lb;
-      cur.rb ||= s.menuButtons.rb;
-      if (pad === pads[0]) {
-        Array.from(pad.buttons ?? []).forEach((b, i) => {
-          if (b?.pressed || (typeof b === 'number' ? b : b?.value || 0) > 0.45) cur.rawButtons.add(i);
-        });
-      }
-    }
-    return cur;
   }
 
   syncMenuButtons() {
-    this.menuPrev = this._sampleMenuState(readPads());
-    this.menuHold = { up: 0, down: 0, left: 0, right: 0 };
+    const padsList = readPads();
+    const padsMap = new Map(padsList.map((pad) => [pad.index, pad]));
+    this._syncPadPorts(padsMap);
+    this.menuPrevByPad.clear();
+    this.menuHoldByPad.clear();
+    for (const pad of padsList) {
+      const slot = Math.max(0, this.padPorts.indexOf(pad.index));
+      this.menuPrevByPad.set(pad.index, this._sampleSinglePadMenu(pad, slot));
+      this.menuHoldByPad.set(pad.index, { up: 0, down: 0, left: 0, right: 0 });
+    }
     this.kbMenuQueue.length = 0;
   }
 
   pollMenu() {
-    const pads = readPads();
+    const padsList = readPads();
+    const padsMap = new Map(padsList.map((pad) => [pad.index, pad]));
+    this._syncPadPorts(padsMap);
+    const pad0 = padsMap.get(this.padPorts[0]) || padsList[0] || null;
     const out = {
-      connected: pads.length > 0,
+      connected: padsList.length > 0,
       keyboardActive: false,
-      padCount: pads.length,
-      padName: pads[0]?.id ? String(pads[0].id).slice(0, 32) : '',
+      padCount: padsList.length,
+      padPorts: [...this.padPorts],
+      padName: pad0?.id ? String(pad0.id).slice(0, 32) : '',
+      sourcePort: -1,
       up: false, down: false, left: false, right: false,
       confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
       rawPressed: [],
+      rawPressedByPort: [[], [], [], []],
+      perPort: Array.from({ length: 4 }, () => ({
+        up: false, down: false, left: false, right: false,
+        confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
+      })),
     };
     if (this.kbMenuQueue.length) {
       const queued = this.kbMenuQueue.splice(0, this.kbMenuQueue.length);
@@ -590,43 +643,102 @@ export class InputManager {
       }
       out.keyboardActive = true;
     }
-    if (!pads.length) {
-      this.menuPrev = this._sampleMenuState([]);
-      this.menuHold = { up: 0, down: 0, left: 0, right: 0 };
+    if (!padsList.length) {
+      this.menuPrevByPad.clear();
+      this.menuHoldByPad.clear();
       return out;
     }
 
-    const cur = this._sampleMenuState(pads);
-
-    for (const dir of MENU_DIRS) {
-      if (cur[dir]) {
-        this.menuHold[dir]++;
-        if (this.menuHold[dir] === 1 || (this.menuHold[dir] >= MENU_REPEAT_DELAY && (this.menuHold[dir] - MENU_REPEAT_DELAY) % MENU_REPEAT_RATE === 0)) {
-          out[dir] = true;
-        }
-      } else {
-        this.menuHold[dir] = 0;
+    const rawSeen = new Set();
+    for (let port = 0; port < 4; port++) {
+      const padIdx = this.padPorts[port];
+      if (padIdx == null) continue;
+      const pad = padsMap.get(padIdx);
+      if (!pad) continue;
+      const cur = this._sampleSinglePadMenu(pad, port);
+      const prev = this.menuPrevByPad.get(pad.index) || {
+        up: false, down: false, left: false, right: false,
+        confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
+        rawButtons: new Set(),
+      };
+      let hold = this.menuHoldByPad.get(pad.index);
+      if (!hold) {
+        hold = { up: 0, down: 0, left: 0, right: 0 };
+        this.menuHoldByPad.set(pad.index, hold);
       }
+
+      let padActed = false;
+      for (const dir of MENU_DIRS) {
+        if (cur[dir]) {
+          hold[dir]++;
+          if (hold[dir] === 1 || (hold[dir] >= MENU_REPEAT_DELAY && (hold[dir] - MENU_REPEAT_DELAY) % MENU_REPEAT_RATE === 0)) {
+            out[dir] = true;
+            out.perPort[port][dir] = true;
+            padActed = true;
+          }
+        } else {
+          hold[dir] = 0;
+        }
+      }
+
+      for (const key of ['confirm', 'back', 'alt', 'start', 'lb', 'rb']) {
+        if (cur[key] && !prev[key]) {
+          out[key] = true;
+          out.perPort[port][key] = true;
+          padActed = true;
+        }
+      }
+      for (const idx of cur.rawButtons) {
+        if (!prev.rawButtons.has(idx)) {
+          out.rawPressedByPort[port].push(idx);
+          if (!rawSeen.has(idx)) {
+            rawSeen.add(idx);
+            out.rawPressed.push(idx);
+          }
+          padActed = true;
+        }
+      }
+      if (padActed && out.sourcePort === -1) out.sourcePort = port;
+      this.menuPrevByPad.set(pad.index, cur);
     }
 
-    for (const key of ['confirm', 'back', 'alt', 'start', 'lb', 'rb']) {
-      out[key] ||= cur[key] && !this.menuPrev[key];
-    }
-    for (const idx of cur.rawButtons) {
-      if (!this.menuPrev.rawButtons.has(idx)) out.rawPressed.push(idx);
-    }
-
-    if (out.rawPressed.length || (pads.length && !out.keyboardActive && (out.up || out.down || out.left || out.right || out.confirm || out.back || out.alt || out.start || out.lb || out.rb))) {
+    if (out.rawPressed.length || (padsList.length && !out.keyboardActive && (out.up || out.down || out.left || out.right || out.confirm || out.back || out.alt || out.start || out.lb || out.rb))) {
       this.activeMode = 'gamepad';
     }
-    this.menuPrev = cur;
     return out;
   }
 
-  poll(portCount = 4, localMultiplayer = this.options.localMultiplayer ?? (portCount > 1)) {
+  resolvePadIndexByPort(count, activeHumanPorts = null) {
+    const resolved = Array.from({ length: count }, (_, port) => this.padPorts[port] ?? null);
+    if (!Array.isArray(activeHumanPorts)) return resolved;
+    const humanSet = new Set(activeHumanPorts.filter((p) => Number.isInteger(p) && p >= 0 && p < count));
+    const assigned = Array(count).fill(null);
+    const usedPadIndices = new Set();
+    // Preserve direct port-to-pad binding whenever that port is human.
+    for (const port of humanSet) {
+      const direct = this.padPorts[port];
+      if (direct != null) {
+        assigned[port] = direct;
+        usedPadIndices.add(direct);
+      }
+    }
+    // Route any remaining unassigned pads to human ports that didn't have a direct pad (e.g. P2 is CPU, P3 is Human).
+    for (const port of activeHumanPorts) {
+      if (!humanSet.has(port) || assigned[port] != null) continue;
+      const spare = this.padPorts.find((idx) => idx != null && !usedPadIndices.has(idx));
+      if (spare != null) {
+        assigned[port] = spare;
+        usedPadIndices.add(spare);
+      }
+    }
+    return assigned;
+  }
+
+  poll(portCount = 4, localMultiplayer = this.options.localMultiplayer ?? (portCount > 1), activeHumanPorts = null) {
     const count = Math.max(0, Math.min(4, Math.floor(portCount)));
     const pads = new Map(readPads().map((pad) => [pad.index, pad]));
     this._syncPadPorts(pads);
+    const padIndexByPort = this.resolvePadIndexByPort(count, activeHumanPorts);
     const frames = [];
     let padUsed = false;
     const observedPads = new Map();
@@ -682,9 +794,10 @@ export class InputManager {
         merge(frame, this.touch);
         for (const k of this.touchTaps) taps.add(k);
       }
-      const pad = pads.get(this.padPorts[port]);
+      const pad = pads.get(padIndexByPort[port]);
       if (pad) {
-        const values = samplePad(pad, this.config).values;
+        const padSlot = Math.max(0, this.padPorts.indexOf(pad.index));
+        const values = samplePad(pad, this.config, padSlot).values;
         const blocked = this.padBlocked.get(pad.index);
         if (blocked) {
           for (const k of BLOCKABLE_BUTTONS) {

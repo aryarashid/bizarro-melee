@@ -78,12 +78,17 @@ const app = {
   flashEnabled: true,
   techFeedEnabled: true,
   rebindAction: null,
+  testerPadPort: 0,
+  lastTesterTabsKey: '',
+  lastObservedPadKey: '',
+  manualPlayerCount: false,
+  cssPortManualByP1: false,
   use3D: renderer3d.ready,
   ports: [
-    { port: 0, fighterId: 'faux', paletteIndex: 0, isCpu: false, cpuLevel: 5, name: 'P1', team: 'red' },
-    { port: 1, fighterId: 'captain-pigeon', paletteIndex: 0, isCpu: true, cpuLevel: 5, name: 'CPU', team: 'blue' },
-    { port: 2, fighterId: 'garth', paletteIndex: 0, isCpu: true, cpuLevel: 5, name: 'CPU 3', team: 'red' },
-    { port: 3, fighterId: 'bario', paletteIndex: 0, isCpu: true, cpuLevel: 5, name: 'CPU 4', team: 'blue' },
+    { port: 0, fighterId: 'faux', paletteIndex: 0, isCpu: false, manualCpu: false, cpuLevel: 5, name: 'P1', team: 'red' },
+    { port: 1, fighterId: 'captain-pigeon', paletteIndex: 0, isCpu: true, manualCpu: false, cpuLevel: 5, name: 'CPU', team: 'blue' },
+    { port: 2, fighterId: 'garth', paletteIndex: 0, isCpu: true, manualCpu: false, cpuLevel: 5, name: 'CPU 3', team: 'red' },
+    { port: 3, fighterId: 'bario', paletteIndex: 0, isCpu: true, manualCpu: false, cpuLevel: 5, name: 'CPU 4', team: 'blue' },
   ],
   records: {
     matchesWon: 0,
@@ -330,6 +335,26 @@ function visibleCssPortCount() {
   return app.playerCount;
 }
 
+function syncConnectedControllersToCss(autoExpand = true) {
+  const isVs = app.selectedMode === MODE.VS_STOCK || app.selectedMode === MODE.VS_TIME;
+  if (!isVs) return;
+  const padPorts = input.getPadPorts ? input.getPadPorts() : [null, null, null, null];
+  const connectedCount = padPorts.filter((idx) => idx != null).length;
+  if (connectedCount < 2) return;
+  const targetCount = Math.min(4, connectedCount);
+  if (autoExpand && !app.manualPlayerCount && app.playerCount < targetCount) {
+    app.playerCount = targetCount;
+    if ($('sel-player-count')) $('sel-player-count').value = String(app.playerCount);
+  }
+  for (let i = 1; i < targetCount; i++) {
+    const p = app.ports[i];
+    if (p && !p.manualCpu) {
+      p.isCpu = false;
+      p.name = `P${i + 1}`;
+    }
+  }
+}
+
 function syncCssSelection() {
   const count = visibleCssPortCount();
   if (app.activeCssPort >= count) app.activeCssPort = 0;
@@ -343,6 +368,9 @@ function syncCssSelection() {
 
   const tiles = $('css-grid').querySelectorAll('.css-tile');
   const activePorts = app.ports.slice(0, count);
+  const padPorts = input.getPadPorts ? input.getPadPorts() : [null, null, null, null];
+  const humanPorts = activePorts.filter((p) => !p.isCpu).map((p) => p.port);
+  const resolvedPads = input.resolvePadIndexByPort ? input.resolvePadIndexByPort(count, humanPorts) : padPorts;
 
   for (const tile of tiles) {
     const id = tile.dataset.fighterId;
@@ -392,6 +420,22 @@ function syncCssSelection() {
     fname.className = 'port-fighter';
     fname.textContent = def.name;
     top.append(tag, fname);
+    if (!p.isCpu) {
+      const padIdx = resolvedPads[p.port];
+      const padSlotNum = padIdx != null ? (padPorts.indexOf(padIdx) + 1) : 0;
+      const padBadge = document.createElement('span');
+      if (padSlotNum > 0) {
+        padBadge.className = 'port-pad-badge';
+        padBadge.textContent = `PAD ${padSlotNum}`;
+      } else if (p.port <= 1) {
+        padBadge.className = 'port-pad-badge kb';
+        padBadge.textContent = 'KB';
+      } else {
+        padBadge.className = 'port-pad-badge missing';
+        padBadge.textContent = 'NO PAD';
+      }
+      top.appendChild(padBadge);
+    }
 
     const controls = document.createElement('div');
     controls.className = 'port-controls';
@@ -433,6 +477,7 @@ function syncCssSelection() {
       cpuBtn.addEventListener('click', () => {
         sound.playUi('move');
         p.isCpu = !p.isCpu;
+        p.manualCpu = p.isCpu;
         p.name = p.isCpu ? `CPU ${p.port + 1}` : `P${p.port + 1}`;
         syncCssSelection();
       });
@@ -457,6 +502,7 @@ function syncCssSelection() {
     card.addEventListener('click', (e) => {
       if (e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT') return;
       app.activeCssPort = p.port;
+      app.cssPortManualByP1 = true;
       renderBioPanel(def, p.paletteIndex);
       syncCssSelection();
     });
@@ -1260,6 +1306,8 @@ const REBIND_ACTIONS = [
 const PAD_REBINDABLE = new Set(['attack', 'special', 'jump', 'shield', 'grab', 'taunt']);
 
 function syncControllerScreen() {
+  app.lastTesterTabsKey = '';
+  renderControllerPadTabs(input.getControllerDiagnostics?.().connectedPads || []);
   const cfg = input.getConfig ? input.getConfig() : { tapJump: true, zJump: false, cStickMode: 'smash', padProfile: 'auto', deadzone: 0.18, keyBinds: {}, padBinds: {} };
   if ($('sel-pad-profile')) $('sel-pad-profile').value = cfg.padProfile || 'auto';
   if ($('inp-tap-jump')) $('inp-tap-jump').checked = cfg.tapJump !== false;
@@ -1299,6 +1347,39 @@ function syncControllerScreen() {
   }
 }
 
+function renderControllerPadTabs(connectedPads) {
+  const tabsEl = $('ctrl-pad-tabs');
+  if (!tabsEl) return;
+  const pads = Array.isArray(connectedPads) ? connectedPads : [];
+  const activeIdx = pads.findIndex((p, idx) => (p.port >= 0 ? p.port : idx) === app.testerPadPort);
+  if (pads.length && activeIdx === -1) {
+    app.testerPadPort = pads[0].port >= 0 ? pads[0].port : 0;
+  }
+  const key = `${app.testerPadPort}|${pads.map((p, idx) => `${p.port >= 0 ? p.port : idx}:${p.index}`).join(',')}`;
+  if (key === app.lastTesterTabsKey) return;
+  app.lastTesterTabsKey = key;
+  tabsEl.hidden = pads.length <= 1;
+  tabsEl.textContent = '';
+  if (pads.length <= 1) return;
+  for (let i = 0; i < pads.length; i++) {
+    const p = pads[i];
+    const slot = p.port >= 0 ? p.port : i;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = slot === app.testerPadPort ? 'ctrl-pad-tab active' : 'ctrl-pad-tab';
+    btn.dataset.padPort = String(slot);
+    btn.textContent = `PAD ${slot + 1}`;
+    btn.addEventListener('click', () => {
+      sound.playUi('move');
+      app.testerPadPort = slot;
+      app.lastTesterTabsKey = '';
+      renderControllerPadTabs(pads);
+      drawControllerTester();
+    });
+    tabsEl.appendChild(btn);
+  }
+}
+
 function drawControllerTester() {
   if (app.screen !== 'controller') return;
   const c = $('ctrl-tester');
@@ -1308,7 +1389,9 @@ function drawControllerTester() {
   ctx.clearRect(0, 0, w, h);
 
   const diag = input.getControllerDiagnostics ? input.getControllerDiagnostics() : { mode: 'keyboard', connectedPads: [] };
-  const pad = diag.connectedPads?.[0] || null;
+  const pads = diag.connectedPads || [];
+  renderControllerPadTabs(pads);
+  const pad = pads.find((p, idx) => (p.port >= 0 ? p.port : idx) === app.testerPadPort) || pads[0] || null;
   const badge = $('ctrl-pad-badge');
   if (badge) {
     const profLabel = pad?.profile === 'gamecube'
@@ -1316,8 +1399,11 @@ function drawControllerTester() {
       : pad?.profile === 'nintendo'
         ? 'Nintendo / Switch'
         : 'Standard (Xbox/PS)';
+    const slotNum = pad ? ((pad.port >= 0 ? pad.port : 0) + 1) : 1;
+    const multiPrefix = pads.length > 1 ? `PAD ${slotNum}/${pads.length} ` : 'Connected ';
+    const autoNote = pads.length > 1 && slotNum > 1 ? ' • Auto-Detect' : '';
     badge.textContent = pad
-      ? `Connected [${profLabel}]: ${(pad.id || 'Controller').slice(0, 46)}`
+      ? `${multiPrefix}[${profLabel}${autoNote}]: ${(pad.id || 'Controller').slice(0, 44)}`
       : 'No gamepad detected yet — press any button on your Bluetooth/USB controller to wake it!';
   }
 
@@ -1498,7 +1584,7 @@ function nudgeRangeInput(inp, delta) {
   }
 }
 
-function updatePadHintBar(connected, padName = '') {
+function updatePadHintBar(connected, padName = '', padCount = 0) {
   const bar = $('pad-hint-bar');
   if (!bar) return;
   const show = connected && app.screen !== 'match';
@@ -1509,11 +1595,15 @@ function updatePadHintBar(connected, padName = '') {
     css: 'Stick / D-Pad: Browse  •  A: Pick  •  B: Back  •  X/Y: Alt Costume  •  LB/RB: Switch Port  •  Start: Stage Select',
     stage: 'Stick / D-Pad: Browse  •  A: Fight  •  B: Fighters  •  X/Y: Random  •  LB/RB: Filter',
     events: 'Stick / D-Pad: Browse  •  A: Launch Event  •  B: Title',
-    controller: 'Stick / D-Pad: Navigate  •  A: Toggle / Rebind  •  Left/Right: Adjust  •  B: Back',
+    controller: padCount > 1
+      ? 'Stick / D-Pad: Navigate  •  LB/RB: Switch Pad  •  A: Toggle / Rebind  •  B: Back'
+      : 'Stick / D-Pad: Navigate  •  A: Toggle / Rebind  •  Left/Right: Adjust  •  B: Back',
     pause: 'Stick / D-Pad: Move  •  A: Select  •  B / Start: Resume',
     results: 'Stick / D-Pad: Move  •  A: Select  •  Start: Rematch  •  B: Title',
   };
-  const label = padName ? `${padName.split('(')[0].trim()}  •  ` : '';
+  const label = padCount > 1
+    ? `${padCount} Pads  •  `
+    : (padName ? `${padName.split('(')[0].trim()}  •  ` : '');
   bar.textContent = `${label}${hints[app.screen] || 'Stick / D-Pad: Move  •  A: Select  •  B: Back'}`;
 }
 
@@ -1523,7 +1613,18 @@ function handleGamepadMenus() {
     return;
   }
   const nav = input.pollMenu ? input.pollMenu() : { connected: false, keyboardActive: false };
-  updatePadHintBar(Boolean(nav.connected), nav.padName || '');
+  const padKey = Array.isArray(nav.padPorts) ? nav.padPorts.join(',') : '';
+  if (padKey !== app.lastObservedPadKey) {
+    app.lastObservedPadKey = padKey;
+    if (app.screen === 'css') {
+      syncConnectedControllersToCss(true);
+      syncCssSelection();
+    } else if (app.screen === 'controller') {
+      app.lastTesterTabsKey = '';
+      syncControllerScreen();
+    }
+  }
+  updatePadHintBar(Boolean(nav.connected), nav.padName || '', nav.padCount || 0);
   if (!nav.connected && !nav.keyboardActive) return;
   if (!app.padFocusEl || !getFocusableInActiveScreen().includes(app.padFocusEl)) {
     focusDefaultForScreen();
@@ -1534,7 +1635,8 @@ function handleGamepadMenus() {
     const act = app.rebindAction;
     if (PAD_REBINDABLE.has(act)) {
       const cfg = input.getConfig?.() || {};
-      const nextPadBinds = { ...(cfg.padBinds || {}), [act]: [nav.rawPressed[0]] };
+      const pressedBtn = nav.rawPressedByPort?.[0]?.[0] ?? nav.rawPressed[0];
+      const nextPadBinds = { ...(cfg.padBinds || {}), [act]: [pressedBtn] };
       input.setConfig?.({ padBinds: nextPadBinds });
       dpad.saveData(input.getConfig(), 'controller');
       sound.playUi('select');
@@ -1543,6 +1645,21 @@ function handleGamepadMenus() {
     input.syncMenuButtons?.();
     syncControllerScreen();
     return;
+  }
+
+  if (app.screen === 'controller' && (nav.lb || nav.rb) && (nav.padCount || 0) > 1) {
+    const diag = input.getControllerDiagnostics?.();
+    const pads = diag?.connectedPads || [];
+    if (pads.length > 1) {
+      const slots = pads.map((p, idx) => (p.port >= 0 ? p.port : idx));
+      const curIdx = Math.max(0, slots.indexOf(app.testerPadPort));
+      app.testerPadPort = slots[(curIdx + (nav.rb ? 1 : slots.length - 1)) % slots.length];
+      app.lastTesterTabsKey = '';
+      sound.playUi('move');
+      renderControllerPadTabs(pads);
+      drawControllerTester();
+      return;
+    }
   }
 
   // Context-sensitive shoulder / shortcut buttons
@@ -1572,9 +1689,23 @@ function handleGamepadMenus() {
   if (app.screen === 'css' && (nav.lb || nav.rb)) {
     const count = visibleCssPortCount();
     app.activeCssPort = (app.activeCssPort + (nav.rb ? 1 : count - 1)) % count;
+    app.cssPortManualByP1 = true;
     sound.playUi('move');
     syncCssSelection();
     return;
+  }
+  if (app.screen === 'css' && Number.isInteger(nav.sourcePort) && nav.sourcePort >= 0) {
+    const count = visibleCssPortCount();
+    if (nav.sourcePort > 0 && nav.sourcePort < count && !app.ports[nav.sourcePort]?.isCpu) {
+      if (app.activeCssPort !== nav.sourcePort) {
+        app.activeCssPort = nav.sourcePort;
+        app.cssPortManualByP1 = false;
+        syncCssSelection();
+      }
+    } else if (nav.sourcePort === 0 && !app.cssPortManualByP1 && app.activeCssPort !== 0) {
+      app.activeCssPort = 0;
+      syncCssSelection();
+    }
   }
   if (app.screen === 'css' && nav.alt) {
     const p = app.ports[app.activeCssPort];
@@ -1888,6 +2019,7 @@ function wireUi() {
     app.selectedMode = MODE.VS_STOCK;
     app.teamBattle = false;
     app.playerCount = 2;
+    app.manualPlayerCount = false;
     app.stocks = 4;
     app.itemFrequency = ITEM_FREQUENCY.MEDIUM;
     if ($('sel-vs-rule')) $('sel-vs-rule').value = MODE.VS_STOCK;
@@ -1904,9 +2036,11 @@ function wireUi() {
     sound.unlock(); sound.playUi('select');
     app.selectedMode = mode;
     app.activeCssPort = 0;
+    app.cssPortManualByP1 = false;
     $('css-mode-badge').textContent = badge;
     $('css-rules-bar').hidden = !rulesVisible;
     $('btn-css-start').textContent = startLabel;
+    syncConnectedControllersToCss(true);
     syncCssSelection();
     showScreen('css');
   };
@@ -2045,12 +2179,16 @@ function wireUi() {
   // CSS controls
   $('btn-css-back').addEventListener('click', () => { sound.playUi('back'); showScreen('title'); });
   for (let i = 0; i < 4; i++) {
-    $(`btn-active-port-${i}`).addEventListener('click', () => { app.activeCssPort = i; syncCssSelection(); });
+    $(`btn-active-port-${i}`).addEventListener('click', () => { app.activeCssPort = i; app.cssPortManualByP1 = true; syncCssSelection(); });
   }
   $('sel-stocks').addEventListener('change', (e) => { app.stocks = Number(e.target.value); });
   $('sel-time').addEventListener('change', (e) => { app.timeSeconds = Number(e.target.value); });
   $('sel-items').addEventListener('change', (e) => { app.itemFrequency = e.target.value; });
-  $('sel-player-count').addEventListener('change', (e) => { app.playerCount = Number(e.target.value); syncCssSelection(); });
+  $('sel-player-count').addEventListener('change', (e) => {
+    app.manualPlayerCount = true;
+    app.playerCount = Number(e.target.value);
+    syncCssSelection();
+  });
   $('sel-battle-type')?.addEventListener('change', (e) => {
     app.teamBattle = e.target.value === 'teams';
     if (app.teamBattle && app.playerCount < 4) {
@@ -2331,7 +2469,7 @@ function wireUi() {
   });
 }
 
-function togglePause(pause) {
+function togglePause(pause, pauserPort = null) {
   if (!app.match || app.match.status === 'ended') return;
   const isOnlineLive = Boolean(app.match.mode === MODE.ONLINE && app.onlineMatchActive);
   if (pause) {
@@ -2342,7 +2480,9 @@ function togglePause(pause) {
       app.onlineMenuOpen = true;
     }
     input.clearHolds();
-    const localPort = (isOnlineLive && app.onlineSession) ? app.onlineSession.getStats().localPort : 0;
+    const localPort = (isOnlineLive && app.onlineSession)
+      ? app.onlineSession.getStats().localPort
+      : (Number.isInteger(pauserPort) ? pauserPort : 0);
     const me = app.match.fighters.find((f) => f.port === localPort) || app.match.fighters[0];
     $('pause-tech-readout').textContent = `P${localPort + 1} Wavedashes: ${me.wavedashCount || 0} • L-Cancels: ${me.lCancelCount || 0} • Max Combo: ${me.maxCombo || 0}`;
     if ($('btn-pause-restart')) $('btn-pause-restart').hidden = isOnlineLive;
@@ -2393,14 +2533,21 @@ function tickSimulation() {
   if ((app.screen === 'match' || runningOnlineOverlay) && app.match) {
     if (app.match.status === 'paused' && !runningOnlineOverlay) return;
 
-    const localMultiplayer = app.match.mode !== MODE.ONLINE && app.match.fighters.filter((f) => !f.isCpu).length > 1;
+    const isOnlineLive = Boolean(app.match.mode === MODE.ONLINE && app.onlineMatchActive);
+    const activeHumanPorts = isOnlineLive
+      ? [0]
+      : app.match.fighters.filter((f) => !f.isCpu).map((f) => f.port);
+    const localMultiplayer = !isOnlineLive && activeHumanPorts.length > 1;
     const polled = runningOnlineOverlay
       ? app.match.fighters.map(() => createEmptyInput())
-      : input.poll(app.match.fighters.length, localMultiplayer);
+      : input.poll(app.match.fighters.length, localMultiplayer, activeHumanPorts);
     updateTouchVisibility();
 
-    if (!runningOnlineOverlay && polled.some((p) => p.pausePressed)) {
-      togglePause(true);
+    const pauserPort = !runningOnlineOverlay
+      ? activeHumanPorts.find((p) => polled[p]?.pausePressed)
+      : undefined;
+    if (pauserPort !== undefined) {
+      togglePause(true, pauserPort);
       return;
     }
 
@@ -2506,6 +2653,16 @@ function frameLoop(now) {
 async function boot() {
   setLayoutAttr();
   syncGraphicsMode();
+  input.onPadChange = () => {
+    app.lastObservedPadKey = (input.getPadPorts ? input.getPadPorts() : []).join(',');
+    if (app.screen === 'css') {
+      syncConnectedControllersToCss(true);
+      syncCssSelection();
+    } else if (app.screen === 'controller') {
+      app.lastTesterTabsKey = '';
+      syncControllerScreen();
+    }
+  };
   input.attach(window);
   wireUi();
   wireTouchControls();
