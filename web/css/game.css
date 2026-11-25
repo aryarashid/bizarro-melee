@@ -1129,12 +1129,13 @@ body[data-touch="1"][data-layout="landscape"] .hud-card-name {
 body[data-touch="1"][data-layout="landscape"] .hud-pct {
   font-size: 1.15rem;
 }
-@media (max-width: 760px) and (orientation: landscape) {
+@media (max-width: 900px) and (orientation: landscape) {
   body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="3"],
   body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="4"] {
     display: grid;
     grid-template-columns: repeat(2, minmax(112px, 1fr));
     gap: 4px;
+    width: 100%;
     padding-left: 136px;
     padding-right: 190px;
   }
@@ -1150,6 +1151,9 @@ body[data-touch="1"][data-layout="landscape"] .hud-pct {
     max-width: none;
     flex: 1 1 0;
     padding: 3px 6px;
+  }
+  body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="3"] .hud-card.hud-card-boss {
+    grid-column: 1 / -1;
   }
 }
 body[data-layout="portrait"] .hud-fighters {

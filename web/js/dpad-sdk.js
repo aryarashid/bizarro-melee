@@ -688,12 +688,21 @@ export function createOnlineSession({
   let guestPick = null;
   let pendingQueue = [];
 
-  function hasEdgePress(inp) {
+  function hasActionEdge(inp) {
     if (!inp) return false;
     for (const k of WIRE_FLAGS) {
       if (k.endsWith('Pressed') && inp[k]) return true;
     }
-    return false;
+    return Math.abs(Number(inp.cStickX) || 0) >= 0.25 || Math.abs(Number(inp.cStickY) || 0) >= 0.25;
+  }
+
+  function tupleHasActionEdge(tuple) {
+    if (!Array.isArray(tuple) || tuple.length < WIRE_AXES.length + 1) return false;
+    const b = Number(tuple[WIRE_AXES.length]) | 0;
+    for (let i = 0; i < WIRE_FLAGS.length; i++) {
+      if (WIRE_FLAGS[i].endsWith('Pressed') && (b & (1 << i))) return true;
+    }
+    return Math.abs(Number(tuple[4]) || 0) >= 250 || Math.abs(Number(tuple[5]) || 0) >= 250;
   }
 
   function tupleEquals(a, b) {
@@ -704,18 +713,20 @@ export function createOnlineSession({
 
   function enqueueStalledInput(inp) {
     const packed = packCompactTuple(inp);
-    const hasEdge = hasEdgePress(inp);
-    // Preserve every distinct press, release, and direction change in exact FIFO order without queueing duplicate idle frames.
+    const hasEdge = hasActionEdge(inp);
+    // Preserve every distinct press, C-stick flick, release, and direction change in exact FIFO order without queueing duplicate idle frames.
     if (!hasEdge && tupleEquals(packed, NEUTRAL_WIRE) && (!pendingQueue.length || tupleEquals(pendingQueue[pendingQueue.length - 1], NEUTRAL_WIRE))) {
       return;
     }
     if (!hasEdge && pendingQueue.length && tupleEquals(pendingQueue[pendingQueue.length - 1], packed)) {
       return;
     }
-    if (pendingQueue.length < 16) {
+    if (pendingQueue.length < 32) {
       pendingQueue.push(packed);
     } else if (hasEdge) {
-      pendingQueue.shift();
+      const nonEdgeIdx = pendingQueue.findIndex((t) => !tupleHasActionEdge(t));
+      if (nonEdgeIdx >= 0) pendingQueue.splice(nonEdgeIdx, 1);
+      else pendingQueue.shift();
       pendingQueue.push(packed);
     } else {
       pendingQueue[pendingQueue.length - 1] = packed;
@@ -955,7 +966,7 @@ export function createOnlineSession({
       let packed;
       if (pendingQueue.length > 0) {
         packed = pendingQueue.shift();
-        if (hasEdgePress(localRawInput)) enqueueStalledInput(localRawInput);
+        if (hasActionEdge(localRawInput)) enqueueStalledInput(localRawInput);
       } else {
         packed = packCompactTuple(localRawInput);
       }

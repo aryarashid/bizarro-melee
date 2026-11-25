@@ -1581,6 +1581,9 @@ function handleGamepadMenus() {
     const def = getFighterById(p.fighterId);
     if (def?.palettes?.length) {
       p.paletteIndex = (p.paletteIndex + 1) % def.palettes.length;
+      if (app.activeCssPort === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+        app.onlineSession.sendGuestPick(p.fighterId, p.paletteIndex);
+      }
       sound.playUi('move');
       renderBioPanel(def, p.paletteIndex);
       syncCssSelection();

@@ -360,20 +360,46 @@ async function runUnitTests() {
     const gr = rg.step(createEmptyInput()); flushR();
     if (gr.ready) assert.equal(gr.inputs[0].moveX, 0, 'Stale Round-1 packet must not leak into Rematch Round 2');
   }
-  // FIFO stall queue: two distinct attack taps separated by a release with opposite directions during a stall
+  // FIFO stall queue: two distinct attack taps + C-stick flick arriving on drain tick + 20-tick stall preserving 10/10 attack edges
   rh.step(createEmptyInput()); rh.step(createEmptyInput());
   const tapR = createEmptyInput(); tapR.moveX = 1; tapR.attack = tapR.attackPressed = true;
   const tapL = createEmptyInput(); tapL.moveX = -1; tapL.attack = tapL.attackPressed = true;
   rh.step(tapR); rh.step(createEmptyInput()); rh.step(tapL);
   const recoveredDirs = [];
-  for (let i = 0; i < 12; i++) {
+  let sawCStickFlick = false;
+  for (let i = 0; i < 14; i++) {
     flushR();
-    rh.step(createEmptyInput());
+    const drainInp = createEmptyInput();
+    if (i === 0) drainInp.cStickX = -1;
+    rh.step(drainInp);
     const gr = rg.step(createEmptyInput());
-    if (gr.ready && gr.inputs[0].attackPressed) recoveredDirs.push(gr.inputs[0].moveX);
+    if (gr.ready) {
+      if (gr.inputs[0].attackPressed) recoveredDirs.push(gr.inputs[0].moveX);
+      if (gr.inputs[0].cStickX <= -0.9) sawCStickFlick = true;
+    }
   }
   assert.deepEqual(recoveredDirs, [1, -1], `Stall FIFO queue must preserve distinct taps and directions, got ${JSON.stringify(recoveredDirs)}`);
-  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + rematch isolation + FIFO stall + 0 desyncs) validated`);
+  assert.ok(sawCStickFlick, 'C-stick flick arriving on first FIFO drain tick must not be dropped');
+  // 20-tick stall with 10 alternating attack taps & releases -> all 10 attack edges must survive
+  const rh3 = createOnlineSession({ isHost: true, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'g', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const rg3 = createOnlineSession({ isHost: false, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'h', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const flush3 = () => { while (rPkts.length) { const x = rPkts.shift(); (x.to === 'h' ? rh3 : rg3).handlePacket(x.p); } };
+  rh3.startHandshake({ seed: 444, stageId: 'arguefield', hostFighter: 'faux', guestFighter: 'garth' }); flush3();
+  rh3.step(createEmptyInput()); rh3.step(createEmptyInput());
+  for (let s = 0; s < 20; s++) {
+    const inp = createEmptyInput();
+    if (s % 2 === 0) { inp.attack = inp.attackPressed = true; }
+    rh3.step(inp);
+  }
+  let longStallEdges = 0;
+  for (let i = 0; i < 40; i++) {
+    flush3();
+    rh3.step(createEmptyInput());
+    const gr = rg3.step(createEmptyInput());
+    if (gr.ready && gr.inputs[0].attackPressed) longStallEdges++;
+  }
+  assert.equal(longStallEdges, 10, `20-tick stall must preserve all 10/10 attack edges (got ${longStallEdges})`);
+  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + rematch isolation + FIFO/C-stick/20-tick stall + 0 desyncs) validated`);
 
   // Controller mapping regression test (8BitDo HID button 9 != Start, DualSense 054c raw HID mapping + analog triggers)
   const { InputManager } = await import('../web/js/input.js');
@@ -906,29 +932,52 @@ async function runBrowserProof() {
     await mob.ctx.close();
     console.log(`PASS: Mobile 390x844 portrait Title + 4P HUD/touch + Event 8 Boss HUD (${mobBossRect.width}px) verified`);
 
-    // B2. Compact landscape phone 667x375 4P HUD readability + Event 8 Boss HUD clearance
-    const land = await openFrame({ viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true });
-    await land.frame.evaluate(() => {
-      window.__BIZARRO_MELEE__.setTeamBattle(false, 4);
-      window.__BIZARRO_MELEE__.startMode('vs-stock', 'arguefield');
-    });
-    await land.page.waitForTimeout(800);
-    const landCardWidths = await land.frame.evaluate(() =>
-      Array.from(document.querySelectorAll('#hud-fighters .hud-card')).map((el) => Math.round(el.getBoundingClientRect().width))
-    );
-    assert.equal(landCardWidths.length, 4, 'Expected 4 HUD cards in 4P landscape');
-    assert.ok(landCardWidths.every((w) => w >= 100), `Compact landscape 4P HUD cards too narrow: ${JSON.stringify(landCardWidths)}`);
-    await land.page.screenshot({ path: path.join(OUT_DIR, '12-landscape-667.png') });
-    await land.frame.evaluate(() => window.__BIZARRO_MELEE__.startEvent('ev-final-audit'));
-    await land.page.waitForTimeout(600);
-    const landBossRect = await land.frame.evaluate(() => {
-      const r = document.querySelector('#hud-fighters .hud-card-boss')?.getBoundingClientRect();
-      return r ? { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) } : null;
-    });
-    assert.ok(landBossRect && landBossRect.right <= 480,
-      `Compact landscape Event 8 Boss HUD overlaps touch buttons: ${JSON.stringify(landBossRect)}`);
-    await land.ctx.close();
-    console.log(`PASS: Compact landscape 667x375 4P HUD (${landCardWidths.join(', ')}px) + Event 8 Boss HUD (right=${landBossRect.right}px) verified`);
+    // B2. Compact landscape phones 667x375 & 812x375: 4P HUD readability + Event 8 Boss HUD zero overflow & zero touch overlap
+    for (const [lw, lh] of [[667, 375], [812, 375]]) {
+      const land = await openFrame({ viewport: { width: lw, height: lh }, hasTouch: true, isMobile: true });
+      await land.frame.evaluate(() => {
+        window.__BIZARRO_MELEE__.setTeamBattle(false, 4);
+        window.__BIZARRO_MELEE__.startMode('vs-stock', 'arguefield');
+      });
+      await land.page.waitForTimeout(800);
+      const landCardWidths = await land.frame.evaluate(() =>
+        Array.from(document.querySelectorAll('#hud-fighters .hud-card')).map((el) => Math.round(el.getBoundingClientRect().width))
+      );
+      assert.equal(landCardWidths.length, 4, `Expected 4 HUD cards in 4P landscape ${lw}x${lh}`);
+      assert.ok(landCardWidths.every((w) => w >= 100), `Landscape ${lw}x${lh} 4P HUD cards too narrow: ${JSON.stringify(landCardWidths)}`);
+      if (lw === 667) await land.page.screenshot({ path: path.join(OUT_DIR, '12-landscape-667.png') });
+      await land.frame.evaluate(() => window.__BIZARRO_MELEE__.startEvent('ev-final-audit'));
+      await land.page.waitForTimeout(700);
+      const landEv8 = await land.frame.evaluate(() => {
+        const cards = Array.from(document.querySelectorAll('#hud-fighters .hud-card')).map((c) => {
+          const n = c.querySelector('.hud-card-name');
+          const r = c.getBoundingClientRect();
+          return {
+            text: n?.textContent || '',
+            right: Math.round(r.right),
+            width: Math.round(r.width),
+            overflowPx: n ? Math.round(n.scrollWidth - n.clientWidth) : -1,
+          };
+        });
+        const btns = Array.from(document.querySelectorAll('#touch-controls .touch-btn')).map((el) => el.getBoundingClientRect());
+        let overlaps = 0;
+        for (const c of document.querySelectorAll('#hud-fighters .hud-card')) {
+          const cr = c.getBoundingClientRect();
+          for (const br of btns) {
+            if (br.width <= 0) continue;
+            if (Math.min(cr.right, br.right) - Math.max(cr.left, br.left) > 2 &&
+                Math.min(cr.bottom, br.bottom) - Math.max(cr.top, br.top) > 2) overlaps++;
+          }
+        }
+        return { cards, overlaps, touchActive: document.body.dataset.touch };
+      });
+      assert.equal(landEv8.overlaps, 0, `Landscape ${lw}x${lh} Event 8 HUD overlaps touch buttons: ${JSON.stringify(landEv8)}`);
+      for (const c of landEv8.cards) {
+        assert.ok(c.overflowPx <= 2, `Landscape ${lw}x${lh} Event 8 name overflow: ${JSON.stringify(c)}`);
+      }
+      await land.ctx.close();
+      console.log(`PASS: Landscape ${lw}x${lh} 4P HUD (${landCardWidths.join(', ')}px) + Event 8 0px overflow & 0 touch overlap verified`);
+    }
 
     // C. Denied localStorage still plays
     const noStore = await openFrame({}, true, false);
