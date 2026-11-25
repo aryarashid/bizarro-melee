@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0a1f">
+  <title>Bizarro Melee</title>
+  <meta name="description" content="3D WebGL Melee-physics browser platform fighter with 26 Bizarro fighters, 16 stages, 18 items, Break the Targets, Home-Run Derby &amp; Multi-Man Brawl. Built for dpad.games.">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/game.css">
+</head>
+<body data-screen="title" data-layout="landscape" data-gfx="3d">
+  <canvas id="game-canvas-3d" aria-label="Bizarro Melee 3D arena"></canvas>
+  <canvas id="game-canvas" aria-label="Bizarro Melee overlay"></canvas>
+
+  <div id="ui-layer">
+    <!-- TITLE SCREEN -->
+    <section id="screen-title" class="screen screen-title" aria-label="Title screen">
+      <div class="title-card">
+        <div class="brand-badge">dpad.games 3D EDITION &bull; 26 FIGHTERS &bull; 29 STAGES &bull; 18 ITEMS</div>
+        <h1 class="game-title">
+          <span class="title-top">BIZARRO</span>
+          <span class="title-main">MELEE</span>
+        </h1>
+        <p class="title-sub">3D WebGL arenas, Blender-crafted items, real wavedashing, L-canceling, Power-Shields, Smash charging &amp; 4P chaos.</p>
+        <div id="dpad-player-pill" class="player-pill" hidden></div>
+
+        <div class="title-actions">
+          <button id="btn-quick-fight" class="btn btn-primary btn-lg" type="button">Quick Fight</button>
+          <button id="btn-vs-mode" class="btn btn-accent btn-lg" type="button">VS Mode (Up to 4P)</button>
+          <button id="btn-events" class="btn btn-secondary" type="button">Bizarro Events (8)</button>
+          <button id="btn-classic" class="btn btn-secondary" type="button">Classic Arcade</button>
+          <button id="btn-targets" class="btn btn-secondary" type="button">Break the Targets</button>
+          <button id="btn-homerun" class="btn btn-secondary" type="button">Home-Run Derby</button>
+          <button id="btn-multiman" class="btn btn-secondary" type="button">Multi-Man Brawl</button>
+          <button id="btn-training" class="btn btn-secondary" type="button">Training Lab</button>
+          <button id="btn-online" class="btn btn-secondary" type="button">Online (dpad)</button>
+        </div>
+
+        <div class="title-footer-actions">
+          <button id="btn-leaderboards" class="btn btn-ghost btn-sm" type="button">Records &amp; Boards</button>
+          <button id="btn-controller-open" class="btn btn-accent btn-sm" type="button">Controller &amp; Combos</button>
+          <button id="btn-settings-open" class="btn btn-ghost btn-sm" type="button">Settings</button>
+          <button id="btn-mute-title" class="btn btn-ghost btn-sm" type="button">Sound: On</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHARACTER SELECT SCREEN -->
+    <section id="screen-css" class="screen screen-css" hidden aria-label="Character select">
+      <header class="css-header">
+        <button id="btn-css-back" class="btn btn-ghost btn-sm" type="button">&larr; Title</button>
+        <div class="css-mode-group">
+          <span id="css-mode-badge" class="mode-badge">VS STOCK</span>
+          <div id="css-rules-bar" class="rules-bar">
+            <label class="rule-chip">
+              <span>Mode</span>
+              <select id="sel-vs-rule">
+                <option value="vs-stock" selected>Stock</option>
+                <option value="vs-time">Time</option>
+              </select>
+            </label>
+            <label class="rule-chip" id="chip-stocks">
+              <span>Stocks</span>
+              <select id="sel-stocks">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+            <label class="rule-chip">
+              <span>Time</span>
+              <select id="sel-time">
+                <option value="120">2:00</option>
+                <option value="180">3:00</option>
+                <option value="300" selected>5:00</option>
+                <option value="480">8:00</option>
+                <option value="0">&infin;</option>
+              </select>
+            </label>
+            <label class="rule-chip">
+              <span>Items</span>
+              <select id="sel-items">
+                <option value="off">Off</option>
+                <option value="low">Low</option>
+                <option value="medium" selected>Med</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="rule-chip">
+              <span>Fighters</span>
+              <select id="sel-player-count">
+                <option value="2" selected>2P</option>
+                <option value="3">3P</option>
+                <option value="4">4P</option>
+              </select>
+            </label>
+            <label class="rule-chip">
+              <span>Rule</span>
+              <select id="sel-battle-type">
+                <option value="ffa" selected>FFA</option>
+                <option value="teams">Teams</option>
+              </select>
+            </label>
+            <button id="btn-random-all" class="btn btn-ghost btn-sm" type="button">Random</button>
+          </div>
+        </div>
+        <button id="btn-css-start" class="btn btn-primary" type="button">Stage Select &rarr;</button>
+      </header>
+
+      <div class="css-body">
+        <div class="css-left">
+          <div class="css-pick-banner">
+            <span>Picking for:</span>
+            <button id="btn-active-port-0" class="port-tab active" data-port="0" type="button">P1</button>
+            <button id="btn-active-port-1" class="port-tab" data-port="1" type="button">P2</button>
+            <button id="btn-active-port-2" class="port-tab" data-port="2" type="button" hidden>P3</button>
+            <button id="btn-active-port-3" class="port-tab" data-port="3" type="button" hidden>P4</button>
+            <span id="css-count-pill" class="count-pill">26 Bizarro Fighters</span>
+          </div>
+          <div id="css-grid" class="css-grid" role="grid" aria-label="Fighter roster"></div>
+        </div>
+
+        <aside id="css-bio-panel" class="css-bio-panel" aria-live="polite">
+          <div class="bio-head">
+            <canvas id="bio-portrait" width="160" height="160"></canvas>
+            <div>
+              <div id="bio-parody" class="bio-parody"></div>
+              <h2 id="bio-name" class="bio-name"></h2>
+              <div id="bio-epithet" class="bio-epithet"></div>
+            </div>
+          </div>
+          <p id="bio-desc" class="bio-desc"></p>
+          <div id="bio-taunt" class="bio-taunt"></div>
+          <div id="bio-stats" class="bio-stats"></div>
+          <div id="bio-specials" class="bio-specials"></div>
+        </aside>
+      </div>
+
+      <footer id="css-ports" class="css-ports"></footer>
+    </section>
+
+    <!-- STAGE SELECT SCREEN (ALL 29 MELEE PARODY ARENAS) -->
+    <section id="screen-stage" class="screen screen-modal" hidden aria-label="Stage select">
+      <div class="modal-card modal-wide">
+        <header class="modal-head">
+          <button id="btn-stage-back" class="btn btn-ghost btn-sm" type="button">&larr; Fighters</button>
+          <h2>Select Stage (29 Bizarro Arenas)</h2>
+          <button id="btn-stage-random" class="btn btn-accent btn-sm" type="button">Random Stage</button>
+        </header>
+        <div class="board-tabs" id="stage-filter-tabs">
+          <button class="btn btn-xs btn-accent" data-stage-cat="all" type="button">All (29)</button>
+          <button class="btn btn-xs btn-ghost" data-stage-cat="tourney" type="button">Tourney</button>
+          <button class="btn btn-xs btn-ghost" data-stage-cat="moving" type="button">Moving</button>
+          <button class="btn btn-xs btn-ghost" data-stage-cat="hazard" type="button">Hazards</button>
+          <button class="btn btn-xs btn-ghost" data-stage-cat="huge" type="button">Huge</button>
+          <button class="btn btn-xs btn-ghost" data-stage-cat="past" type="button">Past 64</button>
+        </div>
+        <div id="stage-grid" class="stage-grid"></div>
+      </div>
+    </section>
+
+    <!-- BIZARRO EVENT MATCHES SCREEN -->
+    <section id="screen-events" class="screen screen-modal" hidden aria-label="Bizarro Event Matches">
+      <div class="modal-card modal-wide">
+        <header class="modal-head">
+          <button id="btn-events-back" class="btn btn-ghost btn-sm" type="button">&larr; Title</button>
+          <h2>Bizarro Event Matches</h2>
+          <span id="events-progress-pill" class="count-pill">0 / 8 Cleared</span>
+        </header>
+        <div id="events-grid" class="events-grid"></div>
+      </div>
+    </section>
+
+    <!-- ONLINE LOBBY SCREEN -->
+    <section id="screen-online" class="screen screen-modal" hidden aria-label="Online lobby">
+      <div class="modal-card">
+        <header class="modal-head">
+          <button id="btn-online-back" class="btn btn-ghost btn-sm" type="button">&larr; Title</button>
+          <h2>Online Multiplayer (dpad.games)</h2>
+          <span></span>
+        </header>
+        <p id="online-status" class="note-box">Checking dpad.games multiplayer availability...</p>
+        <div class="online-actions">
+          <button id="btn-lobby-public" class="btn btn-primary" type="button">Find Public Match</button>
+          <button id="btn-lobby-private" class="btn btn-accent" type="button">Create Private Room</button>
+          <button id="btn-lobby-leave" class="btn btn-ghost" type="button" hidden>Leave Room</button>
+        </div>
+        <div id="online-invite-wrap" class="invite-wrap" hidden>
+          <label for="online-invite-link">Invite Link (share with a friend on dpad.games):</label>
+          <div class="invite-row">
+            <input id="online-invite-link" type="text" readonly>
+            <button id="btn-copy-invite" class="btn btn-secondary btn-sm" type="button">Copy</button>
+          </div>
+        </div>
+        <div id="online-peers" class="peer-list"></div>
+        <button id="btn-online-launch" class="btn btn-primary" type="button" hidden>Start Online Match</button>
+      </div>
+    </section>
+
+    <!-- RECORDS & LEADERBOARDS SCREEN -->
+    <section id="screen-records" class="screen screen-modal" hidden aria-label="Records and leaderboards">
+      <div class="modal-card modal-wide">
+        <header class="modal-head">
+          <button id="btn-records-back" class="btn btn-ghost btn-sm" type="button">&larr; Title</button>
+          <h2>Records &amp; dpad Leaderboards</h2>
+          <span></span>
+        </header>
+        <div id="records-summary" class="records-summary"></div>
+        <div class="board-tabs">
+          <button class="btn btn-sm btn-accent" data-board="homerun-distance" type="button">Home-Run Derby</button>
+          <button class="btn btn-sm btn-ghost" data-board="targets-time" type="button">Break the Targets</button>
+          <button class="btn btn-sm btn-ghost" data-board="multiman-kos" type="button">Multi-Man KOs</button>
+          <button class="btn btn-sm btn-ghost" data-board="classic-score" type="button">Classic Score</button>
+          <button class="btn btn-sm btn-ghost" data-board="ko-total" type="button">Career KOs</button>
+        </div>
+        <div id="leaderboard-list" class="leaderboard-list"></div>
+      </div>
+    </section>
+
+    <!-- CONTROLLER CONFIG & MELEE COMBO GUIDE MODAL -->
+    <section id="screen-controller" class="screen screen-modal" hidden aria-label="Controller configuration and combo guide">
+      <div class="modal-card modal-wide">
+        <header class="modal-head">
+          <button id="btn-controller-back" class="btn btn-ghost btn-sm" type="button">&larr; Back</button>
+          <h2>Melee Controller Config &amp; Combo Lab</h2>
+          <button id="btn-controller-reset" class="btn btn-ghost btn-sm" type="button">Reset Defaults</button>
+        </header>
+
+        <div class="ctrl-layout">
+          <div class="ctrl-col">
+            <div id="ctrl-pad-badge" class="note-box">No gamepad detected yet — press any button on your Bluetooth/USB controller (Xbox, PlayStation, Switch Pro, Joy-Con, GameCube) to wake it!</div>
+            <div class="ctrl-tester-wrap">
+              <canvas id="ctrl-tester" width="320" height="146" aria-label="Live analog stick and trigger tester"></canvas>
+            </div>
+            <div id="ctrl-live-actions" class="ctrl-live-actions" aria-live="polite"></div>
+            <div class="settings-grid">
+              <label class="setting-row">
+                <span>Controller Layout</span>
+                <select id="sel-pad-profile">
+                  <option value="auto" selected>Auto-Detect (Xbox / PS / Switch / GC)</option>
+                  <option value="standard">Xbox / PlayStation (Bottom=A, Right=B)</option>
+                  <option value="nintendo">Nintendo / Switch (Right=A, Bottom=B)</option>
+                  <option value="gamecube">GameCube Adapter</option>
+                </select>
+              </label>
+              <label class="setting-row setting-check">
+                <input id="inp-tap-jump" type="checkbox" checked>
+                <span>Tap Jump (Stick Up jumps — uncheck for easy Up-Tilts!)</span>
+              </label>
+              <label class="setting-row setting-check">
+                <input id="inp-z-jump" type="checkbox">
+                <span>Z-Jump Layout (Swaps Z/RB &amp; Jump like modern Melee pros)</span>
+              </label>
+              <label class="setting-row">
+                <span>C-Stick Mode</span>
+                <select id="sel-cstick-mode">
+                  <option value="smash" selected>Smash Attacks (Classic Melee)</option>
+                  <option value="tilt">Tilt Attacks (Aerials in air)</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span>Stick Deadzone (<span id="lbl-deadzone">0.18</span>)</span>
+                <input id="inp-deadzone" type="range" min="0.08" max="0.36" step="0.02" value="0.18">
+              </label>
+              <label class="setting-row setting-check">
+                <input id="inp-tech-feed" type="checkbox" checked>
+                <span>20XX Tech &amp; Combo Feed Overlay in Match</span>
+              </label>
+            </div>
+            <div id="ctrl-rebind-list" class="rebind-list"></div>
+          </div>
+
+          <div class="ctrl-col">
+            <div class="controls-box">
+              <h3>Melee Advanced Tech Reference</h3>
+              <ul class="tech-guide-list">
+                <li><strong>SHFFL:</strong> Short-Hop (<kbd>O</kbd> or tap Jump) + Aerial + Fast-Fall (Down at apex) + L-Cancel (<kbd>L</kbd>/<kbd>Z</kbd> within 7f of landing).</li>
+                <li><strong>Wavedash / Waveland:</strong> Jump + diagonal down + Hard Shield (<kbd>L</kbd>) right after takeoff to slide across the stage.</li>
+                <li><strong>Light Shield vs Power-Shield:</strong> Hold <kbd>H</kbd> or light-press L/R trigger for big slip-away Light Shield; tap Hard Shield within 4f to Power-Shield &amp; reflect!</li>
+                <li><strong>Shield Drop:</strong> On a platform while shielding, tilt stick down slightly to drop straight through into an aerial!</li>
+                <li><strong>JC Grab &amp; JC Up-Smash:</strong> Press Jump out of dash, then Grab (<kbd>U</kbd>) or Up+Attack during jump-squat for sliding punishes.</li>
+                <li><strong>SDI / ASDI Down:</strong> Flick stick during hitlag to escape multi-hits, or hold Down on final hitlag frame to stick to the ground!</li>
+                <li><strong>Edge Cancel &amp; B-Reverse:</strong> Slide off platform edges during lag to cancel immediately; flick opposite direction on frames 1-3 of Neutral/Down-B to flip momentum!</li>
+              </ul>
+            </div>
+            <div class="controls-box" style="margin-top:10px;">
+              <h3>Signature Bizarro Combos</h3>
+              <ul class="tech-guide-list">
+                <li><strong>Garth — Ken Combo:</strong> Fair &rarr; Fast-Fall &rarr; Dair meteor spike!</li>
+                <li><strong>Faux — Waveshine:</strong> Down-B Shine &rarr; Jump-Cancel &rarr; Wavedash &rarr; Shine / JC Up-Smash!</li>
+                <li><strong>Falcon't — Pillar Combo:</strong> Vertical Shine &rarr; Jump &rarr; Dair spike &rarr; repeat!</li>
+                <li><strong>Captain Pigeon — Bread Combo:</strong> Down-Throw / Up-Air &rarr; Sweetspot Fair Knee of Bread!</li>
+                <li><strong>Gigglefluff — Naptime Setup:</strong> Up-Throw / Up-Air &rarr; Frame-1 Down-B Rest!</li>
+                <li><strong>Screech — Float Cancel:</strong> Hold Jump + Down in air to hover &amp; fire instant aerials!</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONTROLS & SETTINGS MODAL -->
+    <section id="screen-settings" class="screen screen-modal" hidden aria-label="Settings and controls">
+      <div class="modal-card">
+        <header class="modal-head">
+          <button id="btn-settings-back" class="btn btn-ghost btn-sm" type="button">&larr; Back</button>
+          <h2>Settings &amp; Controls</h2>
+          <span></span>
+        </header>
+        <div class="settings-grid">
+          <label class="setting-row">
+            <span>SFX Volume</span>
+            <input id="inp-sfx-vol" type="range" min="0" max="1" step="0.05" value="0.8">
+          </label>
+          <label class="setting-row">
+            <span>Music Volume</span>
+            <input id="inp-music-vol" type="range" min="0" max="1" step="0.05" value="0.55">
+          </label>
+          <label class="setting-row setting-check">
+            <input id="inp-3d" type="checkbox" checked>
+            <span>3D WebGL Arenas &amp; Bloom (uncheck for 2D Classic)</span>
+          </label>
+          <label class="setting-row setting-check">
+            <input id="inp-mute" type="checkbox">
+            <span>Mute all audio</span>
+          </label>
+          <label class="setting-row setting-check">
+            <input id="inp-hitboxes" type="checkbox">
+            <span>Show Hitboxes &amp; Hurtboxes</span>
+          </label>
+          <label class="setting-row setting-check">
+            <input id="inp-shake" type="checkbox" checked>
+            <span>Screen Shake &amp; Hit Flash</span>
+          </label>
+        </div>
+        <div class="controls-box">
+          <h3>Controls &amp; Advanced Melee Tech</h3>
+          <div class="controls-cols">
+            <div>
+              <strong>Player 1</strong>
+              <ul>
+                <li>Move / Aim / Crouch Cancel: <kbd>W A S D</kbd> (or Arrows in 1P)</li>
+                <li>Jump / Short Hop / Wall Jump: <kbd>Space</kbd> / <kbd>I</kbd> / <kbd>W</kbd></li>
+                <li>Attack / Hold Smash / Pickup Item: <kbd>J</kbd> or <kbd>Z</kbd></li>
+                <li>Special (B): <kbd>K</kbd> or <kbd>X</kbd></li>
+                <li>Shield / Power-Shield / Wavedash / L-Cancel: <kbd>L</kbd> / <kbd>Shift</kbd> / <kbd>C</kbd></li>
+                <li>Grab / Throw Item: <kbd>U</kbd> / <kbd>E</kbd> / <kbd>V</kbd> &bull; Taunt: <kbd>T</kbd></li>
+              </ul>
+            </div>
+            <div>
+              <strong>Player 2 &amp; Gamepads (Up to 4P!)</strong>
+              <ul>
+                <li>P2 Move: <kbd>&uarr; &larr; &darr; &rarr;</kbd></li>
+                <li>P2 Jump: <kbd>Right Shift</kbd> / <kbd>Numpad 0</kbd></li>
+                <li>P2 Attack / Special: <kbd>.</kbd> / <kbd>/</kbd></li>
+                <li>P2 Shield / Grab: <kbd>'</kbd> / <kbd>;</kbd></li>
+                <li>Gamepads: Plug in up to 4 controllers (C-Stick instant smashes/aerials!)</li>
+                <li>Pro Tip: Tap <kbd>L</kbd> right as a hit lands to Power-Shield &amp; reflect projectiles!</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- IN-MATCH HUD -->
+    <section id="screen-hud" class="screen-hud" hidden aria-label="Match HUD">
+      <div class="hud-top">
+        <div id="hud-mode-info" class="hud-pill"></div>
+        <div id="hud-timer" class="hud-timer">5:00</div>
+        <div class="hud-top-right">
+          <button id="btn-hud-hitboxes" class="btn btn-ghost btn-xs" type="button" hidden>Hitboxes: Off</button>
+          <button id="btn-hud-reset" class="btn btn-ghost btn-xs" type="button" hidden>Reset Pos</button>
+          <button id="btn-hud-pause" class="btn btn-ghost btn-xs" type="button" aria-label="Pause match">Pause</button>
+        </div>
+      </div>
+
+      <div id="hud-training-bar" class="hud-training-bar" hidden aria-label="Training lab controls">
+        <label class="train-chip">
+          <span>Speed</span>
+          <select id="sel-train-speed">
+            <option value="1" selected>1x</option>
+            <option value="0.5">0.5x</option>
+            <option value="0.25">0.25x</option>
+          </select>
+        </label>
+        <label class="train-chip">
+          <span>CPU</span>
+          <select id="sel-train-cpu">
+            <option value="stand" selected>Stand</option>
+            <option value="jump">Jump</option>
+            <option value="evade">Evade</option>
+            <option value="attack">Attack</option>
+          </select>
+        </label>
+        <label class="train-chip">
+          <span>Item</span>
+          <select id="sel-train-item"></select>
+        </label>
+        <button id="btn-train-spawn" class="btn btn-accent btn-xs" type="button">Spawn Item</button>
+        <button id="btn-train-focus" class="btn btn-ghost btn-xs" type="button">Playfield</button>
+      </div>
+
+      <div id="hud-banner" class="hud-banner" hidden>READY</div>
+      <div id="hud-vs-splash" class="hud-vs-splash" hidden>
+        <div class="vs-side vs-left">
+          <canvas id="vs-p1-canvas" width="128" height="128"></canvas>
+          <div id="vs-p1-name" class="vs-name">FAUX</div>
+        </div>
+        <div class="vs-badge">VS</div>
+        <div class="vs-side vs-right">
+          <canvas id="vs-p2-canvas" width="128" height="128"></canvas>
+          <div id="vs-p2-name" class="vs-name">CAPTAIN PIGEON</div>
+        </div>
+      </div>
+      <div id="hud-tech-feed" class="hud-tech-feed" aria-live="polite"></div>
+      <div id="hud-homerun" class="hud-homerun" hidden>
+        <div id="hr-label" class="hr-label">DISTANCE</div>
+        <div id="hr-feet" class="hr-feet">0.0 ft</div>
+      </div>
+
+      <div id="hud-fighters" class="hud-fighters"></div>
+    </section>
+
+    <!-- PAUSE OVERLAY -->
+    <section id="screen-pause" class="screen screen-modal" hidden aria-label="Paused">
+      <div class="modal-card modal-compact">
+        <h2>PAUSED</h2>
+        <div id="pause-tech-readout" class="pause-tech"></div>
+        <div class="pause-actions">
+          <button id="btn-pause-resume" class="btn btn-primary" type="button">Resume</button>
+          <button id="btn-pause-restart" class="btn btn-secondary" type="button">Restart Match</button>
+          <button id="btn-pause-controller" class="btn btn-secondary" type="button">Controller &amp; Combos</button>
+          <button id="btn-pause-3d" class="btn btn-secondary" type="button">Graphics: 3D WebGL</button>
+          <button id="btn-pause-hitboxes" class="btn btn-secondary" type="button">Toggle Hitboxes</button>
+          <button id="btn-pause-mute" class="btn btn-secondary" type="button">Toggle Sound</button>
+          <button id="btn-pause-css" class="btn btn-ghost" type="button">Character Select</button>
+          <button id="btn-pause-title" class="btn btn-ghost" type="button">Title Screen</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- RESULTS SCREEN -->
+    <section id="screen-results" class="screen screen-modal screen-results" hidden aria-label="Match results">
+      <div class="modal-card modal-wide results-card-podium">
+        <div id="results-kicker" class="results-kicker">VICTORY!</div>
+        <h2 id="results-winner" class="results-winner">FAUX WINS!</h2>
+        <p id="results-sub" class="results-sub"></p>
+        <div id="results-cards" class="results-cards"></div>
+        <div class="results-actions">
+          <button id="btn-results-rematch" class="btn btn-primary" type="button">Rematch</button>
+          <button id="btn-results-next" class="btn btn-accent" type="button" hidden>Next Classic Stage</button>
+          <button id="btn-results-css" class="btn btn-secondary" type="button">Character Select</button>
+          <button id="btn-results-title" class="btn btn-ghost" type="button">Title Screen</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- GAMEPAD MENU NAVIGATION HINT BAR -->
+    <div id="pad-hint-bar" class="pad-hint-bar" hidden aria-live="polite"></div>
+
+    <!-- RESPONSIVE MULTI-TOUCH CONTROLS -->
+    <div id="touch-controls" class="touch-controls" hidden aria-label="Touch controls">
+      <div id="touch-stick-zone" class="touch-stick-zone" aria-label="Movement stick">
+        <div class="touch-stick-base">
+          <div id="touch-stick-knob" class="touch-stick-knob"></div>
+        </div>
+      </div>
+      <div class="touch-buttons">
+        <button class="touch-btn touch-shield" data-touch="shield" type="button" aria-label="Shield or Wavedash">SHLD</button>
+        <button class="touch-btn touch-grab" data-touch="grab" type="button" aria-label="Grab or Throw Item">GRAB</button>
+        <button class="touch-btn touch-jump" data-touch="jump" type="button" aria-label="Jump">JUMP</button>
+        <button class="touch-btn touch-b" data-touch="special" type="button" aria-label="Special attack">B</button>
+        <button class="touch-btn touch-a" data-touch="attack" type="button" aria-label="Normal attack or Item">A</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/vendor/three.bundle.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

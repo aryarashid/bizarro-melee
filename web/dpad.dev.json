@@ -1,0 +1,28 @@
+{
+  "multiplayer": {
+    "enabled": true,
+    "maxPlayers": 2,
+    "lobbyTypes": ["public", "private"]
+  },
+  "stats": [
+    { "id": "matches_won", "name": "Matches Won", "type": "int", "min": 0, "max": 999999, "default": 0, "maxDelta": 5 },
+    { "id": "kos_scored", "name": "KOs Scored", "type": "int", "min": 0, "max": 999999, "default": 0, "maxDelta": 100 },
+    { "id": "wavedashes", "name": "Wavedashes", "type": "int", "min": 0, "max": 999999, "default": 0, "maxDelta": 100 },
+    { "id": "classic_clears", "name": "Classic Clears", "type": "int", "min": 0, "max": 999999, "default": 0, "maxDelta": 2 },
+    { "id": "homerun_best", "name": "Home-Run Best (ft)", "type": "int", "min": 0, "max": 99999, "default": 0 }
+  ],
+  "achievements": [
+    { "id": "first_ko", "name": "Bizarro Baptism", "description": "Score your first KO in Bizarro Melee.", "statId": "kos_scored", "target": 1 },
+    { "id": "wavedash_pro", "name": "20XX Slip-N-Slide", "description": "Land 10 wavedashes.", "statId": "wavedashes", "target": 10 },
+    { "id": "sweetspot_king", "name": "Crumbs Shown", "description": "Score a KO with a sweetspot or meteor smash." },
+    { "id": "mitt_slayer", "name": "Oven Mitt De-Quilted", "description": "Defeat Master Mitt in Classic Arcade." },
+    { "id": "homerun_hero", "name": "Out of the Tax Bracket", "description": "Launch Sagging Bag past 1,000 ft in Home-Run Derby." }
+  ],
+  "leaderboards": [
+    { "id": "homerun-distance", "name": "Home-Run Derby (ft)", "sortOrder": "desc", "displayType": "number", "type": "int", "min": 0, "max": 99999 },
+    { "id": "classic-score", "name": "Classic Arcade High Score", "sortOrder": "desc", "displayType": "number", "type": "int", "min": 0, "max": 9999999 },
+    { "id": "ko-total", "name": "Career KOs", "sortOrder": "desc", "displayType": "number", "type": "int", "min": 0, "max": 999999 },
+    { "id": "targets-time", "name": "Break the Targets (ms)", "sortOrder": "asc", "displayType": "milliseconds", "type": "int", "min": 1000, "max": 600000 },
+    { "id": "multiman-kos", "name": "Multi-Man Bizarro KOs", "sortOrder": "desc", "displayType": "number", "type": "int", "min": 0, "max": 9999 }
+  ]
+}
