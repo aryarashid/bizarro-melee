@@ -399,7 +399,23 @@ async function runUnitTests() {
     if (gr.ready && gr.inputs[0].attackPressed) longStallEdges++;
   }
   assert.equal(longStallEdges, 10, `20-tick stall must preserve all 10/10 attack edges (got ${longStallEdges})`);
-  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + rematch isolation + FIFO/C-stick/20-tick stall + 0 desyncs) validated`);
+  // 31 movement samples + 1 attack + 1 release at 32-entry capacity must NOT overwrite the attack edge, AND 1,0,1 C-stick sequence keeps neutral release
+  const rh4 = createOnlineSession({ isHost: true, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'g', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const rg4 = createOnlineSession({ isHost: false, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'h', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const flush4 = () => { while (rPkts.length) { const x = rPkts.shift(); (x.to === 'h' ? rh4 : rg4).handlePacket(x.p); } };
+  rh4.startHandshake({ seed: 555, stageId: 'arguefield', hostFighter: 'faux', guestFighter: 'garth' }); flush4();
+  rh4.step(createEmptyInput()); rh4.step(createEmptyInput());
+  for (let s = 0; s < 31; s++) { const m = createEmptyInput(); m.moveX = (s % 2 === 0) ? 0.5 : -0.5; rh4.step(m); }
+  const atkCap = createEmptyInput(); atkCap.attack = atkCap.attackPressed = true; rh4.step(atkCap);
+  rh4.step(createEmptyInput());
+  let capAttacks = 0;
+  for (let i = 0; i < 45; i++) {
+    flush4(); rh4.step(createEmptyInput());
+    const gr = rg4.step(createEmptyInput());
+    if (gr.ready && gr.inputs[0].attackPressed) capAttacks++;
+  }
+  assert.equal(capAttacks, 1, `Release at 32-entry capacity must not overwrite queued attack (got ${capAttacks})`);
+  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + rematch isolation + FIFO/C-stick/32-cap + 0 desyncs) validated`);
 
   // Controller mapping regression test (8BitDo HID button 9 != Start, DualSense 054c raw HID mapping + analog triggers)
   const { InputManager } = await import('../web/js/input.js');

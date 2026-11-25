@@ -723,13 +723,15 @@ export function createOnlineSession({
     }
     if (pendingQueue.length < 32) {
       pendingQueue.push(packed);
-    } else if (hasEdge) {
-      const nonEdgeIdx = pendingQueue.findIndex((t) => !tupleHasActionEdge(t));
-      if (nonEdgeIdx >= 0) pendingQueue.splice(nonEdgeIdx, 1);
-      else pendingQueue.shift();
-      pendingQueue.push(packed);
     } else {
-      pendingQueue[pendingQueue.length - 1] = packed;
+      const nonEdgeIdx = pendingQueue.findIndex((t) => !tupleHasActionEdge(t));
+      if (nonEdgeIdx >= 0) {
+        pendingQueue.splice(nonEdgeIdx, 1);
+        pendingQueue.push(packed);
+      } else if (hasEdge) {
+        pendingQueue.shift();
+        pendingQueue.push(packed);
+      }
     }
   }
 
@@ -966,7 +968,11 @@ export function createOnlineSession({
       let packed;
       if (pendingQueue.length > 0) {
         packed = pendingQueue.shift();
-        if (hasActionEdge(localRawInput)) enqueueStalledInput(localRawInput);
+        const tail = pendingQueue.length ? pendingQueue[pendingQueue.length - 1] : packed;
+        const freshPacked = packCompactTuple(localRawInput);
+        if (hasActionEdge(localRawInput) || !tupleEquals(freshPacked, tail)) {
+          enqueueStalledInput(localRawInput);
+        }
       } else {
         packed = packCompactTuple(localRawInput);
       }

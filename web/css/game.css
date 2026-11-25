@@ -1130,6 +1130,18 @@ body[data-touch="1"][data-layout="landscape"] .hud-pct {
   font-size: 1.15rem;
 }
 @media (max-width: 900px) and (orientation: landscape) {
+  body[data-layout="landscape"] .hud-fighters[data-count="3"] .hud-card canvas,
+  body[data-layout="landscape"] .hud-fighters[data-count="4"] .hud-card canvas {
+    display: none;
+  }
+  body[data-layout="landscape"] .hud-fighters[data-count="3"] .hud-card-name,
+  body[data-layout="landscape"] .hud-fighters[data-count="4"] .hud-card-name {
+    font-size: 0.66rem;
+  }
+  body[data-layout="landscape"] .hud-fighters[data-count="3"] .hud-pct,
+  body[data-layout="landscape"] .hud-fighters[data-count="4"] .hud-pct {
+    font-size: 1.15rem;
+  }
   body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="3"],
   body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="4"] {
     display: grid;
@@ -1138,10 +1150,6 @@ body[data-touch="1"][data-layout="landscape"] .hud-pct {
     width: 100%;
     padding-left: 136px;
     padding-right: 190px;
-  }
-  body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="3"] .hud-card canvas,
-  body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="4"] .hud-card canvas {
-    display: none;
   }
   body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="3"] .hud-card,
   body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="4"] .hud-card,
