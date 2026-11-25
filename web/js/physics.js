@@ -1,4 +1,4 @@
-import { ITEM_FREQUENCY, MELEE, MODE, MOVE, STATE, TICK_RATE, WORLD_SCALE, computeMeleeKnockback } from './constants.js';
+import { ITEM_FREQUENCY, MELEE, MODE, MOVE, STATE, TICK_RATE, WORLD_SCALE, computeMeleeKnockback, detAtan2, detCos, detHypot, detSin, detTan } from './constants.js';
 import { CRITTER_SUMMONS, ITEM_DEF, pickRandomItemDef } from './items.js';
 import { BIZARRO_INTERN, getFighterById, MASTER_MITT, SAGGING_BAG } from './roster.js';
 import { getStageById, getStageForm, getSurfaceY, HOMERUN_STAGE, TARGET_STAGE, resolveStagePlatforms, resolveStageSolids } from './stages.js';
@@ -55,7 +55,7 @@ function onlineInput(frame) {
     lightShield: frame.lightShield === true, cStickTilt: frame.cStickTilt === true, tiltMod: frame.tiltMod === true };
   for (const key of INPUT_AXES) input[key] = Number.isFinite(frame[key]) ? clamp(frame[key], -1, 1) : 0;
   if (typeof frame.tapJumpPressed === 'boolean') input.tapJumpPressed = frame.tapJumpPressed;
-  const magnitude = Math.hypot(input.moveX, input.moveY);
+  const magnitude = detHypot(input.moveX, input.moveY);
   if (magnitude > 1) {
     input.moveX /= magnitude;
     input.moveY /= magnitude;
@@ -84,7 +84,7 @@ function stickPresses(match, f, input) {
 
   // A shallow C-stick tap released near center requests nair. Wait for release so a
   // full directional flick can pass through this band without firing prematurely.
-  const cMag = Math.hypot(input.cStickX || 0, input.cStickY || 0);
+  const cMag = detHypot(input.cStickX || 0, input.cStickY || 0);
   const canRequestAerial = f.state === S.AIRBORNE || f.state === S.JUMPSQUAT || f.grounded && input.jumpPressed;
   if (!canRequestAerial || Math.max(Math.abs(input.cStickX || 0), Math.abs(input.cStickY || 0)) >= C_AIR) f.softCTap = false;
   else if (cMag <= 0.10) {
@@ -421,7 +421,7 @@ function jump(match, f, input) {
 function airdodge(f, input) {
   const x = input.moveX || 0;
   const y = input.moveY || 0;
-  const mag = Math.hypot(x, y);
+  const mag = detHypot(x, y);
   const speed = MELEE.AIRDODGE_SPEED * WORLD_SCALE;
   f.vx = mag > 0.2 ? speed * x / mag : 0;
   f.vy = mag > 0.2 ? speed * y / mag : 0;
@@ -439,7 +439,7 @@ function aerialMove(f, input) {
   const x = input.moveX || 0, y = input.moveY || 0;
   if (y >= 0.45) return M.UAIR;
   if (y <= -0.45) return M.DAIR;
-  if (Math.hypot(x, y) < 0.35 || x === 0) return M.NAIR;
+  if (detHypot(x, y) < 0.35 || x === 0) return M.NAIR;
   return x * f.facing > 0 ? M.FAIR : M.BAIR;
 }
 
@@ -855,7 +855,7 @@ function spawnProjectile(match, f, m, source = f) {
   const radius = Math.max(5, Math.round((m.radius ?? 18) * 0.7 * Math.sqrt(ratio)));
   const life = m.projLife ?? 60;
   match.projectiles.push({
-    id: match.nextEntityId++, muzzleRootX: source.x, x, y, vx: facing * (m.projSpeed ?? 12) * Math.cos(aim), vy: (m.projSpeed ?? 12) * Math.sin(aim),
+    id: match.nextEntityId++, muzzleRootX: source.x, x, y, vx: facing * (m.projSpeed ?? 12) * detCos(aim), vy: (m.projSpeed ?? 12) * detSin(aim),
     r: radius, radius, ownerPort: f.port, port: f.port, style, life, maxLife: life, facing,
     damage: m.damage * ratio, moveKey: source.moveKey, sourceFighterId: f.fighterId,
     moveData: m.storableCharge && ratio < 1 ? { ...m, sweetspot: false } : m, mult: source.moveStale,
@@ -879,21 +879,21 @@ function stickAngle(match, f, input) {
       for (const edge of [deck.x, deck.x + deck.w]) {
         const hangX = edge + (edge === deck.x ? -13 : 13);
         const dx = hangX - f.x, dy = getSurfaceY(deck, edge) - 20 - f.y;
-        const length = Math.hypot(dx, dy);
+        const length = detHypot(dx, dy);
         if (length >= distance) continue;
         distance = length;
-        angle = Math.atan2(dy, dx);
+        angle = detAtan2(dy, dx);
       }
     }
     if (angle != null) {
       if (f.moveData.technique === 'quickAttack' && f.specialPhase === 'charge' && distance > 164) {
-        angle += (Math.cos(angle) >= 0 ? 1 : -1) * 36 * RAD;
+        angle += (detCos(angle) >= 0 ? 1 : -1) * 36 * RAD;
       }
       return angle;
     }
   }
   const x = input.moveX || 0, y = input.moveY || 0;
-  return Math.hypot(x, y) > 0.18 ? Math.atan2(y, x) : null;
+  return detHypot(x, y) > 0.18 ? detAtan2(y, x) : null;
 }
 
 function showCharge(match, f, progress, angle) {
@@ -909,7 +909,7 @@ function specialLaunch(match, f, angle, misfire = false) {
 }
 
 function startFlight(f, angle, speed) {
-  const x = Math.cos(angle), y = Math.sin(angle);
+  const x = detCos(angle), y = detSin(angle);
   f.specialLaunchAngle = angle;
   if (Math.abs(x) > 0.001) f.facing = Math.sign(x);
   if (y > 0.001 || !f.grounded) leaveFloor(f);
@@ -969,7 +969,7 @@ function tickSpecial(match, f, m, input, frame) {
   }
   if (technique === 'quickAttack' && frame === 6) {
     const next = stickAngle(match, f, input);
-    if (next != null && Math.cos(next - f.specialLaunchAngle) <= Math.cos(35 * RAD) + 1e-9) beginZip(f, next, 2);
+    if (next != null && detCos(next - f.specialLaunchAngle) <= detCos(35 * RAD) + 1e-9) beginZip(f, next, 2);
     else f.moveFrame = m.startup + m.active;
   }
   if (technique === 'teleport360' && frame === 7) {
@@ -994,7 +994,7 @@ function tickSpecial(match, f, m, input, frame) {
 function activateSpecial(match, f, m) {
   if (m.bossTell === 'gun') {
     const dx = Math.max(1, (f.bossTargetX - f.x) * f.facing - Math.abs(m.offsetX));
-    const angle = clamp(Math.atan2(f.bossAimY - f.y, dx) / RAD, -70, 70);
+    const angle = clamp(detAtan2(f.bossAimY - f.y, dx) / RAD, -70, 70);
     for (const offset of f.bossPhase === 2 ? [-13, 0, 13] : [0]) {
       spawnProjectile(match, f, { ...m, projAngle: angle + offset });
     }
@@ -1375,8 +1375,8 @@ function updateState(match, f, input) {
         if (f.ledgeRollFrames) f.vx = 0;
         transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
       } else {
-        const peak = f.ledgeRollFrames ? 94 * Math.tan(Math.PI / (2 * duration)) : 6.7;
-        f.vx = f.dodgeDir * Math.sin(Math.PI * f.stateFrame / duration) * peak;
+        const peak = f.ledgeRollFrames ? 94 * detTan(Math.PI / (2 * duration)) : 6.7;
+        f.vx = f.dodgeDir * detSin(Math.PI * f.stateFrame / duration) * peak;
       }
       break;
     }
@@ -1400,7 +1400,7 @@ function updateState(match, f, input) {
       tickSmashCharge(match, f, input);
       break;
     case S.TECH:
-      if (f.grounded && f.dodgeDir) f.vx = f.dodgeDir * 9.5 * Math.sin(Math.PI * f.stateFrame / 26);
+      if (f.grounded && f.dodgeDir) f.vx = f.dodgeDir * 9.5 * detSin(Math.PI * f.stateFrame / 26);
       if (f.stateFrame >= (f.grounded && f.dodgeDir ? 26 : 22)) {
         transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
         neutral(match, f, input);
@@ -1717,8 +1717,8 @@ function updateTerrain(match) {
   });
   if (barrelCannon) {
     const { minX, maxX, speed } = stage.barrelCannon;
-    barrelCannon.x = (minX + maxX + Math.sin(frame * speed) * (maxX - minX)) / 2;
-    barrelCannon.angle = 0.65 * Math.sin(frame * speed * 1.45);
+    barrelCannon.x = (minX + maxX + detSin(frame * speed) * (maxX - minX)) / 2;
+    barrelCannon.angle = 0.65 * detSin(frame * speed * 1.45);
     if (barrelCannon.cooldown > 0) barrelCannon.cooldown--;
   }
   const current = [...match.surfaces, ...match.platforms];
@@ -1832,7 +1832,7 @@ function stageTransport(match, f, input) {
   if (!cannon) return false;
   const entering = cannon.occupantPort == null;
   if (entering) {
-    if (cannon.cooldown || f.grounded || f.state === S.LEDGE_HANG || Math.hypot(f.x - cannon.x, f.y - cannon.y) > spec.radius) return false;
+    if (cannon.cooldown || f.grounded || f.state === S.LEDGE_HANG || detHypot(f.x - cannon.x, f.y - cannon.y) > spec.radius) return false;
     cannon.occupantPort = f.port;
     cannon.fireTimer = 24;
     releaseGrab(match, f);
@@ -1852,7 +1852,7 @@ function stageTransport(match, f, input) {
     cannon.cooldown = 40;
     cannon.fireTimer = 0;
     f.vy = spec.launchVy;
-    f.vx = Math.sin(cannon.angle) * 10;
+    f.vx = detSin(cannon.angle) * 10;
     f.jumpsUsed = 0;
     f.inputBuffer = {};
     f.barrelRising = true;
@@ -1883,9 +1883,9 @@ function applyStageHazards(match) {
       f.hitstun = 26;
       f.invulnFrames = 18;
       transition(f, S.HITSTUN, true);
-      const kb = Math.hypot(f.kbVx, f.kbVy) / (MELEE.KB_TO_VEL * WORLD_SCALE);
+      const kb = detHypot(f.kbVx, f.kbVy) / (MELEE.KB_TO_VEL * WORLD_SCALE);
       impactEvent(match, null, f, { damage: 12, kb, y: hotFloorY, port: f.port,
-        moveKey: 'hotFloor', element: 'fire', angle: Math.atan2(f.kbVy, f.kbVx) / RAD });
+        moveKey: 'hotFloor', element: 'fire', angle: detAtan2(f.kbVy, f.kbVx) / RAD });
       event(match, 'explosion', f, { y: hotFloorY, radius: 55 });
     }
     if (riverFlow && f.y < riverFlow.y && !f.grounded && f.state !== S.LEDGE_HANG &&
@@ -2107,7 +2107,7 @@ function integrate(match, f, input, priorTerrain) {
     if (lastZipFrame) f.zipOrigin = null;
   }
   f.prevWallInput = input.moveX || 0;
-  const kb = Math.hypot(f.kbVx, f.kbVy);
+  const kb = detHypot(f.kbVx, f.kbVy);
   if (kb) {
     const decay = f.grounded ? Math.max(s.traction, 0.55) * (match.stage.iceTraction ?? 1) : MELEE.KB_DECAY * WORLD_SCALE;
     const scale = Math.max(0, 1 - decay / kb);
@@ -2136,7 +2136,7 @@ function shieldHits(b, f) {
   if (!isShield(f)) return false;
   const s = f.def.stats;
   const r = s.shieldRadius * f.scale * f.shieldScale * (0.35 + 0.65 * f.shieldHp / MELEE.SHIELD_MAX);
-  return Math.hypot(b.x - (f.x + f.facing * 5), b.y - (f.y + s.height * f.scale * 0.48)) <= b.r + r;
+  return detHypot(b.x - (f.x + f.facing * 5), b.y - (f.y + s.height * f.scale * 0.48)) <= b.r + r;
 }
 
 const powerShield = (f) => f.state === S.SHIELD && !f.lightShielding && f.shieldAge < MELEE.POWERSHIELD_WINDOW;
@@ -2157,7 +2157,7 @@ function breakShield(match, f) {
 
 // Hitlag displacement tests the stage crossing even though ordinary integration is frozen.
 function shiftHitlag(match, f, x, y, distance) {
-  const length = Math.hypot(x, y);
+  const length = detHypot(x, y);
   if (!length) return;
   const oldX = f.x;
   const oldY = f.y;
@@ -2180,15 +2180,15 @@ function shiftHitlag(match, f, x, y, distance) {
 function hitlagDI(match, f, input) {
   const x = input.moveX || 0, y = input.moveY || 0;
   const cx = input.cStickX || 0, cy = input.cStickY || 0;
-  if (f.sdiCount < 3 && Math.hypot(x, y) > 0.18 &&
+  if (f.sdiCount < 3 && detHypot(x, y) > 0.18 &&
       (Math.abs(x - (f.prevMoveX || 0)) > 0.6 || Math.abs(y - (f.prevMoveY || 0)) > 0.6)) {
     shiftHitlag(match, f, x, y, 14);
     f.sdiCount++;
     event(match, 'tech', f, { tech: 'SDI' });
   }
   if (f.hitlag !== 1) return;
-  const useC = Math.hypot(cx, cy) >= 0.18;
-  if (!useC && Math.hypot(x, y) < 0.18) return;
+  const useC = detHypot(cx, cy) >= 0.18;
+  if (!useC && detHypot(x, y) < 0.18) return;
   shiftHitlag(match, f, useC ? cx : x, useC ? cy : y, 10);
   if ((y <= -0.55 || cy <= -0.55) && f.lastKnockback < 85) {
     const floor = [...match.surfaces, ...match.platforms]
@@ -2213,11 +2213,11 @@ function hitlagDI(match, f, input) {
 
 function applyDI(f, input) {
   const a = f.launchAngle;
-  const cross = Math.cos(a) * (input.moveY || 0) - Math.sin(a) * (input.moveX || 0);
+  const cross = detCos(a) * (input.moveY || 0) - detSin(a) * (input.moveX || 0);
   const horizontalGroundLaunch = f.grounded && Math.abs(f.kbVy) < 0.001;
   const di = horizontalGroundLaunch ? 0 : Math.sign(cross) * Math.min(cross * cross, 1) * MELEE.DI_MAX_DEGREES * RAD;
-  f.kbVx = f.launchSpeed * Math.cos(a + di);
-  f.kbVy = f.launchSpeed * Math.sin(a + di);
+  f.kbVx = f.launchSpeed * detCos(a + di);
+  f.kbVy = f.launchSpeed * detSin(a + di);
   f.launchAngle = null;
 }
 
@@ -2385,19 +2385,19 @@ function strike(match, a, v, m, info) {
     v.launchAngle = angle;
     v.launchSpeed = launch;
     v.vx = v.vy = 0;
-    v.kbVx = Math.cos(angle) * launch;
-    v.kbVy = Math.sin(angle) * launch;
+    v.kbVx = detCos(angle) * launch;
+    v.kbVy = detSin(angle) * launch;
     if (onGround && v.kbVy <= 0.01) {
       if (v.kbVy < -1) {
         v.kbVy *= -0.55;
-        v.launchAngle = Math.atan2(v.kbVy, v.kbVx);
+        v.launchAngle = detAtan2(v.kbVy, v.kbVx);
         leaveFloor(v);
       } else v.kbVy = 0;
     } else if (v.kbVy > 0.01) {
       leaveFloor(v);
       v.jumpsUsed = Math.max(v.jumpsUsed, 1);
     }
-    if (launch > 0) launchDegrees = (Math.atan2(v.kbVy, v.kbVx) / RAD + 360) % 360;
+    if (launch > 0) launchDegrees = (detAtan2(v.kbVy, v.kbVx) / RAD + 360) % 360;
     if (m.link && a && !onGround) {
       // Follow a rising screw attack or falling drill until its next pulse.
       v.vx = a.vx;
@@ -2559,7 +2559,7 @@ function meleeCollisions(match, movable) {
 function projectileContact(p, a, b) {
   const dx = p.x - a.x;
   const dy = p.y - a.y;
-  const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / p.r));
+  const steps = Math.max(1, Math.ceil(detHypot(dx, dy) / p.r));
   for (let i = 0; i <= steps; i++) {
     const box = { x: a.x + dx * i / steps, y: a.y + dy * i / steps, r: p.r };
     if (circleHits(box, b.hurtbox) || shieldHits(box, b)) return box;
@@ -2699,7 +2699,7 @@ function updateProjectiles(match) {
     if (m.projBoomerang && p.age >= 27) {
       p.vx = approach(p.vx, (Math.sign(a.x - p.x) || 1) * Math.abs(m.projSpeed), 1.8);
       p.vy = approach(p.vy, clamp((a.y + 32 - p.y) * 0.095, -9, 9), 1.15);
-      if (p.age > 34 && Math.hypot(a.x - p.x, a.y + 32 - p.y) < 28) continue;
+      if (p.age > 34 && detHypot(a.x - p.x, a.y + 32 - p.y) < 28) continue;
     }
     p.facing = Math.sign(p.vx) || p.facing;
     p.vy -= m.projGravity ?? 0;
@@ -2731,7 +2731,7 @@ function updateProjectiles(match) {
   match.projectiles = keep;
 }
 
-const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const distance = (a, b) => detHypot(a.x - b.x, a.y - b.y);
 
 function circleContact(from, to, circle) {
   const dx = to.x - from.x;
@@ -2858,11 +2858,11 @@ function swingItem(match, f, item, input) {
 function throwItem(match, f, item, input) {
   let x = input.moveX || 0;
   let y = input.moveY || 0;
-  if (Math.hypot(x, y) < 0.35) {
+  if (detHypot(x, y) < 0.35) {
     x = f.facing;
     y = 0.25;
   }
-  const amount = Math.hypot(x, y);
+  const amount = detHypot(x, y);
   faceInput(f, x);
   placeHeldItem(item, f);
   item.holderPort = null;
@@ -3307,7 +3307,7 @@ const SWEEPS = {
 function updateHazards(match) {
   const kind = match.stage.hazard;
   if (kind === 'risingAcid') {
-    match.acidLevel = -121 - 139 * Math.cos(match.playFrames * 2 * Math.PI / 720);
+    match.acidLevel = -121 - 139 * detCos(match.playFrames * 2 * Math.PI / 720);
     for (const f of match.fighters) {
       if (f.y >= match.acidLevel || intangible(f) || (f.acidHitAt ?? -Infinity) + 50 > match.frame) continue;
       f.acidHitAt = match.frame;
@@ -3758,7 +3758,7 @@ export function stepMatch(match, inputsByPort = []) {
   match.screenFlash = Math.max(0, match.screenFlash - 1);
   const priorTerrain = updateTerrain(match);
   for (const t of match.targets) {
-    if (!t.broken) t.x = t.baseX + Math.sin(match.frame * t.speed) * t.moveX;
+    if (!t.broken) t.x = t.baseX + detSin(match.frame * t.speed) * t.moveX;
   }
   if (match.status === 'intro') {
     for (const f of match.fighters) if (f.def !== MASTER_MITT) integrate(match, f, EMPTY, priorTerrain);

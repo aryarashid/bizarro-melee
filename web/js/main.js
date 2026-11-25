@@ -105,6 +105,7 @@ const app = {
   onlineReconnecting: false,
   onlineReconnectFrames: 0,
   onlineMenuOpen: false,
+  onlineStatusDirty: false,
   seenPhysicalKey: false,
   padFocusEl: null,
   lastTickMs: 0,
@@ -269,6 +270,9 @@ function buildCssGrid() {
       const port = app.ports[app.activeCssPort];
       port.fighterId = def.id;
       port.paletteIndex = 0;
+      if (app.activeCssPort === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+        app.onlineSession.sendGuestPick(port.fighterId, port.paletteIndex);
+      }
       renderBioPanel(def, 0);
       syncCssSelection();
     });
@@ -398,6 +402,9 @@ function syncCssSelection() {
     altBtn.addEventListener('click', () => {
       sound.playUi('move');
       p.paletteIndex = (p.paletteIndex + 1) % def.palettes.length;
+      if (p.port === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+        app.onlineSession.sendGuestPick(p.fighterId, p.paletteIndex);
+      }
       renderBioPanel(def, p.paletteIndex);
       syncCssSelection();
     });
@@ -1955,7 +1962,7 @@ function wireUi() {
   $('btn-controller-back').addEventListener('click', () => {
     app.rebindAction = null;
     sound.playUi('back');
-    showScreen(app.prevScreen === 'pause' ? 'pause' : 'title');
+    showScreen(app.onlineMenuOpen || app.prevScreen === 'pause' ? 'pause' : 'title');
   });
   $('btn-controller-reset').addEventListener('click', () => {
     app.rebindAction = null;
@@ -2375,7 +2382,11 @@ function tickSimulation() {
     app.onlineSession?.tickHandshake();
   }
 
-  const runningOnlineOverlay = Boolean(app.screen === 'pause' && app.onlineMatchActive && app.onlineMenuOpen);
+  const runningOnlineOverlay = Boolean(
+    (app.screen === 'pause' || app.screen === 'controller' || app.screen === 'settings') &&
+    app.onlineMatchActive &&
+    app.onlineMenuOpen
+  );
   if ((app.screen === 'match' || runningOnlineOverlay) && app.match) {
     if (app.match.status === 'paused' && !runningOnlineOverlay) return;
 
@@ -2394,6 +2405,7 @@ function tickSimulation() {
     if (app.match.mode === MODE.ONLINE && app.onlineMatchActive) {
       if (app.onlineReconnecting || !onlineSt.connected) {
         app.onlineReconnectFrames++;
+        app.onlineStatusDirty = true;
         if ($('hud-mode-info')) {
           setStableText($('hud-mode-info'), `OPPONENT RECONNECTING... • ${app.match.stage.name}`);
         }
@@ -2409,9 +2421,20 @@ function tickSimulation() {
       const stepRes = app.onlineSession.step(polled[0]);
       if (!stepRes.ready) {
         if (stepRes.stallFrames > 15 && $('hud-mode-info')) {
+          app.onlineStatusDirty = true;
           setStableText($('hud-mode-info'), `ONLINE SYNCING... • ${app.match.stage.name}`);
         }
+        if (stepRes.stallFrames > 600) {
+          abortOnlineMatch('OPPONENT TIMED OUT');
+        }
         return;
+      }
+      if (app.onlineStatusDirty) {
+        app.onlineStatusDirty = false;
+        if ($('hud-mode-info')) {
+          const delayF = app.onlineSession.getStats().delayFrames || 3;
+          setStableText($('hud-mode-info'), `ONLINE LOCKSTEP (${delayF}F) • ${app.match.stage.name}`);
+        }
       }
       inputsByPort = stepRes.inputs;
     } else {

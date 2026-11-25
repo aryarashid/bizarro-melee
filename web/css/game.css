@@ -608,11 +608,20 @@ html, body {
   max-width: 96vw;
   margin: 0 auto;
 }
-.hud-fighters[data-count="3"],
+.hud-fighters[data-count="3"] {
+  width: min(95vw, 960px);
+  gap: clamp(6px, 1.1vw, 12px);
+}
 .hud-fighters[data-count="4"] {
   gap: clamp(6px, 1.1vw, 12px);
 }
-.hud-fighters[data-count="3"] .hud-card,
+.hud-fighters[data-count="3"] .hud-card {
+  min-width: 0;
+  flex: 1 1 255px;
+  max-width: 300px;
+  padding: 6px 10px 6px 8px;
+  gap: 7px;
+}
 .hud-fighters[data-count="4"] .hud-card {
   min-width: 0;
   flex: 1 1 0;
@@ -630,7 +639,7 @@ html, body {
 .hud-fighters[data-count="3"] .hud-card.hud-card-boss,
 .hud-fighters[data-count="4"] .hud-card.hud-card-boss {
   min-width: 248px;
-  flex: 1.65 1 268px;
+  flex: 1.25 1 285px;
   max-width: 340px;
 }
 .hud-fighters .hud-pct.hud-boss-hp {
@@ -1134,7 +1143,12 @@ body[data-touch="1"][data-layout="landscape"] .hud-pct {
     display: none;
   }
   body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="3"] .hud-card,
-  body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="4"] .hud-card {
+  body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="4"] .hud-card,
+  body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="3"] .hud-card.hud-card-boss,
+  body[data-touch="1"][data-layout="landscape"] .hud-fighters[data-count="4"] .hud-card.hud-card-boss {
+    min-width: 0;
+    max-width: none;
+    flex: 1 1 0;
     padding: 3px 6px;
   }
 }
@@ -1151,12 +1165,21 @@ body[data-layout="portrait"] .hud-fighters[data-count="4"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
-body[data-layout="portrait"] .hud-card {
+body[data-layout="portrait"] .hud-card,
+body[data-layout="portrait"] .hud-fighters[data-count="3"] .hud-card,
+body[data-layout="portrait"] .hud-fighters[data-count="4"] .hud-card {
   min-width: 0;
   flex: 1 1 0;
   max-width: none;
   padding: 5px 8px;
   gap: 6px;
+}
+body[data-layout="portrait"] .hud-fighters[data-count="3"] .hud-card.hud-card-boss,
+body[data-layout="portrait"] .hud-fighters[data-count="4"] .hud-card.hud-card-boss {
+  min-width: 0;
+  max-width: none;
+  flex: 1 1 0;
+  grid-column: 1 / -1;
 }
 body[data-layout="portrait"] .hud-fighters[data-count="3"] .hud-card canvas,
 body[data-layout="portrait"] .hud-fighters[data-count="4"] .hud-card canvas {

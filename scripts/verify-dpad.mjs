@@ -342,7 +342,38 @@ async function runUnitTests() {
   assert.equal(computeMatchChecksum(hostMatch), computeMatchChecksum(guestMatch), 'Host & Guest final match checksums must be bit-identical');
   assert.ok(hostSess.getStats().checksumsMatched >= 5 && hostSess.getStats().checksumMismatches === 0,
     `Expected >=5 matched checksums and 0 mismatches, got ${JSON.stringify(hostSess.getStats())}`);
-  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + 0 desyncs + sanitizer) validated`);
+
+  // Stale Round-1 input packet ignored on Rematch + FIFO stall queue preserving distinct taps & directions
+  const rPkts = [];
+  const rh = createOnlineSession({ isHost: true, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'g', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const rg = createOnlineSession({ isHost: false, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'h', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const flushR = () => { while (rPkts.length) { const x = rPkts.shift(); (x.to === 'h' ? rh : rg).handlePacket(x.p); } };
+  rh.startHandshake({ seed: 111, stageId: 'arguefield', hostFighter: 'faux', guestFighter: 'garth' }); flushR();
+  const staleInp = createEmptyInput(); staleInp.moveX = 1; staleInp.attack = staleInp.attackPressed = true;
+  rh.step(staleInp);
+  const heldStale = rPkts.find((x) => x.to === 'g' && x.p.t === 'in');
+  rPkts.length = 0;
+  rh.startHandshake({ seed: 222, stageId: 'arguefield', hostFighter: 'faux', guestFighter: 'garth' }); flushR();
+  rg.handlePacket(heldStale.p);
+  for (let i = 0; i < 6; i++) {
+    rh.step(createEmptyInput()); flushR();
+    const gr = rg.step(createEmptyInput()); flushR();
+    if (gr.ready) assert.equal(gr.inputs[0].moveX, 0, 'Stale Round-1 packet must not leak into Rematch Round 2');
+  }
+  // FIFO stall queue: two distinct attack taps separated by a release with opposite directions during a stall
+  rh.step(createEmptyInput()); rh.step(createEmptyInput());
+  const tapR = createEmptyInput(); tapR.moveX = 1; tapR.attack = tapR.attackPressed = true;
+  const tapL = createEmptyInput(); tapL.moveX = -1; tapL.attack = tapL.attackPressed = true;
+  rh.step(tapR); rh.step(createEmptyInput()); rh.step(tapL);
+  const recoveredDirs = [];
+  for (let i = 0; i < 12; i++) {
+    flushR();
+    rh.step(createEmptyInput());
+    const gr = rg.step(createEmptyInput());
+    if (gr.ready && gr.inputs[0].attackPressed) recoveredDirs.push(gr.inputs[0].moveX);
+  }
+  assert.deepEqual(recoveredDirs, [1, -1], `Stall FIFO queue must preserve distinct taps and directions, got ${JSON.stringify(recoveredDirs)}`);
+  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + rematch isolation + FIFO stall + 0 desyncs) validated`);
 
   // Controller mapping regression test (8BitDo HID button 9 != Start, DualSense 054c raw HID mapping + analog triggers)
   const { InputManager } = await import('../web/js/input.js');
@@ -751,21 +782,25 @@ async function runBrowserProof() {
     await desk.page.screenshot({ path: path.join(OUT_DIR, '10-training.png') });
     console.log('PASS: Training Lab toolbar & on-demand item spawn verified');
 
-    // Event 8 (3P Boss HUD specificity) check: Master Mitt card must not crush name to "..."
+    // Event 8 (3P Boss HUD specificity) check: ALL 3 cards must have 0px name overflow at 1280x720
     await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.startEvent('ev-final-audit'));
     await desk.frame.waitForFunction(() => window.__BIZARRO_MELEE__.getMatch()?.status === 'playing', null, { timeout: 6000 });
-    const bossHudInfo = await desk.frame.evaluate(() => {
-      const card = document.querySelector('#hud-fighters .hud-card-boss');
-      const nameEl = card?.querySelector('.hud-card-name');
-      return card && nameEl ? {
-        cardW: Math.round(card.getBoundingClientRect().width),
-        text: nameEl.textContent,
-        overflowPx: Math.round(nameEl.scrollWidth - nameEl.clientWidth),
-      } : null;
-    });
-    assert.ok(bossHudInfo && bossHudInfo.cardW >= 235 && bossHudInfo.overflowPx <= 4,
-      `Event 8 Boss HUD card truncated: ${JSON.stringify(bossHudInfo)}`);
-    console.log(`PASS: Event 8 3P Boss HUD readable (${bossHudInfo.text}, ${bossHudInfo.cardW}px, overflow ${bossHudInfo.overflowPx}px)`);
+    const bossHudCards = await desk.frame.evaluate(() =>
+      Array.from(document.querySelectorAll('#hud-fighters .hud-card')).map((card) => {
+        const nameEl = card.querySelector('.hud-card-name');
+        return {
+          isBoss: card.classList.contains('hud-card-boss'),
+          cardW: Math.round(card.getBoundingClientRect().width),
+          text: nameEl?.textContent || '',
+          overflowPx: nameEl ? Math.round(nameEl.scrollWidth - nameEl.clientWidth) : -1,
+        };
+      })
+    );
+    assert.equal(bossHudCards.length, 3, 'Expected 3 HUD cards in Event 8');
+    for (const c of bossHudCards) {
+      assert.ok(c.overflowPx <= 4, `Event 8 HUD card name truncated: ${JSON.stringify(c)}`);
+    }
+    console.log(`PASS: Event 8 3P HUD readable (${bossHudCards.map((c) => `${c.text} ${c.cardW}px`).join(' | ')})`);
 
     // 2D fallback HUD clearance check at 1280x720 4P
     await desk.frame.evaluate(() => {
@@ -859,10 +894,19 @@ async function runBrowserProof() {
     });
     assert.equal(mobOverlap.length, 0, `Portrait 4P touch buttons overlap HUD cards: ${JSON.stringify(mobOverlap)}`);
     await mob.page.screenshot({ path: path.join(OUT_DIR, '05-mobile.png') });
+    // Verify Event 8 Boss HUD fits inside 390x844 portrait viewport without right-edge clipping
+    await mob.frame.evaluate(() => window.__BIZARRO_MELEE__.startEvent('ev-final-audit'));
+    await mob.page.waitForTimeout(600);
+    const mobBossRect = await mob.frame.evaluate(() => {
+      const r = document.querySelector('#hud-fighters .hud-card-boss')?.getBoundingClientRect();
+      return r ? { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) } : null;
+    });
+    assert.ok(mobBossRect && mobBossRect.left >= 0 && mobBossRect.right <= 390,
+      `Portrait Event 8 Boss HUD clipped off 390px viewport: ${JSON.stringify(mobBossRect)}`);
     await mob.ctx.close();
-    console.log('PASS: Mobile 390x844 portrait Title + 4P HUD/touch clearance verified');
+    console.log(`PASS: Mobile 390x844 portrait Title + 4P HUD/touch + Event 8 Boss HUD (${mobBossRect.width}px) verified`);
 
-    // B2. Compact landscape phone 667x375 4P HUD readability
+    // B2. Compact landscape phone 667x375 4P HUD readability + Event 8 Boss HUD clearance
     const land = await openFrame({ viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true });
     await land.frame.evaluate(() => {
       window.__BIZARRO_MELEE__.setTeamBattle(false, 4);
@@ -875,8 +919,16 @@ async function runBrowserProof() {
     assert.equal(landCardWidths.length, 4, 'Expected 4 HUD cards in 4P landscape');
     assert.ok(landCardWidths.every((w) => w >= 100), `Compact landscape 4P HUD cards too narrow: ${JSON.stringify(landCardWidths)}`);
     await land.page.screenshot({ path: path.join(OUT_DIR, '12-landscape-667.png') });
+    await land.frame.evaluate(() => window.__BIZARRO_MELEE__.startEvent('ev-final-audit'));
+    await land.page.waitForTimeout(600);
+    const landBossRect = await land.frame.evaluate(() => {
+      const r = document.querySelector('#hud-fighters .hud-card-boss')?.getBoundingClientRect();
+      return r ? { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) } : null;
+    });
+    assert.ok(landBossRect && landBossRect.right <= 480,
+      `Compact landscape Event 8 Boss HUD overlaps touch buttons: ${JSON.stringify(landBossRect)}`);
     await land.ctx.close();
-    console.log(`PASS: Compact landscape 667x375 4P HUD readable (card widths: ${landCardWidths.join(', ')}px)`);
+    console.log(`PASS: Compact landscape 667x375 4P HUD (${landCardWidths.join(', ')}px) + Event 8 Boss HUD (right=${landBossRect.right}px) verified`);
 
     // C. Denied localStorage still plays
     const noStore = await openFrame({}, true, false);
@@ -1019,6 +1071,32 @@ async function runBrowserProof() {
     };
     assert.ok(onlineProg.hostFrame > onlineStart.hostFrame0 + 10, `Online host must advance frames (${JSON.stringify(onlineProg)})`);
     assert.ok(onlineProg.guestFrame > onlineStart.guestFrame0 + 10, `Online guest must advance frames (${JSON.stringify(onlineProg)})`);
+
+    // Verify Pause -> Controller & Combos submenu on Guest keeps Host advancing (zero remote freeze)
+    await guestPeer.page.locator('#btn-hud-pause').click();
+    await guestPeer.page.locator('#btn-pause-controller').click();
+    const hostBeforeCtrl = await hostPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getMatch()?.frame ?? 0);
+    for (let i = 0; i < 20; i++) {
+      await pumpP2P();
+      await hostPeer.page.waitForTimeout(25);
+    }
+    const hostAfterCtrl = await hostPeer.page.evaluate(() => window.__BIZARRO_MELEE__.getMatch()?.frame ?? 0);
+    assert.ok(hostAfterCtrl > hostBeforeCtrl + 10, `Opening Controller Config online must not stall remote peer (${hostBeforeCtrl} -> ${hostAfterCtrl})`);
+    await guestPeer.page.locator('#btn-controller-back').click();
+    await guestPeer.page.locator('#btn-pause-resume').click();
+
+    // Verify Reconnect suspends then resumes cleanly AND restores #hud-mode-info label
+    await hostPeer.page.evaluate(() => window.__emitMockDpad('P2P_PEER_RECONNECTING', { userId: 'user-guest' }));
+    await hostPeer.page.waitForTimeout(100);
+    const reconnectingLabel = await hostPeer.page.locator('#hud-mode-info').textContent();
+    assert.ok(reconnectingLabel && reconnectingLabel.includes('RECONNECTING'), `Expected RECONNECTING pill, got "${reconnectingLabel}"`);
+    await hostPeer.page.evaluate(() => window.__emitMockDpad('P2P_PEER_RECONNECTED', { userId: 'user-guest' }));
+    for (let i = 0; i < 20; i++) {
+      await pumpP2P();
+      await hostPeer.page.waitForTimeout(25);
+    }
+    const restoredLabel = await hostPeer.page.locator('#hud-mode-info').textContent();
+    assert.ok(restoredLabel && restoredLabel.includes('ONLINE LOCKSTEP'), `HUD mode pill must restore after reconnect, got "${restoredLabel}"`);
 
     // Verify disconnect aborts match cleanly (does NOT continue solo)
     await hostPeer.page.evaluate(() => {

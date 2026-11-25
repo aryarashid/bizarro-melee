@@ -686,27 +686,39 @@ export function createOnlineSession({
   let checksumMismatches = 0;
   let syncState = 'idle';
   let guestPick = null;
-  let pendingLatch = null;
+  let pendingQueue = [];
 
-  function mergeLatchInto(base, latch) {
-    if (!latch) return base;
-    const merged = { ...neutralInputFrame(), ...(base || {}) };
+  function hasEdgePress(inp) {
+    if (!inp) return false;
     for (const k of WIRE_FLAGS) {
-      if (k.endsWith('Pressed') && latch[k]) merged[k] = true;
+      if (k.endsWith('Pressed') && inp[k]) return true;
     }
-    return merged;
+    return false;
   }
 
-  function latchInput(inp) {
-    if (!inp) return;
-    if (!pendingLatch) {
-      pendingLatch = { ...neutralInputFrame(), ...inp };
+  function tupleEquals(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  function enqueueStalledInput(inp) {
+    const packed = packCompactTuple(inp);
+    const hasEdge = hasEdgePress(inp);
+    // Preserve every distinct press, release, and direction change in exact FIFO order without queueing duplicate idle frames.
+    if (!hasEdge && tupleEquals(packed, NEUTRAL_WIRE) && (!pendingQueue.length || tupleEquals(pendingQueue[pendingQueue.length - 1], NEUTRAL_WIRE))) {
       return;
     }
-    for (const k of WIRE_AXES) pendingLatch[k] = inp[k] ?? 0;
-    for (const k of WIRE_FLAGS) {
-      if (k.endsWith('Pressed')) pendingLatch[k] = Boolean(pendingLatch[k] || inp[k]);
-      else pendingLatch[k] = Boolean(inp[k]);
+    if (!hasEdge && pendingQueue.length && tupleEquals(pendingQueue[pendingQueue.length - 1], packed)) {
+      return;
+    }
+    if (pendingQueue.length < 16) {
+      pendingQueue.push(packed);
+    } else if (hasEdge) {
+      pendingQueue.shift();
+      pendingQueue.push(packed);
+    } else {
+      pendingQueue[pendingQueue.length - 1] = packed;
     }
   }
 
@@ -715,7 +727,7 @@ export function createOnlineSession({
     config = { ...agreed, delayFrames: delay };
     pendingConfig = null;
     synPhase = false;
-    pendingLatch = null;
+    pendingQueue = [];
     localInputs.clear();
     remoteInputs.clear();
     localChecksums.clear();
@@ -737,7 +749,7 @@ export function createOnlineSession({
   function startHandshake(matchCfg = {}) {
     if (!isHost) return false;
     active = false;
-    pendingLatch = null;
+    pendingQueue = [];
     pendingConfig = {
       seed: (Number(matchCfg.seed) >>> 0) || ((Date.now() ^ 0x9e3779b9) >>> 0),
       stageId: sanitizeStage(matchCfg.stageId, 'arguefield'),
@@ -809,7 +821,7 @@ export function createOnlineSession({
     }
     if (!r.length) return false;
     packetsSent++;
-    return send(1, { t: 'in', f: topFrame, r }, false);
+    return send(1, { t: 'in', m: config?.seed ?? 0, f: topFrame, r }, false);
   }
 
   function checkFrameHash(frame) {
@@ -834,7 +846,7 @@ export function createOnlineSession({
     const h = hash >>> 0;
     localChecksums.set(f, h);
     packetsSent++;
-    send(0, { t: 'chk', f, h }, true);
+    send(0, { t: 'chk', m: config?.seed ?? 0, f, h }, true);
     checkFrameHash(f);
   }
 
@@ -845,6 +857,7 @@ export function createOnlineSession({
       active = false;
       pendingConfig = null;
       synPhase = false;
+      pendingQueue = [];
       syncState = 'left';
       onPeerLeave?.();
       return;
@@ -903,6 +916,8 @@ export function createOnlineSession({
       return;
     }
     if (data.t === 'in' && active && Number.isInteger(data.f) && Array.isArray(data.r)) {
+      // Ignore stale input windows from an earlier match/rematch round.
+      if (data.m != null && (Number(data.m) >>> 0) !== (config?.seed >>> 0)) return;
       const maxLen = Math.min(10, data.r.length);
       for (let i = 0; i < maxLen; i++) {
         const f = data.f - i;
@@ -916,6 +931,7 @@ export function createOnlineSession({
       return;
     }
     if (data.t === 'req' && active && Number.isInteger(data.f)) {
+      if (data.m != null && (Number(data.m) >>> 0) !== (config?.seed >>> 0)) return;
       const maxAhead = Math.max(4, (config?.delayFrames || 3) + 2);
       let top = -1;
       for (let f = data.f + maxAhead; f >= data.f; f--) {
@@ -925,6 +941,7 @@ export function createOnlineSession({
       return;
     }
     if (data.t === 'chk' && active && Number.isInteger(data.f)) {
+      if (data.m != null && (Number(data.m) >>> 0) !== (config?.seed >>> 0)) return;
       remoteChecksums.set(data.f | 0, Number(data.h) >>> 0);
       checkFrameHash(data.f | 0);
     }
@@ -935,20 +952,25 @@ export function createOnlineSession({
     const delay = config?.delayFrames || fixedDelay || 3;
     const targetFrame = simFrame + delay;
     if (!localInputs.has(targetFrame)) {
-      const combined = mergeLatchInto(localRawInput, pendingLatch);
-      pendingLatch = null;
-      localInputs.set(targetFrame, packCompactTuple(combined));
+      let packed;
+      if (pendingQueue.length > 0) {
+        packed = pendingQueue.shift();
+        if (hasEdgePress(localRawInput)) enqueueStalledInput(localRawInput);
+      } else {
+        packed = packCompactTuple(localRawInput);
+      }
+      localInputs.set(targetFrame, packed);
       sendWindow(targetFrame);
     } else {
-      // Preserve fresh edge presses sampled while stalled so zero inputs are dropped.
-      latchInput(localRawInput);
+      // Preserve every distinct press, release, and direction vector sampled while stalled in FIFO order.
+      enqueueStalledInput(localRawInput);
     }
     if (!remoteInputs.has(simFrame)) {
       stallFrames++;
       totalStallFrames++;
       if (stallFrames % 2 === 1) {
         packetsSent++;
-        send(1, { t: 'req', f: simFrame }, false);
+        send(1, { t: 'req', m: config?.seed ?? 0, f: simFrame }, false);
       }
       return { ready: false, stallFrames, simFrame };
     }
@@ -970,7 +992,7 @@ export function createOnlineSession({
     active = false;
     pendingConfig = null;
     synPhase = false;
-    pendingLatch = null;
+    pendingQueue = [];
     syncState = 'idle';
   }
 

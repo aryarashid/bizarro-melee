@@ -1,3 +1,4 @@
+import { detCos, detSin } from './constants.js';
 /**
  * Bizarro Melee Complete Stage Collection — ALL 29 Super Smash Bros. Melee VS Stages
  * (+ Sagging Bag Yard for Home-Run Derby + Break the Targets Lab = 31 total playable arenas!)
@@ -72,7 +73,7 @@ export const STAGES = [
       { id: 'left', x: -315, y: 130, w: 175, slope: 10 },
       { id: 'right', x: 140, y: 140, w: 175, slope: -10 },
       { id: 'top', x: -90, y: 268, w: 180 },
-      { id: 'scandall', x: 360, y: -30, w: 125, cloud: true, update(f) { const a = (f / 1200) * Math.PI * 2; return { x: Math.cos(a) * 435 - 62, y: -32 + Math.sin(a * 2) * 52 }; } },
+      { id: 'scandall', x: 360, y: -30, w: 125, cloud: true, update(f) { const a = (f / 1200) * Math.PI * 2; return { x: detCos(a) * 435 - 62, y: -32 + detSin(a * 2) * 52 }; } },
     ],
   },
 
@@ -89,8 +90,8 @@ export const STAGES = [
     respawnPoint: { x: 0, y: 310 },
     solid: [{ x: -395, y: 0, w: 790, h: 175, ledges: true, shape: 'citadel' }],
     platforms: [
-      { id: 'left', x: -335, y: 110, w: 175, update(f) { const s = Math.sin(f * 0.014); return { x: -335, y: Math.max(-6, 86 + s * 112) }; } },
-      { id: 'right', x: 160, y: 150, w: 175, update(f) { const s = Math.cos(f * 0.012 + 0.9); return { x: 160, y: Math.max(-6, 86 + s * 112) }; } },
+      { id: 'left', x: -335, y: 110, w: 175, update(f) { const s = detSin(f * 0.014); return { x: -335, y: Math.max(-6, 86 + s * 112) }; } },
+      { id: 'right', x: 160, y: 150, w: 175, update(f) { const s = detCos(f * 0.012 + 0.9); return { x: 160, y: Math.max(-6, 86 + s * 112) }; } },
       { id: 'top', x: -95, y: 298, w: 190 },
     ],
   },
@@ -164,7 +165,7 @@ export const STAGES = [
           { x: 135, y: 40, w: 360, h: 185, ledges: true, shape: 'treehouse' },
         ],
         platforms: [
-          { id: 'mill-wheel', x: -90, y: 130, w: 170, update(f) { return { x: -90 + Math.cos(f * 0.03) * 55, y: 145 + Math.sin(f * 0.03) * 55 }; } },
+          { id: 'mill-wheel', x: -90, y: 130, w: 170, update(f) { return { x: -90 + detCos(f * 0.03) * 55, y: 145 + detSin(f * 0.03) * 55 }; } },
           { id: 'mill-roof', x: 175, y: 215, w: 230, slope: 24 },
           { id: 'dock-l', x: -415, y: 140, w: 195 },
         ],
@@ -205,7 +206,7 @@ export const STAGES = [
     platforms: [
       { id: 'tri-l', x: -610, y: 115, w: 155, slope: 28 },
       { id: 'tri-r', x: 455, y: 143, w: 155, slope: -28 },
-      { id: 'balcony', x: -115, y: 265, w: 230, update(f) { return { x: -115 + Math.sin(f * 0.019) * 210, y: 265 }; } },
+      { id: 'balcony', x: -115, y: 265, w: 230, update(f) { return { x: -115 + detSin(f * 0.019) * 210, y: 265 }; } },
     ],
   },
 
@@ -226,8 +227,8 @@ export const STAGES = [
       { x: 160, y: 115, w: 250, h: 245, ledges: true, shape: 'cruise' },
     ],
     platforms: [
-      { id: 'carpet-l', x: -580, y: 130, w: 170, update(f) { return { x: -560 + Math.sin(f * 0.021) * 75, y: 130 + Math.cos(f * 0.026) * 65 }; } },
-      { id: 'carpet-r', x: 410, y: 190, w: 170, update(f) { return { x: 410 - Math.sin(f * 0.021) * 75, y: 190 + Math.sin(f * 0.026) * 65 }; } },
+      { id: 'carpet-l', x: -580, y: 130, w: 170, update(f) { return { x: -560 + detSin(f * 0.021) * 75, y: 130 + detCos(f * 0.026) * 65 }; } },
+      { id: 'carpet-r', x: 410, y: 190, w: 170, update(f) { return { x: 410 - detSin(f * 0.021) * 75, y: 190 + detSin(f * 0.026) * 65 }; } },
       { id: 'mast-mid', x: -135, y: 175, w: 210 },
       { id: 'mast-top', x: -95, y: 315, w: 170 },
     ],
@@ -280,8 +281,8 @@ export const STAGES = [
       { x: 380, y: 65, w: 200, h: 215, ledges: true, shape: 'pipe' },
     ],
     platforms: [
-      { id: 'log-1', x: -110, y: 12, w: 100, update(f) { return { x: -110, y: -10 + Math.sin(f * 0.045) * 42 }; } },
-      { id: 'log-2', x: 10, y: -12, w: 100, update(f) { return { x: 10, y: -10 + Math.cos(f * 0.045) * 42 }; } },
+      { id: 'log-1', x: -110, y: 12, w: 100, update(f) { return { x: -110, y: -10 + detSin(f * 0.045) * 42 }; } },
+      { id: 'log-2', x: 10, y: -12, w: 100, update(f) { return { x: 10, y: -10 + detCos(f * 0.045) * 42 }; } },
       { id: 'high-l', x: -470, y: 205, w: 185 },
       { id: 'high-r', x: 285, y: 205, w: 185 },
     ],
@@ -307,7 +308,7 @@ export const STAGES = [
       { id: 'bridge-mid', x: -145, y: 12, w: 290 },
       { id: 'tiki-l', x: -415, y: 165, w: 205 },
       { id: 'tiki-r', x: 210, y: 165, w: 205 },
-      { id: 'sway', x: -120, y: 285, w: 240, update(f) { return { x: -120 + Math.sin(f * 0.024) * 175, y: 285 }; } },
+      { id: 'sway', x: -120, y: 285, w: 240, update(f) { return { x: -120 + detSin(f * 0.024) * 175, y: 285 }; } },
     ],
   },
 
@@ -389,15 +390,15 @@ export const STAGES = [
         id: 'turtle', x: 245, y: 15, w: 240, cloud: true, diving: true,
         update(f) {
           const cycle = f % 720;
-          let y = 12 + Math.sin(f * 0.04) * 14;
+          let y = 12 + detSin(f * 0.04) * 14;
           if (cycle > 480 && cycle < 640) {
-            const t = Math.sin(((cycle - 480) / 160) * Math.PI);
+            const t = detSin(((cycle - 480) / 160) * Math.PI);
             y = 12 - t * 220;
           }
           return { x: 245, y };
         },
       },
-      { id: 'buoy', x: -80, y: 210, w: 180, update(f) { return { x: -80 + Math.sin(f * 0.02) * 85, y: 210 }; } },
+      { id: 'buoy', x: -80, y: 210, w: 180, update(f) { return { x: -80 + detSin(f * 0.02) * 85, y: 210 }; } },
     ],
   },
 
@@ -538,9 +539,9 @@ export const STAGES = [
       { x: 0, y: 32, w: 330, h: 235, ledges: true, slope: -52, shape: 'cavern' },
     ],
     platforms: [
-      { id: 'orb-1', x: -480, y: 130, w: 180, update(f) { const a = f * 0.015; return { x: Math.cos(a) * 430 - 90, y: 145 + Math.sin(a) * 155 }; } },
-      { id: 'orb-2', x: 300, y: 130, w: 180, update(f) { const a = f * 0.015 + Math.PI; return { x: Math.cos(a) * 430 - 90, y: 145 + Math.sin(a) * 155 }; } },
-      { id: 'orb-3', x: -90, y: 280, w: 170, update(f) { const a = f * 0.015 + Math.PI * 0.5; return { x: Math.cos(a) * 430 - 85, y: 145 + Math.sin(a) * 155 }; } },
+      { id: 'orb-1', x: -480, y: 130, w: 180, update(f) { const a = f * 0.015; return { x: detCos(a) * 430 - 90, y: 145 + detSin(a) * 155 }; } },
+      { id: 'orb-2', x: 300, y: 130, w: 180, update(f) { const a = f * 0.015 + Math.PI; return { x: detCos(a) * 430 - 90, y: 145 + detSin(a) * 155 }; } },
+      { id: 'orb-3', x: -90, y: 280, w: 170, update(f) { const a = f * 0.015 + Math.PI * 0.5; return { x: detCos(a) * 430 - 85, y: 145 + detSin(a) * 155 }; } },
     ],
   },
 
@@ -593,7 +594,7 @@ export const STAGES = [
       { x: 355, y: 175, w: 280, h: 560, ledges: true, shape: 'skyscraper' },
     ],
     platforms: [
-      { id: 'ufo', x: -105, y: 225, w: 195, cloud: true, update(f) { return { x: -105 + Math.sin(f * 0.019) * 85, y: 235 + Math.cos(f * 0.031) * 42 }; } },
+      { id: 'ufo', x: -105, y: 225, w: 195, cloud: true, update(f) { return { x: -105 + detSin(f * 0.019) * 85, y: 235 + detCos(f * 0.031) * 42 }; } },
       { id: 'crane', x: -570, y: 195, w: 205 },
       { id: 'helipad', x: 105, y: 295, w: 185 },
     ],
@@ -615,8 +616,8 @@ export const STAGES = [
       { x: -395, y: 18, w: 790, h: 95, ledges: true, shape: 'vehicle' },
     ],
     platforms: [
-      { id: 'car-l', x: -490, y: 120, w: 195, shape: 'vehicle', update(f) { return { x: -450 + Math.sin(f * 0.028) * 140, y: 120 }; } },
-      { id: 'car-r', x: 295, y: 165, w: 195, shape: 'vehicle', update(f) { return { x: 255 - Math.sin(f * 0.028) * 140, y: 165 }; } },
+      { id: 'car-l', x: -490, y: 120, w: 195, shape: 'vehicle', update(f) { return { x: -450 + detSin(f * 0.028) * 140, y: 120 }; } },
+      { id: 'car-r', x: 295, y: 165, w: 195, shape: 'vehicle', update(f) { return { x: 255 - detSin(f * 0.028) * 140, y: 165 }; } },
       { id: 'gantry', x: -120, y: 295, w: 240 },
     ],
   },
@@ -634,13 +635,13 @@ export const STAGES = [
     respawnPoint: { x: 0, y: 340 },
     hotFloorY: -100,
     solid: [
-      { id: 'bus-lead', x: -160, y: 18, w: 340, h: 74, ledges: true, shape: 'vehicle', update(f) { return { x: -170 + Math.sin(f * 0.017) * 155, y: 18 + Math.sin(f * 0.04) * 10 }; } },
-      { id: 'van-left', x: -530, y: 95, w: 245, h: 64, ledges: true, shape: 'vehicle', update(f) { return { x: -500 + Math.cos(f * 0.024) * 120, y: 95 + Math.sin(f * 0.033) * 24 }; } },
-      { id: 'van-right', x: 280, y: 135, w: 255, h: 64, ledges: true, shape: 'vehicle', update(f) { return { x: 260 - Math.cos(f * 0.022) * 135, y: 135 + Math.cos(f * 0.03) * 26 }; } },
+      { id: 'bus-lead', x: -160, y: 18, w: 340, h: 74, ledges: true, shape: 'vehicle', update(f) { return { x: -170 + detSin(f * 0.017) * 155, y: 18 + detSin(f * 0.04) * 10 }; } },
+      { id: 'van-left', x: -530, y: 95, w: 245, h: 64, ledges: true, shape: 'vehicle', update(f) { return { x: -500 + detCos(f * 0.024) * 120, y: 95 + detSin(f * 0.033) * 24 }; } },
+      { id: 'van-right', x: 280, y: 135, w: 255, h: 64, ledges: true, shape: 'vehicle', update(f) { return { x: 260 - detCos(f * 0.022) * 135, y: 135 + detCos(f * 0.03) * 26 }; } },
     ],
     platforms: [
-      { id: 'hover-top', x: -115, y: 265, w: 230, shape: 'vehicle', update(f) { return { x: -115 + Math.sin(f * 0.029 + 1.2) * 210, y: 265 }; } },
-      { id: 'hover-low', x: -290, y: 185, w: 190, shape: 'vehicle', update(f) { return { x: -240 + Math.sin(f * 0.035) * 185, y: 185 }; } },
+      { id: 'hover-top', x: -115, y: 265, w: 230, shape: 'vehicle', update(f) { return { x: -115 + detSin(f * 0.029 + 1.2) * 210, y: 265 }; } },
+      { id: 'hover-low', x: -290, y: 185, w: 190, shape: 'vehicle', update(f) { return { x: -240 + detSin(f * 0.035) * 185, y: 185 }; } },
     ],
   },
 
@@ -656,13 +657,13 @@ export const STAGES = [
     spawns: [{ x: -160, y: 120, facing: 1 }, { x: 160, y: 120, facing: -1 }, { x: -380, y: 270, facing: 1 }, { x: 380, y: 270, facing: -1 }],
     respawnPoint: { x: 0, y: 360 },
     solid: [
-      { id: 'blimp-main', x: -230, y: 10, w: 460, h: 115, ledges: true, shape: 'balloon', update(f) { return { x: -230 + Math.sin(f * 0.013) * 130, y: 10 + Math.sin(f * 0.025) * 42 }; } },
-      { id: 'blimp-l', x: -560, y: 135, w: 230, h: 90, ledges: true, shape: 'balloon', update(f) { return { x: -540 + Math.cos(f * 0.018) * 115, y: 135 + Math.sin(f * 0.028) * 68 }; } },
-      { id: 'blimp-r', x: 330, y: 155, w: 230, h: 90, ledges: true, shape: 'balloon', update(f) { return { x: 310 - Math.cos(f * 0.019) * 115, y: 155 + Math.cos(f * 0.026) * 68 }; } },
+      { id: 'blimp-main', x: -230, y: 10, w: 460, h: 115, ledges: true, shape: 'balloon', update(f) { return { x: -230 + detSin(f * 0.013) * 130, y: 10 + detSin(f * 0.025) * 42 }; } },
+      { id: 'blimp-l', x: -560, y: 135, w: 230, h: 90, ledges: true, shape: 'balloon', update(f) { return { x: -540 + detCos(f * 0.018) * 115, y: 135 + detSin(f * 0.028) * 68 }; } },
+      { id: 'blimp-r', x: 330, y: 155, w: 230, h: 90, ledges: true, shape: 'balloon', update(f) { return { x: 310 - detCos(f * 0.019) * 115, y: 155 + detCos(f * 0.026) * 68 }; } },
     ],
     platforms: [
-      { id: 'float-top', x: -130, y: 315, w: 260, cloud: true, shape: 'balloon', update(f) { return { x: -130 + Math.sin(f * 0.016 + 0.8) * 195, y: 315 + Math.cos(f * 0.022) * 38 }; } },
-      { id: 'float-low', x: -115, y: -260, w: 230, cloud: true, shape: 'balloon', update(f) { return { x: -115 + Math.cos(f * 0.02) * 240, y: -260 + Math.sin(f * 0.03) * 24 }; } },
+      { id: 'float-top', x: -130, y: 315, w: 260, cloud: true, shape: 'balloon', update(f) { return { x: -130 + detSin(f * 0.016 + 0.8) * 195, y: 315 + detCos(f * 0.022) * 38 }; } },
+      { id: 'float-low', x: -115, y: -260, w: 230, cloud: true, shape: 'balloon', update(f) { return { x: -115 + detCos(f * 0.02) * 240, y: -260 + detSin(f * 0.03) * 24 }; } },
     ],
   },
 

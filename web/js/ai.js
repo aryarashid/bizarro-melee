@@ -1,4 +1,4 @@
-import { MELEE, MODE, MOVE, STATE } from './constants.js';
+import { MELEE, MODE, MOVE, STATE, detHypot } from './constants.js';
 import { getSurfaceY } from './stages.js';
 import { createEmptyInput } from './input.js';
 
@@ -8,8 +8,8 @@ const AIR_RECOVERY = new Set(['recovery', 'teleport', 'projectile']);
 const HURT = new Set([S.HITSTUN, S.TUMBLE, S.KNOCKDOWN, S.SHIELD_BREAK]);
 const BLOCKED = new Set([S.ROLL_F, S.ROLL_B, S.SPOTDODGE, S.TECH, S.FREEFALL, S.AIRDODGE]);
 const GROUND_APPROACH = new Set([S.IDLE, S.WALK, S.DASH, S.RUN, S.CROUCH, S.TURN]);
-const THINK_FRAMES = [0, 24, 19, 14, 11, 9, 6, 4, 2, 1];
-const PAUSE_CHANCE = [0, 0.52, 0.38, 0.27, 0.18, 0.14, 0.08, 0.045, 0.015, 0];
+const THINK_FRAMES = [0, 24, 19, 14, 11, 9, 6, 4, 3, 1];
+const PAUSE_CHANCE = [0, 0.52, 0.38, 0.27, 0.18, 0.14, 0.08, 0.055, 0.035, 0];
 const DIRECT_SIDE = new Set(['wonky-kong', 'flurby', 'shriek']);
 const DESIRABLE = new Set(['plunger_bat', 'glow_saber', 'critter_capsule', 'mallet_chaos']);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -158,7 +158,7 @@ function useItem(input, match, f, target, deck, level) {
     if (it.x < deck.x + 12 || it.x > deck.x + deck.w - 12 || it.y < match.acidLevel + 20) continue;
     const dx = it.x - f.x;
     const dy = it.y + it.def.radius * 0.55 - handY;
-    const d = Math.hypot(dx, dy);
+    const d = detHypot(dx, dy);
     if (d <= it.def.radius + 33 * f.scale) {
       tap(input, 'grab');
       return true;
@@ -759,7 +759,8 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
       return input;
     }
     if (level >= 7 && f.state === S.SHIELD && !threat && d < 52 && dy > 26 && dy < 105) return tap(input, 'special', 0, 1);
-    if (level === 9 && f.state === S.SHIELD && !threat && d < 55 && dy >= 0 && dy < 85 &&
+    const fastUSmash = (f.def.moves[M.USMASH]?.startup ?? 12) <= 11;
+    if (level === 9 && fastUSmash && f.state === S.SHIELD && !threat && d < 55 && dy >= 0 && dy < 85 &&
         target.state !== S.SHIELD && target.invulnFrames <= 0) {
       input.cStickY = 1;
       return input;
@@ -793,7 +794,7 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     if (level >= 7 && threat.projectile && reflector && (level === 9 || phase % 2 === 0)) return tap(input, 'special',
       reflector === M.SIDE_B ? sign(threat.x - f.x) : 0, reflector === M.DOWN_B ? -1 : 0);
     if (level >= 8 && !threat.projectile && counter && d < 90 && phase % 3 === 0) return tap(input, 'special', 0, counter === M.DOWN_B ? -1 : 0);
-    if (level < 7 || (level >= 8 && threat.eta <= 5)) return tap(input, 'shield');
+    if (level < 7 || (level >= 8 && threat.eta <= (level === 9 ? 7 : 5))) return tap(input, 'shield');
     // Wait for the next tick rather than starting a committed attack or shielding too early.
     return input;
   }
@@ -853,8 +854,8 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     }
     return input;
   }
-  if (level === 9 && f.grounded && !target.grounded && target.invulnFrames <= 0 && !offstage &&
-      dy > 28 && dy < 135 && target.vy + target.kbVy <= 1 &&
+  if (level === 9 && (f.def.moves[M.USMASH]?.startup ?? 12) <= 11 && f.grounded && !target.grounded &&
+      target.invulnFrames <= 0 && !offstage && dy > 28 && dy < 135 && target.vy + target.kbVy <= 1 &&
       Math.abs(target.x - f.x + (target.vx + target.kbVx) * 4) < 46) {
     input.cStickY = 1;
     return input;
@@ -894,10 +895,13 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     const committed = target.state === S.LANDING || target.hitstun > 4 ||
       target.state === S.ATTACK && target.moveFrame >= target.moveData.startup + target.moveData.active;
     const edgeDistance = dir > 0 ? deck.x + deck.w - target.x : target.x - deck.x;
+    const fastFSmash = (f.def.moves[M.FSMASH]?.startup ?? 14) <= 13;
     if (level >= 8 && hittable && target.state !== S.SHIELD && target.state !== S.SHIELD_STUN &&
         predicted < attackRange && d < attackRange && dy < 30 &&
-        (committed || (level === 9 && (target.percent >= 65 || edgeDistance < 200 && target.percent >= 50)) ||
-         (level === 8 && target.percent >= 78))) {
+        (committed ||
+         (fastFSmash && level === 9 && (target.percent >= 65 || edgeDistance < 200 && target.percent >= 50)) ||
+         (fastFSmash && level === 8 && target.percent >= 78) ||
+         (!fastFSmash && target.percent >= 92 && (level === 9 || target.hitstun > 4)))) {
       input.cStickX = dir;
       return input;
     }
@@ -908,7 +912,7 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     if ((target.state === S.SHIELD || target.state === S.SHIELD_STUN || phase % 11 === 0) &&
         level >= 3 && d < stats.grabRange + 18) return tap(input, 'grab', dir * 0.4);
     if (f.def.moves[M.DOWN_B].kind === 'rest' && level >= 7 && d < 30 && phase % 3 === 0) return tap(input, 'special', 0, -1);
-    if (target.percent >= 85 || level >= 5 && phase % 7 <= 1) {
+    if (target.percent >= 85 || level >= 5 && (fastFSmash || level <= 7) && phase % 7 <= 1) {
       if (match.mode === MODE.HOMERUN && target.percent > 65 || dy <= 22) input.cStickX = dir;
       else input.cStickY = 1;
       if (level === 7 && (target.hitstun > 8 || d > attackRange * 0.65)) input.attack = input.attackPressed = true;
@@ -917,9 +921,10 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     if (target.hitstun > 0 && dy > 14) return tap(input, 'attack', 0, 0.61);
     return tap(input, 'attack', d < 44 && f.facing === dir && (level >= 8 || phase % 5 < 2) ? 0 : dir * 0.58);
   }
+  const nimbleWavedash = stats.runSpeed >= 9.0 || stats.traction <= 0.085;
   if (level >= 8 && d > 175 && d < 260 && Math.abs(dy) < 40 && target.state !== S.ATTACK &&
       f.x + dir * 210 > deck.x && f.x + dir * 210 < deck.x + deck.w &&
-      phase % 29 < (level === 9 ? 5 : 2)) {
+      (nimbleWavedash ? phase % 29 < (level === 9 ? 5 : 2) : phase % 47 < (level === 9 ? 2 : 1))) {
     f.cpuWavedash = true;
     return tap(input, 'jump', dir);
   }
@@ -933,7 +938,8 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     input.moveX = phase % 12 < 6 ? -dir : dir;
     return input;
   }
-  if (level === 9 && neutralB.projStyle && d > 200 && d < 480 && Math.abs(dy) < 32 &&
+  if (level === 9 && neutralB.kind === 'projectile' && neutralB.projStyle && (neutralB.startup ?? 14) <= 14 &&
+      d > 200 && d < 480 && Math.abs(dy) < 32 &&
       f.facing === dir && target.invulnFrames <= 0 && target.state !== S.SHIELD && phase % 36 < 12) {
     return tap(input, 'special');
   }

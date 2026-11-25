@@ -152,3 +152,85 @@ export const PLAYER_COLORS = ['#ff4b5c', '#3898ff', '#ffd23f', '#42e695'];
 export const PORT_LABELS = ['P1', 'P2', 'P3', 'P4'];
 
 export const GAME_VERSION = '2.0.0';
+
+// ============================================================================
+// CROSS-ENGINE DETERMINISTIC MATH (IEEE-754 + - * / AND Math.sqrt ONLY)
+// Guarantees bit-identical simulation across V8 (Chrome/Node/Deno), JSC (Safari/Bun),
+// and SpiderMonkey (Firefox) without relying on engine-specific libm trig/hypot.
+// ============================================================================
+const HALF_PI = 1.5707963267948966;
+const INV_HALF_PI = 0.6366197723675814;
+const SQRT3 = 1.7320508075688772;
+const TAN_PI_12 = 0.2679491924311227;
+const PI_6 = 0.5235987755982989;
+const PI_4 = 0.7853981633974483;
+
+function polySin(r) {
+  const r2 = r * r;
+  return r * (1 + r2 * (-1 / 6 + r2 * (1 / 120 + r2 * (-1 / 5040 + r2 * (1 / 362880 + r2 * (-1 / 39916800 + r2 / 6227020800))))));
+}
+
+function polyCos(r) {
+  const r2 = r * r;
+  return 1 + r2 * (-0.5 + r2 * (1 / 24 + r2 * (-1 / 720 + r2 * (1 / 40320 + r2 * (-1 / 3628800 + r2 / 479001600)))));
+}
+
+export function detSin(x) {
+  if (!Number.isFinite(x)) return NaN;
+  const k = Math.floor(x * INV_HALF_PI + 0.5);
+  const r = x - k * HALF_PI;
+  const q = ((k % 4) + 4) % 4;
+  if (q === 0) return polySin(r);
+  if (q === 1) return polyCos(r);
+  if (q === 2) return -polySin(r);
+  return -polyCos(r);
+}
+
+export function detCos(x) {
+  if (!Number.isFinite(x)) return NaN;
+  const k = Math.floor(x * INV_HALF_PI + 0.5);
+  const r = x - k * HALF_PI;
+  const q = ((k % 4) + 4) % 4;
+  if (q === 0) return polyCos(r);
+  if (q === 1) return -polySin(r);
+  if (q === 2) return -polyCos(r);
+  return polySin(r);
+}
+
+export function detTan(x) {
+  return detSin(x) / detCos(x);
+}
+
+function polyAtanUnit(z) {
+  let offset = 0;
+  let t = z;
+  if (t > TAN_PI_12) {
+    t = (t * SQRT3 - 1) / (SQRT3 + t);
+    offset = PI_6;
+  }
+  const t2 = t * t;
+  const p = t * (1 + t2 * (-1 / 3 + t2 * (1 / 5 + t2 * (-1 / 7 + t2 * (1 / 9 + t2 * (-1 / 11 + t2 * (1 / 13 + t2 * (-1 / 15 + t2 / 17))))))));
+  return offset + p;
+}
+
+export function detAtan2(y, x) {
+  if (x === 0) {
+    if (y > 0) return HALF_PI;
+    if (y < 0) return -HALF_PI;
+    return 0;
+  }
+  const ax = x < 0 ? -x : x;
+  const ay = y < 0 ? -y : y;
+  let angle;
+  if (ay <= ax) {
+    angle = polyAtanUnit(ay / ax);
+  } else {
+    angle = HALF_PI - polyAtanUnit(ax / ay);
+  }
+  if (x < 0) angle = Math.PI - angle;
+  return y < 0 ? -angle : angle;
+}
+
+export function detHypot(x, y) {
+  return Math.sqrt(x * x + y * y);
+}
