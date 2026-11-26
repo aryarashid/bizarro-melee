@@ -41,6 +41,39 @@ function drawItemIcon(ctx, item) {
   ctx.scale((item.def?.radius || 20) / 20, (item.def?.radius || 20) / 20);
   ctx.lineWidth = 2.3; ctx.lineJoin = ctx.lineCap = 'round';
   switch (key) {
+    case 'paper_fan': {
+      const fan = [[0,15]];
+      for (let i=-5;i<=5;i++) {
+        const a = i*.19;
+        fan.push([27*Math.sin(a),15-27*Math.cos(a)]);
+      }
+      poly(fan,ivory);
+      for (const [x,y] of fan.slice(1)) {
+        ctx.beginPath(); ctx.moveTo(0,15); ctx.lineTo(x,y); ctx.lineWidth=1.3; ctx.strokeStyle='#b47255'; ctx.stroke();
+      }
+      ellipse(0,15,2.6,2.6,gold); break;
+    }
+    case 'star_wand':
+      ctx.rotate(.45); box(-2,-9,4,29,2,'#f17dad');
+      ctx.translate(0,-10);
+      poly(Array.from({length:10},(_,i)=>[Math.sin(i*Math.PI/5)*(i%2?4:11),-Math.cos(i*Math.PI/5)*(i%2?4:11)]),gold);
+      break;
+    case 'metal_box':
+      box(-7,-16,14,8,3,gray); box(-18,-10,36,26,4,'#bfcddd'); box(-18,-10,36,7,3,'#ebf5ff');
+      box(-3,-4,6,5,1,gold); break;
+    case 'bunny_ears':
+      for (const side of [-1,1]) {
+        ctx.save(); ctx.rotate(side*.16);
+        ellipse(side*6,-5,5,14,ivory); ellipse(side*6,-6,2.5,10,'#ff9ac5',false); ctx.restore();
+      }
+      box(-12,8,24,5,2,'#ffa1c9'); break;
+    case 'freezie_cube':
+      poly([[-15,-8],[-7,-17],[12,-17],[17,-10],[17,12],[10,17],[-13,15]],'#88dafa');
+      poly([[-12,-7],[-5,-14],[8,-14],[-6,2]],'#e0ffff',false); break;
+    case 'mr_saturn_plush':
+      ellipse(-7,12,6,4,red); ellipse(7,12,6,4,red); ellipse(0,-1,15,14,'#dfad7e');
+      ellipse(-6,-4,1.8,3,gray,false); ellipse(6,-4,1.8,3,gray,false); ellipse(1,3,6,5,'#efa061');
+      poly([[-8,-18],[0,-15],[8,-19],[7,-11],[0,-14],[-7,-11]],'#ff95b9'); break;
     case 'plunger_bat':
       ctx.rotate(-.66);
       box(-22, -3, 42, 6, 3, '#d5a171'); box(-22, -3, 10, 6, 2, gray);
@@ -238,7 +271,7 @@ export class GameRenderer {
     ctx.save();
     this.camera.applyTransform(ctx, w, h);
     for (const f of match.fighters) {
-      if (f.state !== STATE.DEAD && !fighterHidden(f, specialVisual(f))) this._drawTag(ctx, f, match.fighters.length);
+      if (f.state !== STATE.DEAD && !f.starKoTimer && !fighterHidden(f, specialVisual(f))) this._drawTag(ctx, f, match.fighters.length);
     }
     ctx.restore();
     const warning = match.hazards?.find((hz) => hz.warningFrames > 0 && HAZARD_WARNINGS[hz.kind]);
@@ -677,7 +710,24 @@ export class GameRenderer {
       ctx.translate(sm.x, -sm.y - 30);
       ctx.fillStyle = sm.critter?.color || '#a855f7';
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const pet = sm.critter?.id;
+      if (pet === 'gravity_cat' || pet === 'chill_penguin') {
+        const cat = pet === 'gravity_cat';
+        ctx.scale(sm.facing < 0 ? -1 : 1,1); ctx.translate(0,Math.sin(match.frame*.14)*4);
+        if (cat) {
+          ctx.beginPath(); ctx.moveTo(-18,-9); ctx.lineTo(-16,-25); ctx.lineTo(-3,-12);
+          ctx.lineTo(6,-12); ctx.lineTo(16,-24); ctx.lineTo(22,-6); ctx.fill();
+        }
+        ctx.beginPath(); ctx.ellipse(0,0,cat?27:17,cat?17:27,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        if (cat) {
+          ctx.beginPath(); ctx.ellipse(0,4,38,8,-.2,0,Math.PI*2); ctx.strokeStyle='#9ff8ff'; ctx.stroke();
+        } else {
+          ctx.fillStyle='#effaff'; ctx.beginPath();ctx.ellipse(2,5,12,17,0,0,Math.PI*2);ctx.fill();
+          ctx.fillStyle='#ffa84e';ctx.beginPath();ctx.moveTo(7,-8);ctx.lineTo(22,-5);ctx.lineTo(7,-2);ctx.fill();
+        }
+        ctx.fillStyle='#28203c';
+        for (const x of [-6,7]) {ctx.beginPath();ctx.ellipse(x,-7,2.4,3.2,0,0,Math.PI*2);ctx.fill();}
+      } else { ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
       ctx.restore();
     }
   }
@@ -748,6 +798,14 @@ export class GameRenderer {
       ctx.translate(px, py);
 
       switch (pr.style) {
+        case 'star':
+          ctx.rotate(match.frame*.17); ctx.shadowColor='#ffba54'; ctx.shadowBlur=10;
+          ctx.fillStyle='#fff38b'; ctx.beginPath();
+          for (let i=0;i<10;i++) {
+            const a=i*Math.PI/5, n=r*(i%2?.50:1.30);
+            if (i) ctx.lineTo(Math.sin(a)*n,-Math.cos(a)*n); else ctx.moveTo(0,-n);
+          }
+          ctx.closePath(); ctx.fill(); break;
         case 'laser':
           ctx.fillStyle = pr.color || '#38f5ff';
           ctx.shadowColor = pr.color || '#38f5ff';
@@ -848,6 +906,21 @@ export class GameRenderer {
     const px = f.x;
     const py = -f.y; // feet position in canvas space (Y down)
 
+    if (f.starKoTimer > 0) {
+      const progress = 1-f.starKoTimer/54;
+      const x = this.camera.x+(px-this.camera.x)*(.8-.38*progress);
+      const y = -this.camera.y-this.height*(.26+.06*progress)/this.camera.zoom;
+      ctx.save(); ctx.translate(x,y); ctx.scale(1-progress*.95,1-progress*.95);
+      if (this.fx.allowFlash) ctx.rotate(progress*Math.PI*5);
+      this._drawFighterBody(ctx,f,def,stats,pal,rig,0,0,match); ctx.restore(); return;
+    }
+    if (f.tetherBeam) {
+      const b = f.tetherBeam;
+      ctx.save(); ctx.strokeStyle=b.kind==='plasma'?'#72faff':'#ced9e5';ctx.lineWidth=3;
+      if (b.kind==='chain') ctx.setLineDash([5,2]);
+      ctx.beginPath();ctx.moveTo(b.x1,-b.y1);ctx.lineTo(b.x2,-b.y2);ctx.stroke();ctx.restore();
+    }
+
     // Invincibility blink
     if (this.fx.allowFlash && f.invulnFrames > 0 && Math.floor(match.frame / 3) % 2 === 0) {
       ctx.save();
@@ -858,6 +931,13 @@ export class GameRenderer {
       this._drawFighterBody(ctx, f, def, stats, pal, rig, px, py, match);
     }
 
+    if (f.freezeFrames > 0) {
+      const h=stats.height*(f.scale||1), w=stats.width*(f.scale||1)*.65;
+      ctx.save();ctx.translate(px,py);ctx.fillStyle='#87e9ff66';ctx.strokeStyle='#c1f8ff';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(-w,-h);ctx.lineTo(-w*.73,-h*1.18);ctx.lineTo(w*.74,-h*1.15);
+      ctx.lineTo(w,-h*.91);ctx.lineTo(w*.94,-3);ctx.lineTo(w*.69,2);ctx.lineTo(-w*.84,0);
+      ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
+    }
     // Shield bubble
     if (f.state === STATE.SHIELD || f.state === STATE.SHIELD_STUN) {
       const scale = f.scale || 1, shield = f.shieldScale ?? 1;
@@ -997,7 +1077,12 @@ export class GameRenderer {
       ctx.restore();
     }
 
-    this._drawCharacterArtwork(ctx, pal, rig, w, h, f, t, activeSwing);
+    const paint = f.metalFrames > 0 ? { ...pal, body:'#dce6f5', outfit:'#8d9ead', skin:'#dbe7f5', accent:'#f6fcff' } : pal;
+    this._drawCharacterArtwork(ctx, paint, rig, w, h, f, t, activeSwing);
+    if (f.bunnyFrames > 0) {
+      ctx.save();ctx.translate(0,-h);ctx.rotate(.11*Math.sin(t*1.4));
+      drawItemIcon(ctx,{def:{id:'bunny_ears',radius:w*.52}});ctx.restore();
+    }
 
     // Weapon / Attack Smear Arc
     if (activeSwing) {
@@ -1540,7 +1625,7 @@ export class GameRenderer {
 
   _drawOffscreenIndicators(ctx, match, w, h, derbyBag) {
     for (const f of match.fighters) {
-      if (f.state === STATE.DEAD) continue;
+      if (f.state === STATE.DEAD || f.starKoTimer > 0) continue;
       const pt = this.camera.worldToScreen(f.x, f.y + f.def.stats.height * (f.scale || 1) * .5, w, h);
       if (pt.sx >= 12 && pt.sx <= w - 12 && pt.sy >= 12 && pt.sy <= h - 12) continue;
       const cx = Math.max(30, Math.min(w - 30, pt.sx));

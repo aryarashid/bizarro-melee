@@ -308,6 +308,7 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
     const blink = expression === 'blink';
     const eye = rig.eyes;
     const ink = '#211628', ivory = '#fff6e6';
+    const plush = rig.silhouette === 'puff';
     const tech = eye === 'visor' || def.id === 'bizarro-intern';
     const aviators = eye === 'shades' || rig.prop === 'aviators';
     const squint = eye === 'unimpressed' || eye === 'smug';
@@ -342,7 +343,7 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
       const rx = big ? 38 : 35;
       const tilt = intense ? side * -0.24 : side * 0.10;
       if (!tech) {
-        ellipse(c, x + side * 13, 143, 23, 10, '#ef6c7259', side * 0.13);
+        ellipse(c, x + side * 13, 143, plush ? 29 : 23, plush ? 13 : 10, plush ? '#f06b89a6' : '#ef6c7259', side * 0.13);
         for (let n = 0; n < 3; n++) ellipse(c, x + side * (7 + n * 8), 143 + (n % 2) * 3, 1.9, 1.7, '#85384f9c');
         stroke(c, (p) => {
           const inner = impact || sulk ? -17 : intense ? 7 : taunt && side < 0 ? -17 : -5;
@@ -390,7 +391,8 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
       }
       ellipse(c, x, ey, rx + 3, ry + 3, ink, tilt);
       ellipse(c, x, ey, rx, ry, ivory, tilt);
-      const iris = eye === 'starry' ? '#9650d1' : intense ? '#b96136' : '#347293';
+      const iris = ({ garth:'#4594ba', troy:'#318b9f', screech:'#6297b6', velda:'#9650d1', mewtooth:'#36bcdb',
+        zink:'#398967', 'tiny-zink':'#64463a', shriek:'#a2eaff' })[def.id] || (intense ? '#b96136' : '#347293');
       ellipse(c, x + 5, ey + 4, big ? 18 : 15, ry * 0.84, iris, tilt);
       ellipse(c, x + 6, ey + 5, 10, ry * 0.67, '#16162b');
       ellipse(c, x, ey - 5, 6.1, 6.1, '#ffffff');
@@ -543,7 +545,9 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
     const doctor = id === 'dr-bario', plumber = id === 'squeegi';
     const overalls = !!rig.stache && !doctor && !plumber;
     const random = rng(key);
-    c.fillStyle = id === 'wonky-kong' ? '#2c3348' : id === 'shriek' ? '#1c2344' : id === 'velda' ? '#4c1d95' : pal.body;
+    c.fillStyle = id === 'wonky-kong' ? '#eeeee8' : id === 'shriek' ? '#1c2344' : id === 'velda' ? '#4c1d95' : pal.body;
+    const flight = id === 'faux' || id === 'falcont';
+    if (flight && pal.body === def.palettes[0].body) c.fillStyle = id === 'faux' ? '#785740' : '#304461';
     c.fillRect(0, 0, 256, 256);
     b.fillStyle = '#858585';
     b.fillRect(0, 0, 256, 256);
@@ -603,6 +607,12 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
         c.beginPath(); c.arc(x - 14, 92, 5, 0, Math.PI * 2); c.arc(x + 14, 92, 5, 0, Math.PI * 2); c.fill();
         c.fillStyle = '#c9a24a';
         c.beginPath(); c.arc(x, 118, 4, 0, Math.PI * 2); c.fill();
+      } else if (flight) {
+        c.fillStyle = '#f1dfb8';
+        c.beginPath(); c.moveTo(x-38,18);c.lineTo(x+36,18);c.lineTo(x+18,62);c.lineTo(x+3,50);
+        c.lineTo(x-12,68);c.closePath();c.fill();
+        c.fillStyle='#d69c53';c.fillRect(x-2,53,3,172);
+        stroke(c,p=>{p.moveTo(x+13,97);p.lineTo(x+33,93);},'#f0b36b',3);
       } else if (id === 'squeegi') {
         c.fillStyle = pal.body;
         c.fillRect(x - 46, 14, 92, 108);
@@ -925,6 +935,27 @@ export function getPodiumRankTexture(rank, T, owner) {
   });
 }
 
+export function getLcdTexture(T, owner) {
+  return cached(owner, 'calculator-display', () => {
+    const c = canvas(512,256);
+    c.fillStyle = '#aaba89'; c.fillRect(0,0,512,256);
+    c.fillStyle = '#92a277';
+    for (let x=0;x<512;x+=4) c.fillRect(x,0,1,256);
+    for (let y=0;y<256;y+=4) c.fillRect(0,y,512,1);
+    // Six identical seven-segment cells, with angled ends and a dark LCD shadow.
+    for (let d=0;d<6;d++) {
+      const left = 235+d*39;
+      for (const [dx,dy,angle] of [[4,0,0],[4,28,0],[4,56,0],[0,3,1],[32,3,1],[0,31,1],[32,31,1]]) {
+        c.save(); c.translate(left+dx,22+dy); c.rotate(angle*Math.PI/2);
+        c.fillStyle = '#4f6143';
+        c.beginPath(); c.moveTo(0,0); c.lineTo(3,-2); c.lineTo(22,-2); c.lineTo(25,0);
+        c.lineTo(22,2); c.lineTo(3,2); c.closePath(); c.fill(); c.restore();
+      }
+    }
+    return texture(T,c,{pixel:true});
+  });
+}
+
 export function getStageSignTexture(text, ink, paper, T, owner) {
   return cached(owner, `stage-sign:${text}:${ink}:${paper}`, () => {
     const c = canvas(512, 128);
@@ -947,17 +978,27 @@ export function getStageSignTexture(text, ink, paper, T, owner) {
 export function addFighterRim(material) {
   const flash = { value: 0 };
   const flashColor = { value: material.color.clone().set('#ffffff') };
-  material.userData.combatFlash = { flash, flashColor };
+  const metal = { value: 0 };
+  material.userData.combatFlash = { flash, flashColor, metal };
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.metalCoat = metal;
     shader.uniforms.combatFlash = flash;
     shader.uniforms.combatFlashColor = flashColor;
-    shader.fragmentShader = `uniform float combatFlash;
+    shader.fragmentShader = `uniform float metalCoat;
+      uniform float combatFlash;
       uniform vec3 combatFlashColor;
-      ${shader.fragmentShader}`.replace('#include <opaque_fragment>', `
+       ${shader.fragmentShader}`.replace('#include <metalnessmap_fragment>', `
+      #include <metalnessmap_fragment>
+      metalnessFactor = mix(metalnessFactor, 0.92, metalCoat);
+      roughnessFactor = mix(roughnessFactor, 0.14, metalCoat);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.716,.791,.913), metalCoat);
+    `).replace('#include <opaque_fragment>', `
       float faceOn = clamp(dot(normalize(geometryViewDir), normal), 0.0, 1.0);
       float edge = (1.0 - smoothstep(0.06, 0.47, faceOn)) * smoothstep(0.06, 0.95, normal.y * 0.5 + 0.5);
       vec3 rimInk = mix(vec3(0.25, 0.64, 0.86), vec3(1.0, 0.64, 0.30), smoothstep(-0.8, 0.8, normal.x));
-      outgoingLight = mix(outgoingLight, rimInk, edge * 0.24);
+      outgoingLight += rimInk * edge * .22 * (1.0-metalCoat);
+      float reflectionBand = smoothstep(.38,.53,reflect(-normalize(geometryViewDir),normal).y);
+      outgoingLight += metalCoat * mix(vec3(.10,.14,.20),vec3(.68,.79,.95),reflectionBand);
       outgoingLight = mix(outgoingLight, combatFlashColor * 3.7, combatFlash);
       #include <opaque_fragment>
     `);

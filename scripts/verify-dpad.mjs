@@ -32,7 +32,7 @@ async function runUnitTests() {
   const { computeMeleeKnockback, STATE, MOVE, MODE } = await import('../web/js/constants.js');
   const { ROSTER, SAGGING_BAG, MASTER_MITT, getFighterById } = await import('../web/js/roster.js');
   const { STAGES, HOMERUN_STAGE, resolveStagePlatforms } = await import('../web/js/stages.js');
-  const { createMatch, stepMatch } = await import('../web/js/physics.js');
+  const { createMatch, stepMatch, spawnItemNow } = await import('../web/js/physics.js');
   const { computeCpuInput } = await import('../web/js/ai.js');
   const { createEmptyInput } = await import('../web/js/input.js');
 
@@ -54,10 +54,11 @@ async function runUnitTests() {
   }
   console.log('PASS: All 26 Bizarro fighters + 130 sweet/sour normal frame-data snapshots validated');
 
-  const { ITEM_LIST } = await import('../web/js/items.js');
+  const { ITEM_LIST, CRITTER_SUMMONS } = await import('../web/js/items.js');
   const { EVENTS } = await import('../web/js/events.js');
   const { BIZARRO_INTERN } = await import('../web/js/roster.js');
-  assert.equal(ITEM_LIST.length, 18, 'Expected all 18 Bizarro Melee items');
+  assert.equal(ITEM_LIST.length, 24, 'Expected all 24 Bizarro Melee items');
+  assert.equal(CRITTER_SUMMONS.length, 8, 'Expected all 8 Critter Capsule summons');
   assert.equal(STAGES.length, 29, 'Expected all 29 Bizarro Melee VS stages');
   assert.equal(EVENTS.length, 8, 'Expected all 8 Bizarro Event Matches');
   const validFighterIds = new Set([...ids, SAGGING_BAG.id, MASTER_MITT.id, BIZARRO_INTERN.id]);
@@ -69,7 +70,7 @@ async function runUnitTests() {
   }
   const movedPlats = resolveStagePlatforms(STAGES.find((s) => s.id === 'randalls-tax-shelter'), 300);
   assert.ok(movedPlats.some((p) => p.id === 'scandall'), 'Scandall cloud platform resolves');
-  console.log('PASS: All 29 stages, 8 Event Matches (strict fighter IDs), dynamic platforms, and 18 Bizarro items validated');
+  console.log('PASS: All 29 stages, 8 Event Matches (strict fighter IDs), dynamic platforms, 24 Bizarro items & 8 Critter summons validated');
 
   // Melee knockback formula sanity
   const kbLight = computeMeleeKnockback(100, 14, 76, 40, 100);
@@ -567,7 +568,19 @@ async function runUnitTests() {
     assert.ok(gcPoll.moveX > 0.7 && gcPoll.attackPressed && gcPoll.grabPressed && gcPoll.shield,
       `Mayflash GameCube HID mapping failed: ${JSON.stringify(gcPoll)}`);
 
-    console.log('PASS: 8BitDo HID, DualSense 054c, Mayflash GC, 4P mixed controllers, sparse slots, menu isolation & hot-plug validated');
+    // 6) Per-controller haptic rumble safety (fires on vibrationActuator, no-ops cleanly when absent)
+    let rumbleCalls = 0;
+    mockPads = [{
+      index: 0, connected: true, mapping: 'standard', id: 'Xbox Rumble Test',
+      axes: [0, 0, 0, 0], buttons: mkButtons(16, {}),
+      vibrationActuator: { type: 'dual-rumble', playEffect: () => { rumbleCalls++; return Promise.resolve('complete'); } },
+    }];
+    imGc.poll(1, false, [0]);
+    assert.equal(imGc.rumblePort(0, { weak: 0.4, strong: 0.8, durationMs: 90 }), true, 'rumblePort must invoke dual-rumble actuator');
+    assert.equal(rumbleCalls, 1, 'Expected 1 vibrationActuator.playEffect call');
+    assert.equal(imGc.rumblePort(3, { weak: 0.4, strong: 0.8, durationMs: 90 }), false, 'rumblePort on unconnected slot must safely return false');
+
+    console.log('PASS: 8BitDo HID, DualSense 054c, Mayflash GC, 4P mixed controllers, rumble, sparse slots, menu isolation & hot-plug validated');
   } finally {
     if (origNav) Object.defineProperty(globalThis, 'navigator', origNav);
     else delete globalThis.navigator;
@@ -746,7 +759,108 @@ async function runUnitTests() {
     assert.ok(Number.isFinite(mTrain.fighters[0].lastFrameAdv),
       `Hitting shielding Training CPU must record finite lastFrameAdv (got ${mTrain.fighters[0].lastFrameAdv})`);
 
-    console.log('PASS: SSBM mechanics validated (Crouch Cancel, Jab Reset, Parry, Float Cancel, Needles, Dancing Blade, Waveland, Tech Roll, Ledge-Hog, Frame Adv)');
+    // Round 3/4 mechanics: Grab Mash-Out, Z-Air Ledge Tether, and new 24-item effects
+    const mMash = mkDuel('garth', 'faux');
+    mMash.fighters[0].x = -20; mMash.fighters[1].x = 20;
+    for (let t = 0; t < 10; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.grab = i0.grabPressed = true; }
+      stepMatch(mMash, [i0, createEmptyInput()]);
+      if (mMash.fighters[1].state === STATE.GRABBED) break;
+    }
+    assert.equal(mMash.fighters[1].state, STATE.GRABBED, 'P1 grab should capture P2');
+    let sawMashOut = false;
+    for (let t = 0; t < 50; t++) {
+      const i1 = createEmptyInput();
+      if (t % 2 === 0) { i1.attack = i1.attackPressed = true; i1.moveX = 1; }
+      else { i1.jump = i1.jumpPressed = true; i1.moveX = -1; }
+      stepMatch(mMash, [createEmptyInput(), i1]);
+      if (mMash.events.some((e) => e.type === 'tech' && e.tech === 'MASH OUT')) { sawMashOut = true; break; }
+    }
+    assert.ok(sawMashOut, 'Rapidly mashing inputs while grabbed must trigger MASH OUT');
+
+    // Z-Air Ledge Tether recovery (Zink offstage left pressing grab)
+    const mTeth = mkDuel('zink', 'faux');
+    const tDeck = mTeth.surfaces[0];
+    mTeth.fighters[0].x = tDeck.x - 95;
+    mTeth.fighters[0].y = tDeck.y - 45;
+    mTeth.fighters[0].vy = -1;
+    mTeth.fighters[0].grounded = false;
+    mTeth.fighters[0].facing = 1;
+    mTeth.fighters[0].state = STATE.AIRBORNE;
+    let sawTether = false;
+    for (let t = 0; t < 18; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.grab = i0.grabPressed = true; }
+      stepMatch(mTeth, [i0, createEmptyInput()]);
+      if (mTeth.events.some((e) => e.type === 'tether')) sawTether = true;
+    }
+    assert.ok(sawTether && mTeth.fighters[0].state === STATE.LEDGE_HANG,
+      `Zink offstage grab should fire tether and snap to LEDGE_HANG (sawTether=${sawTether}, state=${mTeth.fighters[0].state})`);
+
+    // New items: Metal Box, Bunny Ears, Star Wand projectile, Mr. Saturn Plush instant shield break, Freezie Cube freeze
+    const mIt = mkDuel('bario', 'faux');
+    mIt.fighters[0].x = -30; mIt.fighters[1].x = 42;
+    spawnItemNow(mIt, 'metal_box', -30, 8);
+    for (let t = 0; t < 10; t++) {
+      const i0 = createEmptyInput();
+      if (t === 2) { i0.attack = i0.attackPressed = true; }
+      stepMatch(mIt, [i0, createEmptyInput()]);
+    }
+    assert.ok(mIt.fighters[0].metalFrames > 400, `Metal Box pickup must grant metalFrames (got ${mIt.fighters[0].metalFrames})`);
+
+    spawnItemNow(mIt, 'bunny_ears', -30, 8);
+    for (let t = 0; t < 10; t++) {
+      const i0 = createEmptyInput();
+      if (t === 2) { i0.attack = i0.attackPressed = true; }
+      stepMatch(mIt, [i0, createEmptyInput()]);
+    }
+    assert.ok(mIt.fighters[0].bunnyFrames > 400, `Bunny Ears pickup must grant bunnyFrames (got ${mIt.fighters[0].bunnyFrames})`);
+
+    const mWand = mkDuel('bario', 'faux');
+    mWand.fighters[0].x = -60; mWand.fighters[1].x = 60;
+    spawnItemNow(mWand, 'star_wand', -60, 8);
+    let sawStarProj = false;
+    for (let t = 0; t < 28; t++) {
+      const i0 = createEmptyInput();
+      if (t === 2) { i0.attack = i0.attackPressed = true; }
+      if (t === 10) { i0.moveX = 1; i0.attack = i0.attackPressed = true; }
+      stepMatch(mWand, [i0, createEmptyInput()]);
+      if (mWand.projectiles.some((p) => p.style === 'star')) sawStarProj = true;
+    }
+    assert.ok(sawStarProj, 'Swinging Star Wand must fire a star projectile');
+
+    const mSat = mkDuel('bario', 'faux');
+    mSat.fighters[0].x = -40; mSat.fighters[1].x = 40;
+    spawnItemNow(mSat, 'mr_saturn_plush', -40, 8);
+    let sawShieldBreak = false;
+    for (let t = 0; t < 35; t++) {
+      const i0 = createEmptyInput();
+      const i1 = createEmptyInput();
+      if (t === 2) { i0.attack = i0.attackPressed = true; }
+      if (t === 10) { i0.grab = i0.grabPressed = true; i0.moveX = 1; }
+      i1.shield = true; if (t === 0) i1.shieldPressed = true;
+      stepMatch(mSat, [i0, i1]);
+      if (mSat.fighters[1].state === STATE.SHIELD_BREAK || mSat.events.some((e) => e.type === 'shieldBreak')) {
+        sawShieldBreak = true; break;
+      }
+    }
+    assert.ok(sawShieldBreak, 'Throwing Suspicious Potato Plush at shielding rival must trigger instant shield break');
+
+    const mIce = mkDuel('bario', 'faux');
+    mIce.fighters[0].x = -40; mIce.fighters[1].x = 40;
+    spawnItemNow(mIce, 'freezie_cube', -40, 8);
+    let sawFrozen = false;
+    for (let t = 0; t < 30; t++) {
+      const i0 = createEmptyInput();
+      if (t === 2) { i0.attack = i0.attackPressed = true; }
+      if (t === 10) { i0.grab = i0.grabPressed = true; i0.moveX = 1; }
+      stepMatch(mIce, [i0, createEmptyInput()]);
+      if (mIce.fighters[1].freezeFrames > 0) { sawFrozen = true; break; }
+    }
+    assert.ok(sawFrozen, 'Throwing Freezie Cube at rival must freeze them (freezeFrames > 0)');
+
+    console.log('PASS: SSBM mechanics & Round 3/4 items validated (Crouch Cancel, Jab Reset, Parry, Float Cancel, Needles, Dancing Blade, Waveland, Tech Roll, Ledge-Hog, Frame Adv, Mash-Out, Tether, Metal/Bunny/Wand/Freezie)');
   }
 
   // Master Mitt 380 HP, Phase 2 transition, and multi-attack tells

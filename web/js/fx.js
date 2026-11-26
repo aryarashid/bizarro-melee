@@ -43,6 +43,10 @@ export function fighterArchetype(f) {
 }
 
 const reactions = {
+  freeze: ['#7edaff','#f3ffff',.52,39,19],
+  phantomHit: ['#b9cbe2','#ffffff',0,20,9],
+  grabRelease: ['#ffa979','#fff3c9',.48,33,14],
+  tether: ['#6ce7ed','#fffbd5',0,17,10],
   counter: ['#8daec4', '#f6fcff', .61, 41, 12],
   reflect: ['#50dfff', '#e0ffff', .51, 61, 17],
   chargeStored: ['#ffb644', '#fff4b9', .60, 35, 19],
@@ -745,6 +749,12 @@ export class FxSystem {
         }
         case 'ko': {
           const col = PLAYER_COLORS[(e.port || 0) % PLAYER_COLORS.length];
+          if (e.star) {
+            const camera = this.classic?.camera, height = this.classic?.height || 720;
+            this.starKOs.push({ x: camera ? camera.x+(e.x-camera.x)*.42 : e.x,
+              y: camera ? camera.y+height*.32/camera.zoom : e.y, life:22,maxLife:22 });
+            break;
+          }
           this.beams.push({
             x: e.x, y: e.y, dir: e.dir || 'right', color: col, life: 28, maxLife: 28,
           });
@@ -758,9 +768,6 @@ export class FxSystem {
               size: 7 + Math.random() * 6,
               color: i % 2 === 0 ? '#ffffff' : col, back: false,
             });
-          }
-          if (e.star) {
-            this.starKOs.push({ x: e.x, y: e.y, life: 42, maxLife: 42, color: col });
           }
           break;
         }
@@ -932,7 +939,16 @@ export class FxSystem {
         const line = (build, ink, width) => {
           ctx.beginPath(); build(ctx); ctx.lineWidth = width; ctx.strokeStyle = ink; ctx.stroke();
         };
-        if (p.kind === 'reflect') {
+        if (p.kind === 'freeze' || p.kind === 'phantomHit' || p.kind === 'tether' || p.kind === 'grabRelease') {
+          const shards = p.kind === 'freeze' ? 9 : p.kind === 'grabRelease' ? 6 : p.kind === 'tether' ? 4 : 1;
+          for (let i=0;i<shards;i++) {
+            const a = i*TAU/shards+.42, distance = shards === 1 ? 0 : r*t;
+            ctx.save(); ctx.translate(Math.cos(a)*distance,Math.sin(a)*distance); ctx.rotate(a);
+            const len = (shards === 1 ? .80 : .29)*r;
+            ctx.beginPath(); ctx.moveTo(-len,0); ctx.lineTo(0,-len*.31); ctx.lineTo(len,0); ctx.lineTo(0,len*.31);
+            ctx.closePath(); ctx.fillStyle = i%2 ? p.core : p.rim; ctx.fill(); ctx.restore();
+          }
+        } else if (p.kind === 'reflect') {
           for (const [s, tilt, ink] of [[1, -.36, p.rim], [.72, .38, p.core]]) {
             line((c) => c.ellipse(0, 0, r*s, r*s*.73, tilt, 0, TAU), ink, 3.8 * left);
           }
@@ -1082,7 +1098,8 @@ export class FxSystem {
       const t = 1 - s.life / s.maxLife;
       const rad = Math.sin(t * Math.PI) * 34;
       ctx.save();
-      ctx.translate(s.x, -s.y + 80);
+      ctx.translate(s.x, -s.y);
+      ctx.shadowColor = '#ffce55'; ctx.shadowBlur = 6;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.moveTo(0, -rad); ctx.lineTo(rad * 0.25, -rad * 0.25);

@@ -600,6 +600,7 @@ export class InputManager {
       start: s.menuButtons.start,
       lb: s.menuButtons.lb,
       rb: s.menuButtons.rb,
+      select: rawButtons.has(8),
       rawButtons,
     };
   }
@@ -631,12 +632,12 @@ export class InputManager {
       padName: pad0?.id ? String(pad0.id).slice(0, 32) : '',
       sourcePort: -1,
       up: false, down: false, left: false, right: false,
-      confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
+      confirm: false, back: false, alt: false, start: false, lb: false, rb: false, select: false,
       rawPressed: [],
       rawPressedByPort: [[], [], [], []],
       perPort: Array.from({ length: 4 }, () => ({
         up: false, down: false, left: false, right: false,
-        confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
+        confirm: false, back: false, alt: false, start: false, lb: false, rb: false, select: false,
       })),
     };
     if (this.kbMenuQueue.length) {
@@ -661,7 +662,7 @@ export class InputManager {
       const cur = this._sampleSinglePadMenu(pad, port);
       const prev = this.menuPrevByPad.get(pad.index) || {
         up: false, down: false, left: false, right: false,
-        confirm: false, back: false, alt: false, start: false, lb: false, rb: false,
+        confirm: false, back: false, alt: false, start: false, lb: false, rb: false, select: false,
         rawButtons: new Set(),
       };
       let hold = this.menuHoldByPad.get(pad.index);
@@ -684,7 +685,7 @@ export class InputManager {
         }
       }
 
-      for (const key of ['confirm', 'back', 'alt', 'start', 'lb', 'rb']) {
+      for (const key of ['confirm', 'back', 'alt', 'start', 'lb', 'rb', 'select']) {
         if (cur[key] && !prev[key]) {
           out[key] = true;
           out.perPort[port][key] = true;
@@ -850,5 +851,28 @@ export class InputManager {
     this.taps.clear();
     this.touchTaps.clear();
     return frames;
+  }
+
+  rumblePort(port, { weak = 0.35, strong = 0.55, durationMs = 110 } = {}) {
+    try {
+      const pads = readPads();
+      if (!pads.length) return false;
+      const padsMap = new Map(pads.map((p) => [p.index, p]));
+      this._syncPadPorts(padsMap);
+      const padIdx = this.padPorts[port];
+      const pad = padIdx != null ? padsMap.get(padIdx) : null;
+      const act = pad?.vibrationActuator;
+      if (!act || typeof act.playEffect !== 'function') return false;
+      const p = act.playEffect(act.type || 'dual-rumble', {
+        startDelay: 0,
+        duration: Math.max(25, Math.min(600, Math.round(durationMs))),
+        weakMagnitude: Math.max(0, Math.min(1, weak)),
+        strongMagnitude: Math.max(0, Math.min(1, strong)),
+      });
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

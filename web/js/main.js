@@ -77,6 +77,7 @@ const app = {
   hitboxesVisible: false,
   shakeEnabled: true,
   flashEnabled: true,
+  rumbleEnabled: true,
   techFeedEnabled: true,
   rebindAction: null,
   testerPadPort: 0,
@@ -1819,7 +1820,7 @@ function handleGamepadMenus() {
     for (let padSlot = 0; padSlot < 4; padSlot++) {
       const act = nav.perPort[padSlot];
       if (!act) continue;
-      const anyAct = act.up || act.down || act.left || act.right || act.confirm || act.back || act.alt || act.start || act.lb || act.rb;
+      const anyAct = act.up || act.down || act.left || act.right || act.confirm || act.back || act.alt || act.start || act.lb || act.rb || act.select;
       if (!anyAct) continue;
 
       sound.unlock();
@@ -1897,6 +1898,25 @@ function handleGamepadMenus() {
         continue;
       }
 
+      if (act.select && !cur.locked) {
+        const randIdx = Math.floor(Math.random() * totalTiles);
+        cur.index = randIdx;
+        const def = ROSTER[randIdx];
+        if (def) {
+          p.fighterId = def.id;
+          p.paletteIndex = Math.floor(Math.random() * (def.palettes?.length || 4));
+          if (targetPort === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+            app.onlineSession.sendGuestPick(p.fighterId, p.paletteIndex);
+          }
+          lastBioDef = def;
+          lastBioPal = p.paletteIndex;
+        }
+        sound.playUi('move');
+        if (app.rumbleEnabled) input.rumblePort?.(padSlot, { weak: 0.2, strong: 0.1, durationMs: 45 });
+        changed = true;
+        continue;
+      }
+
       if (act.confirm) {
         if (!cur.locked) {
           const def = ROSTER[cur.index % totalTiles];
@@ -1910,6 +1930,7 @@ function handleGamepadMenus() {
           }
           cur.locked = true;
           sound.playUi('select');
+          if (app.rumbleEnabled) input.rumblePort?.(padSlot, { weak: 0.3, strong: 0.25, durationMs: 65 });
           changed = true;
         }
         continue;
@@ -2428,6 +2449,7 @@ function wireUi() {
       hitboxes: app.hitboxesVisible,
       shake: app.shakeEnabled,
       flash: app.flashEnabled,
+      rumble: app.rumbleEnabled,
     }, 'settings');
   };
 
@@ -2657,6 +2679,7 @@ function wireUi() {
   $('inp-hitboxes').addEventListener('change', (e) => { app.hitboxesVisible = e.target.checked; persistSettings(); });
   $('inp-shake').addEventListener('change', (e) => { app.shakeEnabled = e.target.checked; persistSettings(); });
   $('inp-flash')?.addEventListener('change', (e) => { app.flashEnabled = e.target.checked; persistSettings(); });
+  $('inp-rumble')?.addEventListener('change', (e) => { app.rumbleEnabled = e.target.checked; persistSettings(); });
 
   // HUD / Pause / Results
   $('btn-hud-pause').addEventListener('click', () => togglePause(true));
@@ -2824,6 +2847,38 @@ function togglePause(pause, pauserPort = null) {
 // ============================================================================
 // MAIN 60HZ FIXED-TIMESTEP LOOP
 // ============================================================================
+function triggerMatchRumble(events, match) {
+  if (!app.rumbleEnabled || !events?.length || !match) return;
+  const isOnline = match.mode === MODE.ONLINE && app.onlineMatchActive;
+  const localPort = isOnline ? (app.onlineSession?.getStats().localPort ?? 0) : -1;
+  const humanPorts = isOnline
+    ? [localPort]
+    : match.fighters.filter((f) => !f.isCpu).map((f) => f.port);
+  if (!humanPorts.length) return;
+  const canRumble = (port) => (isOnline ? port === localPort : humanPorts.includes(port));
+  const rumbleSlot = (port, cfg) => {
+    const slot = isOnline ? 0 : port;
+    if (canRumble(port)) input.rumblePort?.(slot, cfg);
+  };
+  for (const e of events) {
+    if (e.type === 'hit') {
+      const kb = Number.isFinite(e.kb) ? e.kb : 0;
+      const strong = Math.min(1, 0.2 + kb / 165);
+      const weak = Math.min(1, 0.25 + (e.damage || 6) / 28);
+      const dur = e.sweetspot || kb >= 110 ? 150 : 75;
+      if (e.victimPort != null) rumbleSlot(e.victimPort, { weak, strong, durationMs: dur });
+      if (e.attackerPort != null) rumbleSlot(e.attackerPort, { weak: weak * 0.55, strong: strong * 0.5, durationMs: Math.round(dur * 0.7) });
+    } else if (e.type === 'ko' || e.type === 'dramaticFinish') {
+      if (e.port != null) rumbleSlot(e.port, { weak: 0.75, strong: 1.0, durationMs: 260 });
+      else for (const p of humanPorts) rumbleSlot(p, { weak: 0.5, strong: 0.8, durationMs: 200 });
+    } else if (e.type === 'shieldBreak' || e.type === 'explosion') {
+      for (const p of humanPorts) rumbleSlot(p, { weak: 0.65, strong: 0.9, durationMs: 180 });
+    } else if (e.type === 'powershield' || e.type === 'counter' || (e.type === 'tech' && e.tech === 'PARRY')) {
+      if (e.port != null) rumbleSlot(e.port, { weak: 0.55, strong: 0.35, durationMs: 85 });
+    }
+  }
+}
+
 function tickSimulation() {
   const onlineSt = dpad.getOnlineState();
   if (onlineSt.connected || app.onlineSession) {
@@ -2907,6 +2962,7 @@ function tickSimulation() {
     }
     renderer3d.ingestEvents(app.match.events, app.match);
     sound.playEvents(app.match.events);
+    triggerMatchRumble(app.match.events, app.match);
     pushTechFeed(app.match.events);
     updateMatchHud(app.match);
 
@@ -3130,6 +3186,10 @@ async function boot() {
     if (typeof savedSet.flash === 'boolean') {
       app.flashEnabled = savedSet.flash;
       if ($('inp-flash')) $('inp-flash').checked = savedSet.flash;
+    }
+    if (typeof savedSet.rumble === 'boolean') {
+      app.rumbleEnabled = savedSet.rumble;
+      if ($('inp-rumble')) $('inp-rumble').checked = savedSet.rumble;
     }
   }
 

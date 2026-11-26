@@ -435,7 +435,7 @@ const NORMAL_TRAITS = {
 };
 
 const RAPID_JABS = new Set(['faux', 'falcont', 'captain-pigeon', 'flurby', 'zink', 'tiny-zink', 'shriek', 'squeegi']);
-const TETHERS = { shamus: [8, 115], zink: [10, 105], 'tiny-zink': [9, 93] };
+const TETHERS = new Set(['shamus', 'zink', 'tiny-zink']);
 
 function applyProfile(id, moves) {
   if (!NORMALS[id]) return;
@@ -460,11 +460,12 @@ function finishProfile(id, moves) {
       offsetY: jab.offsetY, radius: jab.radius, damage: 6, bkb: 32, kbg: 71, angle: 39,
       ...pulse, ...moves[MOVE.JAB3], rapidJab: true };
   }
-  if (TETHERS[id]) {
-    const [startup, reach] = TETHERS[id];
-    moves[MOVE.ZAIR] = { name: 'Tether Shot', startup, active: 5, endlag: 19, landingLag: 6, damage: 5,
-      angle: 42, bkb: 24, kbg: 50, kind: 'strike', offsetX: reach, offsetY: 30, radius: 16,
-      hitboxes: [{ offsetX: reach, radius: 19 }, { offsetX: reach * 0.66, radius: 18 }] };
+  if (TETHERS.has(id)) {
+    const reach = 115;
+    moves[MOVE.ZAIR] = { name: 'Tether Shot', startup: 7, active: 10, endlag: 16, landingLag: 6, damage: 5,
+      angle: 42, bkb: 24, kbg: 35, kind: 'strike', offsetX: reach, offsetY: 30, radius: 16,
+      hitboxes: [{ offsetX: reach, radius: 19 }, { offsetX: reach * 0.66, radius: 18 },
+        { offsetX: reach * 0.33, radius: 20 }] };
   }
 }
 

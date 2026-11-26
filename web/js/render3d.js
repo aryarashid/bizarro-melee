@@ -4,7 +4,7 @@ import { MELEE, MODE, MOVE as M, STATE as S, PLAYER_COLORS, WORLD_SCALE } from '
 import { getStageForm, getSurfaceY, resolveStagePlatforms, resolveStageSolids } from './stages.js';
 import { getSurfaceTextures, getFaceTexture, getOutfitTextures, getSkyTexture, getCloudTexture, getCelestialTexture,
   getDamageSmokeTexture, getImpactPuffTexture, getJumbotronTexture, getPodiumRankTexture, getStageSignTexture,
-  addFighterRim, releasePaint, skyStyle, getCombatGlowTexture, getFistSteamTexture } from './textures3d.js';
+  getLcdTexture, addFighterRim, releasePaint, skyStyle, getCombatGlowTexture, getFistSteamTexture } from './textures3d.js';
 import { attackLimb, attackVisual, combatPaint, specialVisual, specialEventVisual, legacySpecialEvents, fighterHidden, zipPoints, chargePulse,
   combatReaction, fighterArchetype, fighterTag, victoryOrder, flashesAllowed, mittTell, mittGunAim, drawMittTell } from './fx.js';
 
@@ -59,7 +59,7 @@ const softenedSpace = (id) => id === 'corn-area' || id === 'venom-barge';
 const deepDaylight = (id) => id === 'yoshis-tax-island' || id === 'foreclosed-castle';
 
 function attackAccent(f, key, move) {
-  if (move?.name === 'Knee of Bread') return 'knee';
+  if (move?.name === 'Knee of Bread' || f.def.id === 'falcont' && key === M.FAIR) return 'knee';
   if (move?.meteor || move?.hitboxes?.some((box) => box.meteor)) return 'spike';
   if (smashes.has(key) || key === M.ITEM_SWING || (blades.has(f.def.rig?.prop) && swings.has(key))) return 'power';
   return null;
@@ -155,7 +155,18 @@ const WEAPONS = {
   crystal: ['Weapon_Crystal', 18, 18], squeegee: ['Weapon_Squeegee', 16, 26],
   bat: ['Weapon_Bat', 16, 26], pill: ['Weapon_Pill', 14, 18],
 };
+const HEAD_SCULPTS = {
+  faux: 'FoxSculpt', falcont: 'ToucanSculpt', 'wonky-kong': 'GorillaSculpt', sourzer: 'TurtleSculpt',
+  broshee: 'DinoSculpt', mewtooth: 'CatSculpt', chikapu: 'MouseSculpt', spitzu: 'MouseSculpt',
+  bario: 'ToonRound', 'dr-bario': 'ToonRound', squeegi: 'ToonRound', mess: 'ToonRound',
+  zink: 'ToonRound', 'tiny-zink': 'ToonRound', screech: 'HeroFem', velda: 'HeroFem', shriek: 'HeroFem',
+};
+const TORSO_SCULPTS = {
+  stout: 'StoutTorso', brute: 'BruteTorso', tallBrute: 'BruteTorso', dress: 'DressSkirt',
+  parka: 'ParkaTorso', armor: 'ArmorTorso', ninja: 'HeroTorsoFem',
+};
 const SUMMONS = {
+  chill_penguin: 'Summon_ChillPenguin', gravity_cat: 'Summon_GravityCat',
   laser_duck: 'Summon_LaserDuck', fire_toaster: 'Summon_RagingToaster', tax_piggy: 'Summon_AuditPiggy',
   snore_sloth: 'Summon_SnoreSloth', tornado_pigeon: 'Summon_TornadoPigeon', volt_hamster: 'Summon_VoltHamster',
 };
@@ -316,6 +327,12 @@ function attackPose(f, key, m, accent) {
     arm: follow?.arm ?? (hit.arm ?? neutral.arm) + (jab ? .22 : .38), slide: hit.slide * .58, lift: hit.lift * .55 };
   if (f.def.id === 'sourzer' && (key === M.NAIR || key === M.UP_B)) hit = { ...hit, spin: (hit.spin || 0) + TAU * 1.25 };
   if (m?.kind === 'reflector') wind = { ...wind, lean: 0.48, lift: -0.32, knee: -1.55, offKnee: -1.35, leg: 0.95 };
+  if (m?.kind === 'dancingBlade') {
+    const high = (m.bladeStage || 1) % 2 === 1;
+    wind = { ...wind, arm: high ? -.72 : 2.54, tool: high ? .62 : -1.1 };
+    hit = { ...hit, arm: high ? 2.74 : .88, elbow: .12, tool: high ? -.75 : .35, yaw: high ? -.73 : .64 };
+    follow = { ...hit, arm: hit.arm + (high ? .45 : -.50), slide: .14 };
+  }
   if (m?.kind === 'powerPunch') {
     wind = { ...wind, lean: 0.55, arm: -0.95, elbow: 1.45, slide: -0.18 };
     hit = { ...hit, lean: -0.78, slide: 0.62, arm: 1.92, elbow: 0.04, yaw: -0.22 };
@@ -457,6 +474,7 @@ export class GameRenderer3D {
     this.ownedGeometries = new WeakSet();
     this.ownedMaterials = new WeakSet();
     this.baseGeo = new Map();
+    this.faceRadii = new WeakMap();
     for (const key of ['fighterMeshes', 'itemMeshes', 'projMeshes', 'targetMeshes', 'hazardMeshes', 'summonMeshes',
       'platMeshes', 'solidMeshes']) this[key] = new Map();
     this.fxParticles = [];
@@ -884,6 +902,13 @@ export class GameRenderer3D {
     if (stage.hazard === 'risingAcid') {
       this.acidMesh = this._liquid(true, -260, '#70ff3d');
       this.acidSparks = this._ambientPoints(-260, 'acid', '#92ff45', 100);
+      if (id === 'acid-vat-depths') {
+        const paint = this._energy('#a9ff62', .64);
+        for (let i=0;i<14;i++) {
+          const bubble = this._shape(this.stageGroup,'ring',paint,(i-6.5)*83,-260,-46-(i%3)*39,1,1,1,false);
+          this.stageAnimations.push({type:'acidBubble',node:bubble,i});
+        }
+      }
     }
     if (stage.hazard && stage.hazard !== 'risingAcid') {
       const warning = this._basic(stage.hazard === 'starshipLaser' ? '#56eaff' : '#ff8a38',
@@ -1021,11 +1046,13 @@ export class GameRenderer3D {
         this.terrainAnimations.push({ type: 'jet', node: plume, length: plume.scale.y, phase: z });
         blob('smallBall', lamp, x * 0.87, -h * 0.32, z, 9, 5, 11, false);
       }
-      const canopyX = x * (racer ? 0.22 : 0.08);
-      const canopyW = Math.min(racer ? 34 : 26, x * 0.07);
-      const canopyY = -h * 0.06;
-      blob('ball', gunmetal, canopyX, canopyY, d * 0.42, canopyW * 1.15, h * 0.12, 9);
-      blob('ball', glass, canopyX + 1, canopyY + h * 0.03, d * 0.48, canopyW, h * 0.07, 7, false);
+      const bridge = stage.id === 'corn-area' && h > 200 || stage.id === 'venom-barge' && slope > 0;
+      if (racer || bridge) {
+        const cx = x * (racer ? .22 : .08), cy = racer ? -h*.06 : 3, cz = racer ? d*.42 : -88;
+        const radius = Math.min(34, x*.14);
+        blob('ball', gunmetal, cx, cy, cz, radius*1.15, 11, 16);
+        blob('ball', glass, cx, cy+5, cz, radius, 13, 14, false);
+      }
       if (racer) {
         const white = glow('#eff4ff', 0.22);
         for (const z of [-16, -3]) band(white, 0.6, z, s.w * 0.86, 0.8, 5);
@@ -1164,6 +1191,14 @@ export class GameRenderer3D {
         blob('ball', glow('#85aaff', 0.40), -x * 0.12, -8, -29, x * 0.42, 17, 37);
       } else {
         for (let i = 0; i < 5; i++) blob('smallBall', cap, (i - 2) * s.w * 0.15, -12 - (i % 2) * 4, 38, s.w * 0.16, 10, 29);
+        if (s.id === 'scandall') {
+          const cheek = this._mat('#ff9ba6');
+          for (const k of [-1,1]) {
+            blob('ball',black,k*14,-9,69,2.3,4,1.2,false);
+            blob('ball',cheek,k*23,-14,68,5.7,2.6,1.5,false);
+            box(black,k*2.3,-15,69,5.5,1.6,1.5,false).rotation.z = k*.36;
+          }
+        }
         if (s.vanishing) root.userData.cloud = cap;
       }
     } else {
@@ -1200,6 +1235,11 @@ export class GameRenderer3D {
           }
         }
       }
+    }
+    if (stage.id === 'randalls-tax-shelter' && platform && !s.cloud) {
+      const stitches = [];
+      for (let px=-x+12;px<x-8;px+=13) stitches.push([px,-8+rise(px),depth+2,6,2]);
+      this._windowInstances(root,stitches,this._basic('#fff0bd'));
     }
     if (s.ledges && !s.walkOff) for (const side of [-1, 1]) {
       blob('gem', trim, side * (x - 10), -5, depth * 0.72, 5, 4, 6, false);
@@ -1299,6 +1339,8 @@ export class GameRenderer3D {
       box(body, 0, 179, -230, 1168, 644, 90);
       box(lip, 0, 174, -178, 1050, 560, 24);
       box(screen, 0, 177, -163, 995, 505, 12);
+      this._shape(root, 'plane', this._basic('#fff', { map:getLcdTexture(T,this), toneMapped:false }),
+        0,177,-156,994,504,1,false);
       sign('BIZARRO  /  LCD', '#d7dec1', '#333b2e', 0, 462, -168, 304, 37);
       const control = this._mat('#282e22');
       for (const x of [-527, 527]) this._shape(root, 'disk', control, x, -68, -172, 27, 9, 27, false).rotation.x = Math.PI / 2;
@@ -2119,6 +2161,11 @@ export class GameRenderer3D {
       this.acidMesh.position.y = Number.isFinite(match.acidLevel) && match.acidLevel > -900 ? match.acidLevel : -260;
       this.acidMesh.material.uniforms.clock.value = t / 36;
       this.acidSparks.position.y = this.acidMesh.position.y;
+      for (const entry of this.stageAnimations) if (entry.type === 'acidBubble') {
+        const phase = phase01(t/61+entry.i*.3819);
+        entry.node.position.y = this.acidMesh.position.y + 64*phase;
+        entry.node.scale.setScalar((5+entry.i%5)*Math.sin(phase*Math.PI));
+      }
     }
     if (this.barrierMesh) this.barrierMesh.visible = !match.homerun?.barrierBroken;
     if (this.warningLane) {
@@ -2130,6 +2177,18 @@ export class GameRenderer3D {
         this.warningLane.material.opacity = 0.20 + 0.15 * Math.sin(hz.warningFrames * 0.54);
       }
     }
+  }
+
+  _sculpt(parent, key, material, x, y, z, sx, sy, sz) {
+    const node = this._model('characters', key);
+    if (!node) return null;
+    node.traverse((mesh) => {
+      if (mesh.isMesh && mesh.material.name === 'NeutralTint') mesh.material = material;
+    });
+    node.position.set(x, y, z);
+    node.scale.set(sx, sy, sz);
+    parent.add(node);
+    return node;
   }
 
   _bodyMesh(group, profile, height, rx, rz, material) {
@@ -2144,7 +2203,7 @@ export class GameRenderer3D {
     return body;
   }
 
-  _featurePatch(rx, ry, rz, jaw = 0) {
+  _featurePatch(rx, ry, rz, jaw = 0, skull = null) {
     const T = this.T, geometry = new T.PlaneGeometry(1, 1, 16, 14);
     const p = geometry.attributes.position, uv = geometry.attributes.uv;
     for (let i = 0; i < p.count; i++) {
@@ -2152,6 +2211,32 @@ export class GameRenderer3D {
       const latitude = (uv.getY(i) - 0.5) * 2.16 + 0.10;
       const w = Math.cos(latitude) * headWidth(Math.sin(latitude), jaw);
       p.setXYZ(i, (rx + 0.52) * w * Math.cos(theta), (ry + 0.52) * Math.sin(latitude), (rz + 0.52) * w * Math.sin(theta));
+    }
+    // Project the painted features onto the bind mesh once per sculpt. Reuse
+    // normalized samples for every costume, expression and fighter scale.
+    if (skull) {
+      const source = this.assets.characters.get(skull.name);
+      let radii = this.faceRadii.get(source);
+      if (!radii) {
+        source.updateMatrixWorld(true);
+        const ray = new T.Raycaster(), aim = new T.Vector3();
+        radii = new Float32Array(p.count);
+        this.faceRadii.set(source, radii);
+        for (let i = 0; i < p.count; i++) {
+          const theta = (.5 - uv.getX(i)) * 1.94;
+          aim.set(Math.cos(theta), 0, Math.sin(theta));
+          ray.ray.origin.copy(aim).multiplyScalar(3);
+          ray.ray.origin.y = p.getY(i) / (ry + .52);
+          ray.ray.direction.copy(aim).negate();
+          const hit = ray.intersectObject(source, true)[0];
+          radii[i] = hit ? 3 - hit.distance : 0;
+        }
+      }
+      for (let i = 0; i < p.count; i++) if (radii[i]) {
+        const theta = (.5 - uv.getX(i)) * 1.94;
+        p.setX(i, (rx * radii[i] + .7) * Math.cos(theta));
+        p.setZ(i, (rz * radii[i] + .7) * Math.sin(theta));
+      }
     }
     geometry.computeVertexNormals();
     return geometry;
@@ -2241,6 +2326,8 @@ export class GameRenderer3D {
     const detail = this._mat(pal.accent, { emissive: pal.accent, emissiveIntensity: 0.13, metalness: 0.17, roughness: 0.43 });
     const dark = this._mat('#20192b', { roughness: 0.65 });
     const light = this._mat('#f3e6da', { roughness: 0.68 });
+    const flightCoat = id === 'faux' || id === 'falcont';
+    if (flightCoat && !f.paletteIndex) main.color.set(id === 'faux' ? '#795537' : '#30425c');
     rig.pelvisHeight = h * (puff ? .23 : build.hips);
     if (sil === 'sandbag' || sil === 'ovenMitt') {
       this._buildSpecialFighter(rig, f, sil, body, pants, gold, dark);
@@ -2248,20 +2335,24 @@ export class GameRenderer3D {
       const bulk = puff ? 1 : build.bulk * (sil === 'tallCat' ? .87 : 1);
       const depth = isFlat ? 0.39 : 1;
       const breadth = w * (puff ? 0.49 : 0.39) * bulk * depth;
-      const chestSz = h * (puff ? .61 : sil === 'dress' ? .39 : build.torso);
-      const chestRx = w * (puff ? 0.51 : 0.33) * bulk;
+      const chestSz = h * (puff ? .80 : sil === 'dress' ? .39 : build.torso);
+      const chestRx = w * (puff ? 0.46 : 0.33) * bulk;
       const shoulders = puff ? chestSz * 0.66 : chestSz * 0.81;
       const profile = puff ? [[0,0],[0.06,0.48],[0.26,0.89],[0.50,1],[0.75,0.92],[0.93,0.53],[1,0]]
         : sil === 'dress' ? [[-0.64,0],[-0.62,1.40],[-0.48,1.40],[0.02,1.0],[0.32,0.62],[0.76,0.75],[0.96,0.43],[1,0]]
           : [[-0.15,0],[-0.12,0.53],[0.02,0.83],[0.27,sil === 'stout' ? 0.97 : 0.73],[0.53,0.92],[0.73,1.10],[0.89,1.01],[0.99,0.57],[1.06,0]];
-      this._bodyMesh(torso, profile, chestSz, chestRx, breadth, body);
+      const torsoStyle = style.hat === 'elfCap' ? 'RangerTunic' : ['garth','troy'].includes(id) ? 'ArmorTorso'
+        : TORSO_SCULPTS[sil] || 'HeroTorso';
+      const dress = sil === 'dress';
+      if (puff || isFlat || !this._sculpt(torso, 'Body_' + torsoStyle, body, 0, chestSz * (dress ? .18 : .45), 0,
+        chestRx, chestSz * (dress ? .84 : .58), breadth)) this._bodyMesh(torso, profile, chestSz, chestRx, breadth, body);
       if (!puff && sil !== 'dress') {
         this._shape(pelvis, 'ball', pants, 0, -h * 0.020, 0, chestRx * 0.87, h * 0.104, breadth * 0.94);
         this._shape(torso, 'ball', detail, chestRx * 0.81, chestSz * 0.14, 0, 2.2, h * 0.039, breadth * 0.27);
       }
       const sleek = id === 'screech' ? 0.78 : id === 'squeegi' ? 0.86 : (!puff && !fur ? 0.89 : fur ? 0.94 : 1);
       const rx = puff ? chestRx : Math.min(h * (fur || sil === 'kid' ? 0.255 : 0.23) * sleek, w * 0.51);
-      const ry = puff ? chestSz * 0.48 : h * (sil === 'stout' ? 0.225 : 0.212) * sleek;
+      const ry = puff ? chestSz * 0.48 : h * (id === 'squeegi' ? .256 : sil === 'stout' ? .225 : .212) * sleek;
       const rz = puff ? breadth : rx * (isFlat ? 0.43 : 1.09);
       const jaw = puff || fur || armor ? 0 : sil === 'stout' ? 0.10 : 0.25;
       const neckY = puff ? chestSz * 0.49 : chestSz * (sil === 'dress' ? 0.92 : 0.93);
@@ -2271,11 +2362,20 @@ export class GameRenderer3D {
       if (!puff) {
         const neckBand = this._shape(torso, 'ball', armor || style.prop === 'scarf' ? detail : pants, 0, neckY + 1, 0, rx * 0.66, h * 0.065, rz * 0.70);
         neckBand.rotation.z = 0.17;
-        this._sculptHead(head, style.hat === 'visorHelm' ? pants : skin, rx, ry, rz, jaw);
-        if (!isFlat && !fur && !armor && id !== 'wonky-kong') for (const s of [-1, 1]) {
+        const headKey = 'Head_' + (HEAD_SCULPTS[id] || 'HeroMale');
+        const paint = style.hat === 'visorHelm' ? pants : skin;
+        rig.skull = !isFlat && this._sculpt(head, headKey, paint, 0, 0, 0, rx, ry, rz);
+        if (!rig.skull) this._sculptHead(head, paint, rx, ry, rz, jaw);
+        if (!isFlat && !fur && !armor && id !== 'wonky-kong' && !headKey.startsWith('Head_Hero')) for (const s of [-1, 1]) {
           this._shape(head, 'smallBall', skin, -rx * 0.14, -ry * 0.06, s * rz * 0.92, rx * 0.24, ry * 0.30, rz * 0.16);
         }
       }
+      if (flightCoat) for (const side of [-1,1]) {
+        const lapel = this._shape(torso,'ball',light,chestRx*.54,chestSz*.83,side*breadth*.60,
+          chestRx*.47,chestSz*.13,breadth*.50);
+        lapel.rotation.z = -.36;
+      }
+      if (dress) this._sculpt(torso,'Body_HeroTorsoFem',body,0,chestSz*.67,0,chestRx*.73,chestSz*.38,breadth*.70);
       const mantle = { main, pants, detail, dark, gold, skin, light };
       this._dressHead(rig, f, style, sil, { rx, ry, rz, jaw, ...mantle });
       if (parent !== this.battleGroup && rig.muzzle && rig.face) {
@@ -2380,7 +2480,17 @@ export class GameRenderer3D {
       };
       node.material = Array.isArray(node.material) ? node.material.map(rim) : rim(node.material);
     });
-    if (style.eyes === 'none') this._flatOutline(rig);
+    if (id === 'mr-beep-blob') {
+      const ink = this._mat('#080911',{roughness:.23,metalness:.24});
+      addFighterRim(ink);
+      const slots = rig.flashMaterials.get('body') || [];
+      slots.push(ink.userData.combatFlash);
+      rig.flashMaterials.set('body',slots);
+      rig.turn.traverse((mesh) => {
+        if (mesh.isMesh && zones.get(mesh) !== 'tool') mesh.material = ink;
+      });
+      this._flatOutline(rig);
+    }
     if (parent === this.battleGroup) this._buildFighterEffects(rig, f);
     return rig;
   }
@@ -2396,6 +2506,7 @@ export class GameRenderer3D {
         mitt.scale.setScalar(h * 0.33);
         mitt.position.y = h * 0.51;
         rig.torso.add(mitt);
+        rig.digits = Array.from({ length: 5 }, (_, i) => mitt.getObjectByName('MittDigit' + i));
       } else {
         this._shape(rig.torso, 'ball', body, 0, h * 0.55, 0, h * 0.33, h * 0.49, h * 0.22);
         const thumb = this._shape(rig.torso, 'ball', body, h * 0.30, h * 0.44, 0, h * 0.19, h * 0.27, h * 0.16);
@@ -2438,11 +2549,11 @@ export class GameRenderer3D {
         if (id === 'mess') { hat.rotation.y = 0.65; hat.rotation.z = 0.35; }
         else if (style.hat === 'backCap' || style.hat === 'snapback') hat.rotation.y = Math.PI;
       }
-      if (id === 'squeegi') { y = ry * 1.05; sx = rx * 0.78; sy = ry * 1.45; sz = rz * 0.82; }
+      if (id === 'squeegi') { y = ry * .76; sx = rx * .88; sy = ry * .81; sz = rz * .92; }
       if (style.hat === 'bowler') { y = ry * 0.69; sy *= 1.05; }
       if (style.hat === 'headmirror') { y = ry * 0.75; sx *= 0.87; sy *= 0.72; sz *= 0.86; }
-      if (style.hat === 'elfCap') { y = ry * 0.94; sx *= 0.81; sy *= 0.93; sz *= 0.91; }
-      if (hatKey === 'Hat_Crown') { y = ry * 0.32; sy *= 0.98; }
+      if (style.hat === 'elfCap') { y = ry * .59; sx *= 1.12; sy *= 1.04; sz *= 1.16; }
+      if (hatKey === 'Hat_Crown') { y = ry*.47; sx *= 1.15; sz *= 1.18; sy *= 1.13; }
       if (helmet) { x = -rx * 0.08; y = ry * 0.08; sx *= 1.12; sy = ry * 1.02; sz *= 1.09; }
       if (style.hat === 'foxEars') { x = -rx * 0.05; y = -ry * 0.02; sx = rx * 0.92; sy = ry * 0.95; sz = rz * 0.92; }
       if (style.hat === 'toucanBeak') { x = -rx * 0.02; y = -ry * 0.06; sx = rx * 1.08; sy = ry * 1.02; sz = rz * 1.02; }
@@ -2474,7 +2585,15 @@ export class GameRenderer3D {
         this._shape(head, 'disk', detail, rx * 0.23, ry * 0.61, 0, rx * 0.91, ry * 0.13, rz * 1.11);
       }
     }
-    if (['elfCap', 'tiaraHair', 'tiara', 'headband', 'mysticCrown'].includes(style.hat) && sil !== 'flat2d' && id !== 'troy') {
+    const hairStyles = {
+      garth: ['Hair_SimpleParted','#784427',.57,.55], zink: ['Hair_SimpleParted','#f0c15c',.62,.44],
+      'tiny-zink': ['Hair_SimpleParted','#edbd67',.65,.44], velda: ['Hair_Long','#ffe5ad',.05,1.16],
+      screech: ['Hair_Buns','#ac501d',.59,.81], dadondorf: ['Hair_Beard','#cf541a',-.50,.69],
+    };
+    const cut = hairStyles[id];
+    const coiffure = cut && this._pinPart(head,cut[0],-rx*(id==='dadondorf' ? -.36 : .13),ry*cut[2],0,
+      rx*(id==='dadondorf' ? .83 : 1.01),ry*cut[3],rz*1.04,{ NeutralTint: cut[1] });
+    if (!coiffure && ['elfCap', 'tiaraHair', 'tiara', 'headband', 'mysticCrown'].includes(style.hat) && sil !== 'flat2d' && id !== 'troy') {
       const hairColor = id === 'velda' ? '#f6e2a8' : id === 'garth' ? '#6a3b22'
         : (id === 'zink' || id === 'tiny-zink') ? '#f0d078'
         : (sil === 'dress' || style.hat === 'elfCap') ? '#b76d36'
@@ -2511,7 +2630,8 @@ export class GameRenderer3D {
     }
     if (style.hat === 'hood' || style.hat === 'ninjaWrap') {
       const cowl = id === 'shriek' ? this._mat('#1a2040', { roughness: 0.55 }) : main;
-      this._shape(head, 'ball', cowl, -rx * 0.28, 0, 0, rx * 1.04, ry * 1.18, rz * 1.13);
+      if (style.hat !== 'ninjaWrap' || !this._sculpt(head,'Part_RoyalCowl',cowl,0,0,0,rx,ry*1.03,rz*1.04))
+        this._shape(head, 'ball', cowl, -rx*.28,0,0,rx*1.04,ry*1.18,rz*1.13);
       if (style.hat === 'hood') {
         const rim = this._shape(head, 'ring', light, rx * 0.43, 0, 0, rz * 1.01, ry * 0.95, 1.95);
         rim.rotation.y = Math.PI / 2;
@@ -2570,7 +2690,7 @@ export class GameRenderer3D {
         roughness: 0.88, alphaTest: 0.03, emissive: glowEyes ? '#9af6ff' : helmet ? pal.accent : 0xffffff,
         emissiveIntensity: glowEyes ? 0.42 : helmet ? 0.24 : 0.07 });
       if (helmet) material.emissiveMap = material.map;
-      rig.face = this._add(head, this._featurePatch(faceRx, ry, faceRz, jaw), material, 0, 0, 0, false);
+      rig.face = this._add(head, this._featurePatch(faceRx, ry, faceRz, jaw, !helmet && !['hood','ninjaWrap'].includes(style.hat) && rig.skull), material, 0, 0, 0, false);
       rig.face.renderOrder = 1;
       if (['visorHelm', 'birdHelmet', 'foxEars', 'toucanBeak', 'glasses'].includes(style.hat)) {
         rig.face.position.x = style.hat === 'visorHelm' || style.hat === 'birdHelmet' ? rx * 0.26 : rx * 0.12;
@@ -2597,8 +2717,8 @@ export class GameRenderer3D {
       for (const ear of rig.ears) ear.removeFromParent();
       rig.ears = null;
     };
-    if (id === 'dadondorf') this._pinPart(head, 'Part_Beard', rx * 0.12, -ry * 0.42, 0, rx * 1.05, ry * 0.95, rz * 0.9);
-    if (id === 'screech') this._pinPart(head, 'Part_HairBun', -rx * 0.02, ry * 0.72, 0, rx * 0.95, ry * 0.85, rz * 0.9);
+    if (id === 'dadondorf' && !this.assets.characters.has('Hair_Beard')) this._pinPart(head, 'Part_Beard', rx * 0.12, -ry * 0.42, 0, rx * 1.05, ry * 0.95, rz * 0.9);
+    if (id === 'screech' && !this.assets.characters.has('Hair_Buns')) this._pinPart(head, 'Part_HairBun', -rx * 0.02, ry * 0.72, 0, rx * 0.95, ry * 0.85, rz * 0.9);
     if (id === 'broshee') {
       const snout = this._pinPart(head, 'Part_DinoSnout', rx * 0.2, -ry * 0.12, 0, rx * 1.2, ry * 1.05, rz * 1.05);
       if (snout && rig.muzzle) { rig.muzzle.removeFromParent(); rig.muzzle = null; }
@@ -2608,10 +2728,16 @@ export class GameRenderer3D {
       this._shape(head, 'ball', this._mat('#8d95aa'), rx * 0.46, -ry * 0.38, 0, rx * 0.36, ry * 0.24, rz * 0.34);
     }
     if (id === 'troy') {
-      this._pinPart(head, 'Part_HairCrest', -rx * 0.02, ry * 0.48, 0, rx * 1.28, ry * 1.2, rz * 1.05,
+      this._pinPart(head, 'Hair_FlameSweep', -rx*.07,ry*.19,0,rx*1.02,ry*.95,rz*1.08,
         { CharOrange: '#ff5a1f', CharRed: '#ffb03a', CharGold: '#ffe14a' });
     }
-    if (id === 'garth') {
+    if (id === 'dr-bario') {
+      const tube = this._shape(rig.torso,'ring',this._mat('#25313a'),chestRx*.93,chestSz*.63,0,
+        rz*.42,chestSz*.32,3);
+      tube.rotation.y = Math.PI/2;
+      this._shape(rig.torso,'smallBall',this._mat('#b9d1d7',{metalness:.70}),chestRx*.96,chestSz*.32,0,2.1,2.1,2.1);
+    }
+    if (id === 'garth' && !this.assets.characters.has('Hair_SimpleParted')) {
       this._pinPart(head, 'Part_HairCrest', -rx * 0.04, ry * 0.58, 0, rx * 1.05, ry * 0.82, rz * 0.95,
         { CharOrange: '#6a3b22', CharRed: '#4a2815', CharGold: '#8a5a32' });
     }
@@ -2620,11 +2746,12 @@ export class GameRenderer3D {
       this._pinPart(rig.torso, 'Part_Backpack', -chestRx * 0.72, chestSz * 0.42, 0, chestRx * 0.62, chestSz * 0.48, rz * 0.7);
     }
     if (id === 'spitzu') {
-      if (this._pinPart(head, 'Part_MouseEars', 0, ry * 0.42, 0, rx * 1.35, ry * 1.2, rz * 1.35)) dropEars();
+      if (this._pinPart(head, 'Part_MouseEars', 0, ry*.43, 0, rx, ry*1.05, rz)) dropEars();
+      this._pinPart(head,'Hat_Glasses',rx*.08,ry*.53,0,rx*.90,ry*.83,rz*.94,{CharTeal:'#79bfbe',CharChrome:'#977044'});
       this._pinPart(rig.torso, 'Part_Battery', -chestRx * 0.85, chestSz * 0.48, 0, chestRx * 0.7, chestSz * 0.42, rz * 0.75);
     }
     if (id === 'chikapu') {
-      if (this._pinPart(head, 'Part_BoltEars', 0, ry * 0.55, 0, rx * 1.2, ry * 1.35, rz * 1.15, { CharGold: '#ffe14a' })) dropEars();
+      if (this._pinPart(head, 'Part_BoltEars', 0, ry*.45, 0, rx, ry*1.02, rz*1.12, { CharGold: '#ffe14a' })) dropEars();
       this._pinPart(head, 'Hat_Cap', 0, ry * 0.62, 0, rx * 0.78, ry * 0.42, rz * 0.82,
         { CharRed: '#e23b3b', CharBlue: '#e23b3b', CharWhite: '#fff6e8' });
     }
@@ -2632,7 +2759,10 @@ export class GameRenderer3D {
       this._pinPart(head, 'Part_CatEars', 0, ry * 0.28, 0, rx * 0.85, ry * 0.7, rz * 0.8);
       this._pinPart(head, 'Part_HairSwirl', rx * 0.02, ry * 0.48, 0, rx * 0.65, ry * 0.55, rz * 0.65);
     }
-    if (id === 'velda') this._pinPart(head, 'Hat_Hood', -rx * 0.42, ry * 0.22, 0, rx * 1.2, ry * 1.18, rz * 1.12, { NeutralTint: '#4c1d95' });
+    if (id === 'velda') this._pinPart(rig.torso, 'Part_RoyalMantle', -chestRx*.70, chestSz*.45,0,
+      chestRx*.54, chestSz*.75,rz*1.08,{NeutralTint:'#50247e'});
+    if (id === 'shriek') this._pinPart(head, 'Part_NinjaMask',rx*.30,-ry*.36,0,rx*.79,ry*.43,rz*.94,{NeutralTint:'#414766'});
+    if (id === 'velda') this._pinPart(head, 'Part_RoyalCowl', -rx*.12, ry*.04, 0, rx*1.06, ry*1.05, rz*1.10, { NeutralTint: '#4c1d95' });
     if (id === 'bario' || style.prop === 'monocle') this._pinPart(head, 'Part_Monocle', rx * 0.08, ry * 0.02, 0, rx * 0.9, ry * 0.82, rz * 0.85);
     if (id === 'sourzer') {
       this._pinPart(head, 'Part_Snout', rx * 0.18, -ry * 0.22, 0, rx * 1.05, ry * 0.95, rz * 0.9);
@@ -2672,6 +2802,10 @@ export class GameRenderer3D {
     const girth = w * build.limbs;
     const thigh = rig.pelvisHeight * (puff ? 0.43 : 0.46), calf = rig.pelvisHeight * 0.40;
     const gloveSize = Math.max(4, w * (puff ? 0.15 : 0.137));
+    const segment = (joint, key, material, length, radius, width) => {
+      if (!this._sculpt(joint, 'Limb_' + key, material, 0, -length*.49, 0, radius, length*.61, width*depth))
+        this._shape(joint, 'ball', material, 0, -length*.49, 0, radius, length*.61, width*depth);
+    };
     rig.limbs = [];
     for (const s of [1, -1]) {
       const label = s === 1 ? 'right' : 'left';
@@ -2679,12 +2813,17 @@ export class GameRenderer3D {
       const arm = this._bone(shoulder, label + ' upperArm');
       const fore = this._bone(arm, label + ' forearm', 0, -u, 0);
       const grip = this._bone(fore, label + ' grip', 0, -l, 0);
-      const pauldron = style.silhouette === 'armor' || f.def.id === 'garth';
-      this._shape(arm, 'ball', main, 0, -u * 0.44, 0, girth * 0.121, u * 0.67, girth * 0.113 * depth);
-      this._shape(arm, 'ball', pauldron ? detail : main, 0, -u * 0.08, s * w * 0.029 * depth,
-        girth * (pauldron ? 0.17 : 0.139), w * 0.145, girth * (pauldron ? 0.20 : 0.141) * depth);
+      const pauldron = style.silhouette === 'armor' || ['garth','troy'].includes(f.def.id);
+      segment(arm, 'UpperArm', main, u, girth*.132, girth*.12);
+      const plate = pauldron && this._sculpt(arm,'Part_KnightPauldron',pants,0,-u*.12,s*w*.025,
+        girth*.16,u*.35,girth*.17*depth);
+      if (plate) {
+        const band = this._shape(arm,'disk',gold,0,-u*.32,0,girth*.138,u*.07,girth*.146);
+        band.rotation.z = -.09;
+      } else if (puff || !rig.skull) this._shape(arm, 'ball', main, 0, -u*.10, 0,
+        girth*.12,u*.34,girth*.12*depth);
       this._shape(fore, 'smallBall', pauldron ? dark : main, 0, 0, 0, w * 0.098, w * 0.093, w * 0.099 * depth);
-      this._shape(fore, 'ball', f.def.id === 'wonky-kong' || style.stache || style.silhouette === 'parka' ? main : skin, 0, -l * 0.48, 0, girth * 0.106, l * 0.73, girth * 0.093 * depth);
+      segment(fore, 'Forearm', f.def.id === 'wonky-kong' || style.stache || style.silhouette === 'parka' ? main : skin, l, girth*.116, girth*.105);
       this._shape(fore, 'disk', style.silhouette === 'armor' ? gold : pants, 0, -l * 0.76, 0, gloveSize * 0.91, l * 0.21, gloveSize * depth);
       const glove = this._model('characters', 'Part_Glove',
         { CharWhite: f.def.id === 'wonky-kong' ? '#3a4258' : style.silhouette === 'armor' ? pal.outfit : style.stache ? '#f3f3ff' : style.silhouette === 'parka' ? pal.accent : pal.skin });
@@ -2699,9 +2838,9 @@ export class GameRenderer3D {
       const shin = this._bone(leg, label + ' shin', 0, -thigh, 0);
       const kneeCap = this._bone(shin, label + ' knee cap');
       const foot = this._bone(shin, label + ' ankle', 0, -calf, 0);
-      this._shape(leg, 'ball', pants, 0, -thigh * 0.40, 0, girth * 0.126, thigh * 0.79, girth * 0.12 * depth);
+      segment(leg, 'Thigh', pants, thigh, girth*.14, girth*.13);
       this._shape(kneeCap, 'smallBall', pauldron ? detail : pants, w * 0.025, 0, 0, w * 0.103, w * 0.111, w * 0.108 * depth);
-      this._shape(shin, 'ball', pants, 0, -calf * 0.42, 0, girth * 0.109, calf * 0.77, girth * 0.102 * depth);
+      segment(shin, 'Shin', pants, calf, girth*.115, girth*.105);
       const flurby = f.def.id === 'flurby';
       const leather = flurby ? '#e23b3b' : style.stache ? new this.T.Color('#704039').lerp(new this.T.Color(pal.outfit), 0.36) : pal.outfit;
       const boot = this._model('characters', 'Part_Boot', { NeutralTint: leather });
@@ -2734,7 +2873,7 @@ export class GameRenderer3D {
     const hand = rig.limbs[0].grip;
     rig.tool = this._bone(hand, 'weapon socket');
     rig.heldSocket = this._bone(hand, 'item socket', gloveSize * 0.33, 0.3, gloveSize * 0.26);
-    const spec = WEAPONS[style.prop];
+    const spec = f.def.id === 'shriek' ? ['Part_Kunai',18,13,'characters'] : WEAPONS[style.prop];
     const tip = spec?.[2] || (style.prop === 'pill' ? 13 : 4);
     rig.trailBase = this._bone(rig.tool, 'trail inner', spec ? tip * 0.40 : 1, 0, 0);
     rig.trailTip = this._bone(rig.tool, 'trail outer', tip, 0, 0);
@@ -2755,7 +2894,7 @@ export class GameRenderer3D {
     }
     if (style.shield === 'trashLid') {
       const forearm = rig.limbs[1].fore;
-      const lid = this._model('characters', 'Part_TrashLid');
+      const lid = this._model('characters', 'Part_RoundShield') || this._model('characters', 'Part_TrashLid');
       if (lid) {
         lid.position.set(0, -l * 0.45, -w * 0.15);
         lid.scale.setScalar(w * 0.32);
@@ -2772,10 +2911,11 @@ export class GameRenderer3D {
 
   _buildBuddy(rig, pants, detail, light, dark) {
     const h = rig.h;
-    const buddy = this._bone(rig.turn, 'Nana-Bot', -24, 0, -10);
+    const buddy = this._bone(rig.root, 'Nana-Bot', -24, 0, -10);
+    buddy.rotation.y = -.8;
     const bot = this._model('characters', 'Buddy_NanaBot');
     if (bot) {
-      bot.scale.setScalar(h * 0.42);
+      bot.scale.setScalar(h * 0.47);
       bot.position.y = h * 0.12;
       buddy.add(bot);
       rig.buddy = buddy;
@@ -2924,6 +3064,15 @@ export class GameRenderer3D {
       rig.punch = flame;
     }
     if (moves.some((m) => m.kind === 'rest')) {
+      rig.sleepLetters = this._bone(root,'Sleep letters',0,h,10);
+      const lilac = this._energy('#ffdbfa',.93);
+      for (let i=0;i<3;i++) {
+        const glyph = this._bone(rig.sleepLetters,'Z',12+i*11,i*10,0);
+        for (const y of [-3,3]) this._shape(glyph,'box',lilac,0,y,0,7,1.5,1,false);
+        this._shape(glyph,'box',lilac,0,0,0,9,1.5,1,false).rotation.z = .72;
+        glyph.scale.setScalar(.72+i*.20);
+      }
+      rig.sleepLetters.visible = false;
       rig.rest = this._bone(root, 'Rest bloom', 0, h * 0.48, 7);
       const circle = this._shape(rig.rest, 'ring', this._energy('#ffa6d9'), 0, 0, 0, 35, 35, 16, false);
       circle.rotation.x = -0.36;
@@ -3082,9 +3231,9 @@ export class GameRenderer3D {
       2, 0, 0, 72, 52, 1, false);
 
     const aura = this._bone(rig.torso, 'Enraged Mitt aura');
-    const rim = this._shape(aura, 'ball', this._fresnel('#ffac36', 0.50, 3.2), 0, h * 0.58, 0, w * 0.67, h * 0.62, w * 0.47, false);
+    const rim = this._shape(aura, 'ball', this._fresnel('#ce2444', 0.50, 3.2), 0, h * 0.58, 0, w * 0.67, h * 0.62, w * 0.47, false);
     const embers = Array.from({ length: 6 }, (_, i) => this._shape(aura, 'gem',
-      this._energy(i % 2 ? '#ffa138' : '#ffdb76', 0.63), 0, 0, 0, 1, 1, 1, false));
+      this._energy(i % 2 ? '#ff751e' : '#ff2846', 0.63), 0, 0, 0, 1, 1, 1, false));
     for (const effect of [marker, muzzle, aura]) effect.visible = false;
     rig.mittTells = { marker, disk, inner, ring, muzzle, fire, core, bloom, aura, rim, embers };
   }
@@ -3092,6 +3241,12 @@ export class GameRenderer3D {
   _updateMittTells(rig, f, tick, tell, move, age) {
     const { marker, disk, inner, ring, muzzle, fire, core, bloom, aura, rim, embers } = rig.mittTells;
     const { root, shadow, h, w } = rig, sc = root.scale.x;
+    const curls = { punch: [1,1,1,1,1], gun: [.16,0,1,1,1], poke: [.89,0,.93,.92,.85],
+      slap: [.25,.04,.07,.12,.19], sweep: [.55,.12,.23,.37,.46], drill: [.91,0,0,.95,.93],
+      clap: [.29,.18,.16,.18,.26], slam: [.92,.97,1,1,.91] };
+    rig.digits?.forEach((digit,i) => {
+      if (digit) digit.rotation.x = (curls[tell]?.[i] ?? (.19+.09*Math.sin(tick*.08+i))) * 1.52;
+    });
     const phase = age / Math.max(1, move?.startup ?? 1) + 1;
     if ((marker.visible = tell === 'slam' && age < 0 && shadow.visible)) {
       const beat = 0.5 + 0.5 * Math.sin(tick * 0.40);
@@ -3195,6 +3350,10 @@ export class GameRenderer3D {
       const release = 1 - clamp((frame - startup - (d?.active || 5)) / 3);
       rig.punch.scale.setScalar((0.27 + 0.76 * windup + (active ? 0.14 : 0)) * release * (0.94 + 0.07 * Math.cos(tick * 1.77)));
       rig.punch.rotation.z = -(rig.pose.arm + rig.pose.elbow) + Math.sin(tick * 0.6) * 0.12;
+    }
+    if (rig.sleepLetters && (rig.sleepLetters.visible = attacking && d?.kind === 'rest')) {
+      rig.sleepLetters.position.y = h + 9*Math.sin(frame*.11);
+      rig.sleepLetters.position.x = Math.sin(frame*.07)*8;
     }
     if (rig.rest && (rig.rest.visible = attacking && d?.kind === 'rest' && frame >= startup && frame < startup + 24)) {
       const age = clamp((frame - startup) / 24), spread = 10 + ease(age) * 92;
@@ -3314,7 +3473,11 @@ export class GameRenderer3D {
         leg: -.44, offLeg: .58, knee: -.87, offKnee: -.50, roll: -localX * .23 });
       blendPose(target, yank, flinch, target);
     }
-    const gain = snap ? 1 : 1 - Math.exp(-delta * (recoil ? 2.6 : attacking || hurt ? 1.08 : 0.39));
+    if (!showcase && f.tetherBeam) target = { ...target, arm: 1.56, elbow: .04, off: -.42, lean: -.23 };
+    if (!showcase && attacking && d?.kind === 'rest' && f.moveFrame >= d.startup)
+      target = { ...target, lift: -.16, head: -.32, leg: 1.03, knee: -1.61, offLeg: .91, offKnee: -1.57, arm: .94, off: .91 };
+    const snapPose = snap || hitlag > 0 || attacking && (f.moveFrame ?? 0) <= 1;
+    const gain = snapPose ? 1 : 1 - Math.pow(attacking || hurt ? .35 : .58, delta);
     // Root resets and GLB upgrades initialize directly at the current simulation pose.
     const a = rig.initialized ? gain : 1;
     rig.initialized = true;
@@ -3395,7 +3558,8 @@ export class GameRenderer3D {
     const [strikeRim, strikeCore, strikeSpark] = combatPaint[strike?.style || 'unarmed'];
     rig.heldFlash = this.allowFlash && strikeZone === 'held' ? .18 + .50 * strikePulse : 0;
     rig.heldFlashColor = strikeSpark;
-    for (const [zone, slots] of rig.flashMaterials) for (const { flash, flashColor } of slots) {
+    for (const [zone, slots] of rig.flashMaterials) for (const { flash, flashColor, metal } of slots) {
+      metal.value = !showcase && f.metalFrames > 0 ? 1 : 0;
       const limbPulse = this.allowFlash && zone === strikeZone && strike ? .18 + .50 * strikePulse : 0;
       flash.value = Math.max(hitPulse, limbPulse);
       if (flash.value) flashColor.value.set(hitPulse ? hit?.electric ? '#b7f8ff' : '#ffffff' : strikeSpark);
@@ -3430,7 +3594,12 @@ export class GameRenderer3D {
       if (rig.face.material.emissiveMap) rig.face.material.emissiveMap = rig.face.material.map;
     }
     if (rig.muzzleGrin) rig.muzzleGrin.visible = expression === 'victory';
+    if (f.def.id === 'velda' && rig.tool?.children.length) {
+      const crystal = rig.tool.children.find(n=>n.name==='Weapon_Crystal');
+      if (crystal) { crystal.position.y = 12+Math.sin(tick*.09)*4; crystal.rotation.y = tick*.035; }
+    }
     if (showcase) return;
+    this._updateStatus(rig,f,tick);
     this._updateCombatRig(rig, f, tick, strike, strikeZone, strikePulse, [strikeRim, strikeCore, strikeSpark], specialMove);
     if (rig.shield.visible = state === S.SHIELD || state === S.SHIELD_STUN) {
       const bubble = clamp((f.shieldHp ?? 60) / MELEE.SHIELD_MAX);
@@ -3467,11 +3636,18 @@ export class GameRenderer3D {
     }
     rig.respawn.visible = state === S.RESPAWN;
     this._updateContact(rig, f, match);
+    if (f.starKoTimer > 0) {
+      const flight = clamp(1 - f.starKoTimer/54);
+      this._skyPosition(rig.root.position,f.starKoOrigin?.x ?? f.x,flight);
+      rig.root.scale.setScalar(sc * mix(1,.045,ease(flight)));
+      rig.tumble.rotation.z += this.allowFlash ? flight*TAU*3 : flight*.46;
+      rig.shadow.visible = false;
+    }
     if (rig.mittTells) this._updateMittTells(rig, f, tick, tell, d, activeAge);
     this._updateSignature(rig, f, tick, delta, attacking, active);
     const item = held ? match.items?.find((item) => item.id === f.heldItemId) : null;
     this._updateRibbon(rig, f, tick, strike, item, strikeZone);
-    if (!rig.root.visible) return;
+    if (!rig.root.visible || f.starKoTimer > 0) return;
     this._updateLaunchEffects(rig, f, tick, hit, launchSpeed, x, y + h * sc * .53);
     if (f.percent >= 100 && state !== S.RESPAWN && match.status !== 'paused') {
       const heavy = f.percent >= 150;
@@ -3487,6 +3663,53 @@ export class GameRenderer3D {
           match.suddenDeath ? 2.8 : heavy ? 2.2 : 1.55, 0, tick, { swirl: plume, heavy });
       }
     } else if (f.percent < 100) rig.nextSmoke = null;
+  }
+
+  _skyPosition(out, x, flight) {
+    const span = this.camZ * .24 * this.camera.aspect;
+    return out.set(this.camX+clamp(x-this.camX,-span,span)*(1-flight*.38),
+      this.camY+this.camZ*(.24+flight*.07), -650*ease(flight));
+  }
+
+  _updateStatus(rig, f, tick) {
+    const { w,h } = rig;
+    if (f.bunnyFrames > 0 && !rig.bunny) {
+      const parent = rig.head || rig.torso;
+      rig.bunny = this._bone(parent,'Bunny headband',0,rig.head ? h*.18 : h*.93,0);
+      const ears = this._model('items','Item_BunnyEars');
+      if (ears) {
+        ears.scale.setScalar(w*.68);
+        ears.rotation.y = Math.PI/2;
+        rig.bunny.add(ears);
+      } else for (const side of [-1,1]) {
+        this._shape(rig.bunny,'ball',this._mat('#ffbad1'),0,h*.16,side*w*.19,w*.09,h*.21,w*.12);
+      }
+    }
+    if (rig.bunny && (rig.bunny.visible = f.bunnyFrames > 0))
+      rig.bunny.rotation.z = .13*Math.sin(tick*.24) + clamp((f.vy||0)*.018,-.33,.33);
+    if (f.freezeFrames > 0 && !rig.ice) {
+      const rings = [[w*.48,w*.39,h*1.26,8],[w*.68,w*.51,h*1.08,10],[w*.63,w*.51,4,8],[w*.51,w*.40,-2,8]];
+      rig.ice = this._add(rig.root,this._bevel(rings,false),this._mat('#9eeeff',{
+        emissive:'#329fbf',emissiveIntensity:.42,roughness:.13,transparent:true,opacity:.34,depthWrite:false,
+        flatShading:true }),0,0,0,false);
+      rig.ice.rotation.y = .24;
+    }
+    if (rig.ice) rig.ice.visible = f.freezeFrames > 0;
+    const beam = f.tetherBeam;
+    if (beam && !rig.tether) {
+      rig.tether = this._bone(rig.root,'Grapple');
+      const plasma = beam.kind === 'plasma';
+      const paint = plasma ? this._energy('#62eeff',.88) : this._mat('#c2d1df',{metalness:.73,roughness:.28});
+      this._shape(rig.tether,'box',paint,.5,0,0,1,plasma?3:1.5,2,false);
+      for (let i=0;i<9;i++) this._shape(rig.tether,'ring',paint,(i+.5)/9,0,0,.038,2.1,1.8,false).rotation.x = i%2*.8;
+      this._shape(rig.tether,'gem',paint,1,0,0,.04,4,3,false);
+    }
+    if (rig.tether && (rig.tether.visible = !!beam)) {
+      const sc = rig.root.scale.x, dx = beam.x2-beam.x1, dy = beam.y2-beam.y1;
+      rig.tether.position.set((beam.x1-rig.root.position.x)/sc,(beam.y1-rig.root.position.y)/sc,5);
+      rig.tether.scale.x = Math.hypot(dx,dy)/sc;
+      rig.tether.rotation.z = Math.atan2(dy,dx);
+    }
   }
 
   _updateCombatRig(rig, f, tick, strike, zone, pulse, paint, special) {
@@ -3734,14 +3957,15 @@ export class GameRenderer3D {
     const root = this._bone(this.battleGroup, def.mesh || 'item');
     const tilt = this._bone(root, 'item pose');
     const loaded = this._model('items', def.mesh);
-    const long = ['Item_PlungerBat', 'Item_GlowSaber', 'Item_Mallet'].includes(def.mesh);
+    const handles = { Item_PlungerBat: -.79, Item_GlowSaber: -.80, Item_Mallet: -.85, Item_PaperFan: -.57, Item_StarWand: -.81 };
+    const long = Object.hasOwn(handles,def.mesh);
     let grip = 0;
     if (loaded) {
       const scale = clamp(r * (long ? 0.88 : 1.16), 9, 29);
       loaded.scale.setScalar(scale);
       // Tool meshes stand along +Y. Align the middle of the handle with the
       // grip when rotated into the hand, instead of gripping the blade.
-      grip = long ? scale * ({ Item_PlungerBat: -0.79, Item_GlowSaber: -0.80, Item_Mallet: -0.85 }[def.mesh]) : 0;
+      grip = long ? scale * handles[def.mesh] : 0;
       tilt.add(loaded);
     } else {
       const casing = this._mat(color, { metalness: 0.19, emissive: color, emissiveIntensity: 0.14 });
@@ -3851,7 +4075,18 @@ export class GameRenderer3D {
     const shine = this._basic('#fffbe5', { toneMapped: false });
     const glow = this._basic(col, { transparent: true, opacity: 0.37, depthWrite: false, blending: T.AdditiveBlending });
     const elongated = /laser|needle|missile|arrow|bolt/i.test(p.style || '');
-    if (elongated) {
+    if (p.style === 'star') {
+      const star = new T.Shape();
+      for (let i=0;i<10;i++) {
+        const angle = Math.PI/2 + i*Math.PI/5, radius = r*(i%2 ? .48 : 1.28);
+        const x = radius*Math.cos(angle), y = radius*Math.sin(angle);
+        if (i) star.lineTo(x,y); else star.moveTo(x,y);
+      }
+      star.closePath();
+      this._add(root,new T.ShapeGeometry(star),this._energy('#fff38c',1,{side:T.DoubleSide}),0,0,1,false);
+      this._shape(root,'plane',this._energy('#ff9d57',.79,{map:getCombatGlowTexture(T,this),side:T.DoubleSide}),
+        0,0,0,r*4.5,r*4.5,1,false);
+    } else if (elongated) {
       this._shape(root, 'ball', luminous, 0, 0, 0, r * 2.1, r * 0.49, r * 0.49, false);
       this._shape(root, 'smallBall', shine, r * 0.8, 0, 0, r * 0.86, r * 0.24, r * 0.25, false);
       this._shape(root, 'smallBall', glow, -r * 1.4, 0, 0, r * 2.8, r * 0.72, r * 0.65, false);
@@ -4031,7 +4266,7 @@ export class GameRenderer3D {
     this._syncItems(match, rigsByPort);
     this._syncMap(this.projMeshes, match.projectiles, this._buildProjectile, (node, p) => {
       node.position.set(p.x, p.y, 4);
-      node.rotation.set(0, node.userData.elongated ? 0 : t * 0.11,
+      node.rotation.set(0, node.userData.elongated || p.style === 'star' ? 0 : t * 0.11,
         node.userData.elongated ? Math.atan2(p.vy || 0, p.vx ?? 1) : t * 0.14);
     }, (node, p) => node.userData.projectileStyle === p.style && node.userData.projectileRadius === (p.radius || 9));
     this._syncMap(this.targetMeshes, (match.targets || []).filter((tg) => !tg.broken), this._buildTarget, (node, tg) => {
@@ -4508,6 +4743,12 @@ export class GameRenderer3D {
         { end: explosion ? 82 : 76, tilt: 0.90, yaw: bearing * 0.45 });
       this._flash(col, x, cy, sweet || explosion ? 92000 : 46000, t, sweet ? 16 : 10);
     } else if (e.type === 'ko') {
+      if (e.star) {
+        const point = this._skyPosition(this.viewPoint,x,1);
+        for (const [size,color,aspect] of [[48,'#ffce52',1.8],[31,'#fffbea',1.9]])
+          this._particle('impactStar',point.x,point.y,-650,color,size,22,0,0,0,t,{angle:0,aspect,alpha:1});
+        return;
+      }
       const dir = e.dir, col = playerColor(e.port);
       const a = dir === 'left' ? -Math.PI / 2 : dir === 'right' ? Math.PI / 2 : dir === 'top' ? Math.PI : 0;
       for (const [width, height, paint] of [[86, 740, col], [45, 580, '#e5d9ff'], [25, 465, '#fff8d5']]) {
@@ -4524,7 +4765,18 @@ export class GameRenderer3D {
       ink, reach, life, 0, 0, 0, frame, { angle, aspect, alpha: .94, solid: true });
     const ring = (z, start, end, tilt, ink) => this._particle('ring', x, cy, z,
       ink, start, life, 0, 0, 0, frame, { end, tilt, yaw: -.28, solid: true });
-    if (type === 'reflect') {
+    if (type === 'phantomHit' || type === 'tether') {
+      star(x,cy,size,type === 'phantomHit' ? Math.PI*.25 : 0,rim,.82);
+      star(x,cy,size*.52,0,core,.82);
+    } else if (type === 'freeze' || type === 'grabRelease') {
+      const shards = type === 'freeze' ? 10 : 6;
+      for (let i=0;i<shards;i++) {
+        const a = TAU*i/shards + .27, dx=Math.cos(a), dy=Math.sin(a);
+        this._particle('impactSpark',x+dx*9,cy+dy*9,23+i%3*7,i%2 ? rim : core,
+          i%2 ? 5 : 7,life,dx*5,dy*5,0,frame,{angle:a,solid:true});
+      }
+      if (type === 'grabRelease') ring(25,8,size,.32,rim);
+    } else if (type === 'reflect') {
       ring(36, size * .40, size * 1.25, -.22, rim);
       ring(44, size * .31, size * .92, .61, core);
     } else if (type === 'counter') {
@@ -4914,7 +5166,7 @@ export class GameRenderer3D {
 
   _updateCamera(match, options, delta) {
     const active = match.fighters.filter((f) => f.state !== S.DEAD);
-    const finishAge = this._finishAge(match), finishDuration = this.finish?.duration || 36;
+    const finishAge = this._finishAge(match), finishDuration = Math.min(14,this.finish?.duration || 14);
     const cinematic = this.allowFlash && options.shakeEnabled !== false;
     const finishActive = cinematic && finishAge < finishDuration;
     const reveal = finishActive ? (0.26 + 0.74 * ease(finishAge / 8)) * (1 - ease((finishAge - finishDuration * 0.56) / (finishDuration * 0.44))) : 0;
@@ -5204,7 +5456,7 @@ export class GameRenderer3D {
       }
       const tags = [];
       for (const f of match.fighters) {
-        if (f.state === S.DEAD || fighterHidden(f, specialVisual(f))) continue;
+        if (f.state === S.DEAD || f.starKoTimer > 0 || fighterHidden(f, specialVisual(f))) continue;
         const sc = f.scale || 1, body = f.def.stats.height * sc;
         const top = this.projectToScreen(f.x, f.y + (f.state === S.LEDGE_HANG ? 27 : body + 28));
         const eye = this.projectToScreen(f.x, f.y + (f.state === S.LEDGE_HANG ? -body * 0.35 : body * 0.55));

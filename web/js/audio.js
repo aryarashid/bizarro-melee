@@ -56,12 +56,26 @@ TRACKS.battle_final = battleScore(148, 38, true, 'triangle', [0,5,3,4,0,2,6,4], 
   '7 10 - 12 14 - 15 - 10 12 - 15 17 - 19 -',
   '24 - - 22 19 17 - 15 14 - 19 14 12 - - -',
 ]);
+TRACKS.battle_temple = battleScore(138, 46, false, 'triangle', [0,4,5,3,0,5,1,4], [0,7,12,7,0,7,12,11], [
+  '12 - 16 19 - 21 19 16 14 - 16 19 - 24 - -',
+  '24 - 23 21 19 - 16 14 16 - 19 - 12 - - -',
+  '7 - 11 14 - 16 14 11 12 - 16 19 21 - 19 -',
+  '24 - 21 19 16 14 12 14 16 - 19 16 12 - - -',
+]);
+TRACKS.battle_fountain = battleScore(116, 50, true, 'sine', [0,3,6,2,5,1,4,0], [0,null,7,12,0,null,7,10], [
+  '19 - 15 12 - 14 15 19 22 - 19 15 - 14 - -',
+  '24 - 22 19 17 - 15 14 12 - 15 19 14 - 12 -',
+  '12 15 19 - 22 19 15 12 14 17 20 - 19 - 15 -',
+  '24 - 19 15 17 - 14 10 12 - - - - - - -',
+]);
 
 const STAGE_MUSIC = new Map(Object.entries({
   battle_final: ['final-obligation'],
+  battle_temple: ['lowrule-temple', 'great-bay-marina'],
+  battle_fountain: ['puddle-of-insomnia', 'slush-summit'],
   battle_scifi: ['corn-area', 'venom-barge', 'acid-vat-basement', 'acid-vat-depths', 'loud-suburb-highway', 'big-blue-commute'],
   battle_retro: ['corporate-kingdom', 'corporate-kingdom-2', 'flat-screen-calc', 'retro-jungle-64', 'retro-tax-island-64', 'onett-strip-mall', 'fiveside-skyscrapers'],
-  battle_whimsical: ['randalls-tax-shelter', 'puddle-of-insomnia', 'nightmare-suburb', 'rainbow-highway', 'tropic-condo-falls', 'jungle-japes-hoa', 'yoshis-tax-island', 'green-greens-suburb', 'critter-floats', 'slush-summit'],
+  battle_whimsical: ['randalls-tax-shelter', 'nightmare-suburb', 'rainbow-highway', 'tropic-condo-falls', 'jungle-japes-hoa', 'yoshis-tax-island', 'green-greens-suburb', 'critter-floats'],
 }).flatMap(([track, stages]) => stages.map((stage) => [stage, track])));
 
 const hz = (note) => 440 * 2 ** ((note - 69) / 12);
@@ -413,6 +427,26 @@ export class SoundEngine {
         case 'absorb':
           this._tone(320, 980, 0.09, 'sine', 0.19);
           this._tone(540, 1480, 0.11, 'triangle', 0.14, 0.025);
+          break;
+        case 'tether':
+          this._tone(880, 1980, 0.08, 'sawtooth', 0.14);
+          this._noise(0.035, 3600, 1.5, 0.12);
+          break;
+        case 'grabRelease':
+          this._tone(360, 740, 0.075, 'triangle', 0.15);
+          this._noise(0.03, 2100, 1.2, 0.12);
+          break;
+        case 'phantomHit':
+          this._tone(2180, 3260, 0.07, 'sine', 0.14);
+          this._noise(0.018, 5200, 2.0, 0.11);
+          break;
+        case 'starKo':
+          this._tone(1680, 520, 0.65, 'sine', 0.16);
+          this._tone(2200, 3300, 0.14, 'triangle', 0.15, 0.72);
+          break;
+        case 'freeze':
+          this._tone(1840, 2960, 0.12, 'sine', 0.18);
+          this._noise(0.06, 4800, 2.2, 0.16);
           break;
         case 'chargeStored':
           this._tone(698, 698, 0.06, 'triangle', 0.16);

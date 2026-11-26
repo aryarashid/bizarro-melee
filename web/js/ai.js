@@ -1,5 +1,5 @@
 import { MELEE, MODE, MOVE, STATE, detCos, detHypot, detSin } from './constants.js';
-import { drawRng } from './physics.js';
+import { drawRng, findTetherLedge } from './physics.js';
 import { getSurfaceY } from './stages.js';
 import { createEmptyInput } from './input.js';
 
@@ -12,7 +12,8 @@ const GROUND_APPROACH = new Set([S.IDLE, S.WALK, S.DASH, S.RUN, S.CROUCH, S.TURN
 const THINK_FRAMES = [0, 24, 19, 14, 11, 9, 6, 4, 3, 1];
 const PAUSE_CHANCE = [0, 0.52, 0.38, 0.27, 0.18, 0.14, 0.08, 0.055, 0.035, 0];
 const DIRECT_SIDE = new Set(['wonky-kong', 'flurby', 'shriek']);
-const DESIRABLE = new Set(['plunger_bat', 'glow_saber', 'critter_capsule', 'mallet_chaos']);
+const DESIRABLE = new Set(['plunger_bat', 'glow_saber', 'critter_capsule', 'mallet_chaos',
+  'paper_fan', 'star_wand', 'freezie_cube', 'mr_saturn_plush']);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const sign = (x, fallback = 1) => Math.sign(x) || fallback;
 const teammates = (a, b) => a?.team != null && a.team === b?.team;
@@ -191,6 +192,8 @@ function recover(input, match, f, deck, level) {
   const dx = target - f.x;
   const dist = Math.max(0, outside ? Math.abs(edge - f.x) : 0);
   input.moveX = Math.abs(dx) < 11 ? 0 : sign(dx);
+  if (level >= 7 && f.state === S.AIRBORNE && f.heldItemId == null &&
+      f.def.moves[M.ZAIR] && findTetherLedge(match, f)) return tap(input, 'grab', input.moveX);
   const recovery = f.def.moves[M.UP_B];
   const rising = f.vy + f.kbVy > 2.5;
   const hasJump = f.jumpsUsed < f.def.stats.maxJumps;
@@ -460,6 +463,13 @@ function crossGap(input, match, f, target, floor, level, hazardY) {
 export function computeCpuInput(match, f) {
   const lab = match.mode === MODE.TRAINING && f?.isCpu ? match.trainingConfig : null;
   const behavior = lab ? (lab.cpuBehavior ?? match.trainingCpuMode ?? 'stand') : null;
+  if (f?.starKoTimer) return createEmptyInput();
+  if (f?.freezeFrames > 0 || f?.state === S.GRABBED && f.cpuLevel >= 5 && (!lab || behavior === 'fight')) {
+    const mash = createEmptyInput();
+    mash.moveX = f.prevMoveX > 0 ? -1 : 1;
+    if (match.frame % 2 === 0) tap(mash, 'attack', mash.moveX);
+    return mash;
+  }
   const input = decideCpuInput(match, f, behavior);
   if (!lab || !(f.hitlag && HURT.has(f.state) || f.hitstun > 0)) return input;
   if (lab.cpuDi === 'random') {
@@ -977,6 +987,11 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
   if ((d < attackRange || d < attackRange + 42 && predicted < attackRange) && dy > -48 && dy < 38) {
     if (level >= 8 && (target.state === S.SHIELD || target.state === S.SHIELD_STUN) && d < stats.grabRange + 16) {
       return tap(input, 'grab', dir * 0.4);
+    }
+    // Use the quicker forward tilt unless the victim is locked down long enough for a smash.
+    if (level === 9 && f.fighterId === 'sourzer' && target.invulnFrames <= 0 &&
+        target.state !== S.SHIELD && target.state !== S.SHIELD_STUN && target.hitstun < 15) {
+      return tap(input, 'attack', dir * 0.58);
     }
     if (level >= 7 && f.state === S.DASH && d < stats.grabRange + 22 && target.grounded &&
         (target.state === S.SHIELD || (level >= 8 && phase % 5 === 0))) return tap(input, 'jump', dir * 0.7);
