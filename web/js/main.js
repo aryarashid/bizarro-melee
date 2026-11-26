@@ -2863,11 +2863,14 @@ function triggerMatchRumble(events, match) {
   for (const e of events) {
     if (e.type === 'hit') {
       const kb = Number.isFinite(e.kb) ? e.kb : 0;
-      const strong = Math.min(1, 0.2 + kb / 165);
-      const weak = Math.min(1, 0.25 + (e.damage || 6) / 28);
-      const dur = e.sweetspot || kb >= 110 ? 150 : 75;
+      const tier = e.weightTier || (kb >= 145 ? 'colossal' : kb >= 95 ? 'heavy' : kb >= 52 ? 'medium' : 'light');
+      const strong = tier === 'colossal' ? 1.0 : tier === 'heavy' ? Math.min(0.95, 0.55 + kb / 240) : tier === 'medium' ? Math.min(0.55, 0.25 + kb / 220) : 0.12;
+      const weak = tier === 'colossal' ? 0.92 : tier === 'heavy' ? 0.65 : tier === 'medium' ? 0.38 : 0.22;
+      const dur = tier === 'colossal' ? 190 : tier === 'heavy' ? 135 : tier === 'medium' ? 75 : 42;
       if (e.victimPort != null) rumbleSlot(e.victimPort, { weak, strong, durationMs: dur });
-      if (e.attackerPort != null) rumbleSlot(e.attackerPort, { weak: weak * 0.55, strong: strong * 0.5, durationMs: Math.round(dur * 0.7) });
+      if (e.attackerPort != null) rumbleSlot(e.attackerPort, { weak: weak * 0.58, strong: strong * 0.52, durationMs: Math.round(dur * 0.72) });
+    } else if (e.type === 'clank') {
+      for (const p of e.ports || humanPorts) rumbleSlot(p, { weak: 0.65, strong: 0.45, durationMs: 70 });
     } else if (e.type === 'ko' || e.type === 'dramaticFinish') {
       if (e.port != null) rumbleSlot(e.port, { weak: 0.75, strong: 1.0, durationMs: 260 });
       else for (const p of humanPorts) rumbleSlot(p, { weak: 0.5, strong: 0.8, durationMs: 200 });

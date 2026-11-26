@@ -449,44 +449,66 @@ export class FxSystem {
       const reaction = combatReaction(e, match);
       if (reaction) { this._cue({ ...reaction, type: 'reaction', kind: e.type }, reaction.life); continue; }
       switch (e.type) {
+        case 'clank': {
+          this.rings.push({ x: e.x, y: e.y, r: 10, maxR: 76, life: 12, maxLife: 12, color: '#ffdf4d', lineWidth: 5 });
+          this.rings.push({ x: e.x, y: e.y, r: 6, maxR: 48, life: 9, maxLife: 9, color: '#ffffff', lineWidth: 3 });
+          for (let i = 0; i < 16; i++) {
+            const a = (i / 16) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
+            const sp = 5 + Math.random() * 8;
+            this.particles.push({
+              x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+              life: 12 + (i % 5), maxLife: 17, size: 4 + (i % 3),
+              color: i % 2 === 0 ? '#ffffff' : '#ffdf4d', back: false,
+            });
+          }
+          this.callouts.push({ x: e.x, y: e.y + 38, text: 'CLANK!', color: '#ffdf4d', bg: 'rgba(32,24,8,0.88)', life: 24, maxLife: 24, scale: 1.05 });
+          break;
+        }
         case 'hit': {
-          const heavy = e.heavy || e.sweetspot || e.meteor || (e.kb || 0) >= 95;
-          const count = heavy ? 32 : 17;
-          const color = e.electric ? '#38f5ff' : (e.sweetspot ? '#ffdf4d' : (e.meteor ? '#ff4b72' : (e.slash ? '#bae6fd' : '#ffab52')));
+          const tier = e.weightTier || (e.heavy || e.sweetspot || e.meteor || (e.kb || 0) >= 95 ? 'heavy' : (e.kb || 0) >= 52 ? 'medium' : 'light');
+          const colossal = tier === 'colossal';
+          const heavy = tier === 'heavy' || colossal;
+          const count = colossal ? 44 : heavy ? 32 : tier === 'medium' ? 18 : 10;
+          const color = colossal ? '#ff3b5c' : (e.electric ? '#38f5ff' : (e.sweetspot ? '#ffdf4d' : (e.meteor ? '#ff4b72' : (e.slash ? '#bae6fd' : '#ffab52'))));
           const victim = match?.fighters?.find((f) => f.port === e.victimPort);
           const baseAngle = Number.isFinite(e.angle) ? e.angle * Math.PI / 180 : Math.atan2(victim?.kbVy || 0, victim?.kbVx || 1);
           if (e.victimPort != null) this.hitColors.set(e.victimPort, Boolean(e.electric));
           this._cue({ type: 'impact', x: e.x, cy: e.y, angle: baseAngle, rim: color, core: '#ffffff',
-            reach: 52 + 83 * clamp01((e.kb || 0) / 175) }, heavy ? 13 : 9);
+            reach: (tier === 'light' ? 36 : colossal ? 78 : 52) + 88 * clamp01((e.kb || 0) / 175) }, colossal ? 16 : heavy ? 13 : tier === 'medium' ? 9 : 6);
           for (let i = 0; i < count; i++) {
             const a = (baseAngle != null && i < count * 0.72)
-              ? baseAngle + (Math.random() - 0.5) * 0.9
+              ? baseAngle + (Math.random() - 0.5) * (colossal ? 1.1 : 0.9)
               : Math.random() * Math.PI * 2;
-            const sp = (heavy ? 7.5 : 4.2) + Math.random() * (heavy ? 12 : 8);
+            const sp = (colossal ? 10 : heavy ? 7.5 : tier === 'medium' ? 4.8 : 3.2) + Math.random() * (colossal ? 14 : heavy ? 12 : 7);
             this.particles.push({
               x: e.x, y: e.y,
               vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-              life: 14 + Math.floor(Math.random() * 12),
-              maxLife: 26,
-              size: (heavy ? 7.5 : 4.5) + Math.random() * 4,
-              color: i % 3 === 0 ? '#ffffff' : (e.electric && i % 2 === 0 ? '#ffdf4d' : color),
+              life: (colossal ? 18 : 13) + Math.floor(Math.random() * 11),
+              maxLife: 29,
+              size: (colossal ? 9 : heavy ? 7.5 : tier === 'medium' ? 4.8 : 3.4) + Math.random() * 3.8,
+              color: i % 3 === 0 ? '#ffffff' : (colossal && i % 2 === 0 ? '#ffdf4d' : (e.electric && i % 2 === 0 ? '#ffdf4d' : color)),
               back: false,
             });
           }
           this.rings.push({
-            x: e.x, y: e.y, r: heavy ? 26 : 13, maxR: heavy ? 154 : 81,
-            life: heavy ? 18 : 12, maxLife: heavy ? 18 : 12, color, lineWidth: heavy ? 9 : 5,
+            x: e.x, y: e.y, r: colossal ? 30 : heavy ? 24 : tier === 'medium' ? 14 : 9,
+            maxR: colossal ? 196 : heavy ? 150 : tier === 'medium' ? 84 : 48,
+            life: colossal ? 22 : heavy ? 18 : 11, maxLife: colossal ? 22 : heavy ? 18 : 11,
+            color, lineWidth: colossal ? 11 : heavy ? 8 : 4.5,
           });
-          if (e.electric) this._cue({ type: 'bolt', x: e.x, cy: e.y, angle: baseAngle, rim: '#d9ffff', core: '#ffe694', reach: 72 }, 8);
-          if (e.slash) this._cue({ type: 'slash', x: e.x, cy: e.y, angle: baseAngle, rim: color, core: '#ffffff', reach: 64 }, 8);
-          if (e.element === 'fire') this._cue({ type: 'flame', x: e.x, cy: e.y, angle: baseAngle, rim: '#ff6a1a', core: '#ffd36a', reach: 50 }, 10);
-          if (e.meteor) this._cue({ type: 'meteor', x: e.x, cy: e.y, angle: -Math.PI / 2, rim: '#ff4864', core: '#ffffff', reach: 62 }, 12);
-          if (e.sweetspot || e.meteor || (e.electric && heavy)) {
+          if (colossal) {
+            this.rings.push({ x: e.x, y: e.y, r: 16, maxR: 132, life: 14, maxLife: 14, color: '#ffdf4d', lineWidth: 6 });
+          }
+          if (e.electric) this._cue({ type: 'bolt', x: e.x, cy: e.y, angle: baseAngle, rim: '#d9ffff', core: '#ffe694', reach: colossal ? 96 : 72 }, 9);
+          if (e.slash) this._cue({ type: 'slash', x: e.x, cy: e.y, angle: baseAngle, rim: color, core: '#ffffff', reach: colossal ? 88 : 64 }, 8);
+          if (e.element === 'fire') this._cue({ type: 'flame', x: e.x, cy: e.y, angle: baseAngle, rim: '#ff6a1a', core: '#ffd36a', reach: heavy ? 68 : 48 }, 10);
+          if (e.meteor) this._cue({ type: 'meteor', x: e.x, cy: e.y, angle: -Math.PI / 2, rim: e.trueSpike ? '#ff2454' : '#ff4864', core: '#ffffff', reach: e.trueSpike ? 82 : 62 }, 13);
+          if (colossal || e.sweetspot || e.meteor || (e.electric && heavy)) {
             this.callouts.push({
               x: e.x, y: e.y + 44,
-              text: e.meteor ? 'METEOR!' : (e.electric ? 'ZAP CRUNCH!' : 'CRUNCH!'),
-              color: e.meteor ? '#ff4b72' : (e.electric ? '#38f5ff' : '#ffdf4d'),
-              life: 32, maxLife: 32, scale: 1.3,
+              text: e.trueSpike ? 'TRUE SPIKE!!' : (e.meteor ? 'METEOR!' : (colossal ? 'CRUSHING HIT!!' : (e.electric ? 'ZAP CRUNCH!' : 'CRUNCH!'))),
+              color: e.meteor || colossal ? '#ff4b72' : (e.electric ? '#38f5ff' : '#ffdf4d'),
+              life: colossal ? 38 : 32, maxLife: colossal ? 38 : 32, scale: colossal ? 1.48 : 1.3,
             });
           }
           break;
@@ -533,15 +555,21 @@ export class FxSystem {
             life: 10, maxLife: 10, color: e.doubleJump ? '#7ce8ff' : '#ffffff', lineWidth: 2.5,
           });
           break;
-        case 'land':
-          for (let i = -1; i <= 1; i += 2) {
+        case 'land': {
+          const heavyLand = Math.min(2.2, ((e.weight ?? 100) / 100) * Math.max(0.7, (e.speed ?? 6) / 9));
+          const puffs = heavyLand > 1.3 ? 4 : 2;
+          for (let i = 0; i < puffs; i++) {
+            const side = i % 2 === 0 ? -1 : 1;
+            const spread = 1 + (i >> 1) * 0.65;
             this.particles.push({
-              x: e.x + i * 10, y: e.y + 3,
-              vx: i * 3.2, vy: 1.5,
-              life: 12, maxLife: 12, size: 6, color: 'rgba(255,255,255,0.7)', back: true,
+              x: e.x + side * 10 * spread, y: e.y + 3,
+              vx: side * 3.0 * heavyLand * spread, vy: 1.2 + heavyLand * 0.7,
+              life: Math.round(11 + heavyLand * 3), maxLife: 18,
+              size: 5 + heavyLand * 2.6, color: 'rgba(255,255,255,0.74)', back: true,
             });
           }
           break;
+        }
         case 'ledgeGrab':
           this.rings.push({
             x: e.x, y: e.y, r: 6, maxR: 34,

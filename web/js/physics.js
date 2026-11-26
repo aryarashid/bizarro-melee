@@ -263,7 +263,7 @@ function makeState(match, player, stocks) {
     shineJump: false, sdiCount: 0, lastKnockback: 0, trueComboCount: 0, comboMoves: [], receivedCombo: null,
     shieldAge: 0, smashChargeKey: null, smashChargeFrames: 0, jabStep: 0, jabWindow: 0,
     getupRolling: false, jabReset: false, needleCount: 0, bucketCount: 0, bladeInput: null, floatAerial: false,
-    meteorHitFrame: -999, wallJumpCooldown: 0, starHits: new Map(),
+    meteorHitFrame: -999, meteorTrueSpike: false, wallJumpCooldown: 0, starHits: new Map(),
   };
   clearSpecial(f);
   f.parasolOpen = false;
@@ -1347,12 +1347,13 @@ function tickSmashCharge(match, f, input) {
 
 function clearMeteor(f) {
   f.meteorHitFrame = -999;
+  f.meteorTrueSpike = false;
   f.meteorByPort = null;
   f.meteorTimer = 0;
 }
 
 function tryMeteorCancel(match, f, input) {
-  if (f.grounded || f.kbVy >= 0 || f.meteorHitFrame === -999 ||
+  if (f.grounded || f.kbVy >= 0 || f.meteorHitFrame === -999 || f.meteorTrueSpike ||
       match.frame - f.meteorHitFrame < MELEE.METEOR_CANCEL_MIN_FRAMES) return false;
   const x = input.moveX || 0;
   const y = input.moveY || 0;
@@ -2550,14 +2551,36 @@ function hitMaterial(id, key, m, sweetspot) {
   return { electric, slash };
 }
 
+function classifyHitWeight(key, m, damage, kb, sweetspot, meteor) {
+  if (m?.homerun || kb >= MELEE.HIT_TIER_COLOSSAL_KB || (sweetspot && damage >= 20)) {
+    return { weightTier: 'colossal', hitWeight: 1 };
+  }
+  if (kb >= MELEE.HIT_TIER_HEAVY_KB || damage >= 14 || sweetspot || meteor || SMASH_MOVES.has(key)) {
+    return { weightTier: 'heavy', hitWeight: clamp(0.66 + (kb - 70) / 220, 0.66, 0.94) };
+  }
+  if (kb >= MELEE.HIT_TIER_MEDIUM_KB || damage >= 8) {
+    return { weightTier: 'medium', hitWeight: clamp(0.38 + (kb - 35) / 170, 0.38, 0.65) };
+  }
+  return { weightTier: 'light', hitWeight: clamp(0.14 + damage / 45 + kb / 240, 0.14, 0.37) };
+}
+
 function impactEvent(match, a, v, hit) {
-  const { damage, kb = 0, sweetspot = false, meteor = false, electric = false, slash = false, angle = 0 } = hit;
-  const heavy = kb >= 95 || damage >= 14 || sweetspot || meteor;
-  match.screenShake = Math.max(match.screenShake, Math.min(18, 2.5 + kb * 0.085 + (sweetspot ? 6 : 0) + (electric ? 3 : 0)));
-  if (sweetspot || electric || kb >= 120) match.screenFlash = Math.max(match.screenFlash, heavy ? 4 : 2);
+  const {
+    damage = 8, kb = 0, sweetspot = false, meteor = false, trueSpike = false,
+    electric = false, slash = false, angle = 0, weightTier = 'medium', hitWeight = 0.5,
+  } = hit;
+  const heavy = weightTier === 'heavy' || weightTier === 'colossal' || kb >= 95 || damage >= 14 || sweetspot || meteor;
+  const tierShake = weightTier === 'colossal' ? 6.5 : weightTier === 'heavy' ? 3.2 : weightTier === 'medium' ? 1.2 : 0.2;
+  const weightRatio = clamp((a?.def?.stats?.weight || 100) / Math.max(55, v?.def?.stats?.weight || 100), 0.75, 1.35);
+  match.screenShake = Math.max(match.screenShake, Math.min(22, (2.0 + tierShake + kb * 0.082 + (sweetspot ? 4.5 : 0) + (electric ? 2.5 : 0)) * weightRatio));
+  if (weightTier === 'colossal' || sweetspot || electric || kb >= 120) match.screenFlash = Math.max(match.screenFlash, weightTier === 'colossal' ? 6 : heavy ? 4 : 2);
   match.events.push({
     type: 'hit', x: v.x, y: v.y + v.def.stats.height * v.scale * 0.52, ...hit,
-    kb, sweetspot, meteor, electric, slash, angle, heavy, hitlag: v.hitlag,
+    kb, sweetspot, meteor, trueSpike, electric, slash, angle, heavy, weightTier, hitWeight,
+    comboCount: a && a !== v ? (a.trueComboCount || 1) : 1,
+    attackerWeight: a?.def?.stats?.weight ?? 100,
+    victimWeight: v.def.stats.weight ?? 100,
+    hitlag: v.hitlag,
     attackerPort: a?.port ?? null, victimPort: v.port,
   });
 }
@@ -2616,10 +2639,12 @@ function strike(match, a, v, m, info) {
     if (a && !projectile) a.hitlag = Math.max(a.hitlag, v.hitlag);
     v.shieldStun = Math.ceil(damage * MELEE.SHIELD_STUN_MULT + MELEE.SHIELD_STUN_BASE);
     if (a && a !== v) a.lastFrameAdv = clamp(v.shieldStun - remaining, -40, 40);
-    v.vx += (Math.sign(v.x - (projectile ? box.x : a?.x ?? box.x)) || direction) * Math.min(9, 1 + damage * 0.32) * (v.lightShielding ? 1.6 : 1);
-    if (!projectile && a?.grounded) a.vx -= direction * Math.min(4, damage * 0.2);
+    const shieldWeightScale = clamp(100 / Math.max(55, v.def.stats.weight * metalWeight(v)), 0.65, 1.45);
+    const pushTier = SMASH_MOVES.has(key) || damage >= 14 ? 1.28 : damage <= 6 ? 0.78 : 1;
+    v.vx += (Math.sign(v.x - (projectile ? box.x : a?.x ?? box.x)) || direction) * Math.min(11, (1 + damage * 0.32) * pushTier * shieldWeightScale) * (v.lightShielding ? 1.6 : 1);
+    if (!projectile && a?.grounded) a.vx -= direction * Math.min(4.8, damage * 0.2 * pushTier);
     transition(v, S.SHIELD_STUN, true);
-    event(match, 'shieldHit', v, { damage });
+    event(match, 'shieldHit', v, { damage, heavy: damage >= 14 || SMASH_MOVES.has(key) });
     if (v.shieldHp <= 0) breakShield(match, v);
     return false;
   }
@@ -2720,11 +2745,13 @@ function strike(match, a, v, m, info) {
     v.fastFalling = false;
     if (!onGround && meteor && m.angle >= 230 && m.angle <= 310 && (v.vy + v.kbVy < -1.5 || v.kbVy < -1.5)) {
       v.meteorHitFrame = match.frame;
+      v.meteorTrueSpike = Boolean(m.trueSpike);
       if (a && a !== v) {
         v.meteorByPort = a.port;
         v.meteorTimer = 90;
       }
     }
+    const { weightTier, hitWeight } = classifyHitWeight(key, m, damage, kb, sweetspot, meteor);
     v.hitstun = m.sleep ? 0 : Math.max(1, Math.floor((m.minHitstun ?? 0) * crouchFactor), Math.floor(m.hitstunOnly ? 7 * crouchFactor : kb * MELEE.HITSTUN_MULT));
     if (jabReset) {
       v.hitstun = 14;
@@ -2735,11 +2762,11 @@ function strike(match, a, v, m, info) {
       event(match, 'tech', v, { tech: 'JAB RESET' });
     } else if (crouchFactor < 1 && damage >= 6) event(match, 'tech', v, { tech: 'CROUCH CANCEL' });
     if (m.freezeFrames) v.hitstun = Math.max(v.hitstun, 18);
-    const accent = sweetspot ? 2 : SMASH_MOVES.has(key) && (kb >= 95 || damage >= 14) ? 1 : 0;
+    const accent = weightTier === 'colossal' ? 4 : sweetspot ? 2 : weightTier === 'heavy' ? 1 : 0;
     const hitlag = m.link ? 2 : Math.floor(damage * MELEE.HITLAG_MULT + MELEE.HITLAG_BASE) + accent + (m.homerun ? 10 : 0);
     if (a && !projectile) a.hitlag = Math.max(a.hitlag, hitlag);
     const electricFreeze = !m.link && material.electric;
-    v.hitlag = Math.max(v.hitlag, m.freezeFrames || 0, electricFreeze ? Math.min(20, Math.floor(hitlag * 1.5)) : hitlag);
+    v.hitlag = Math.max(v.hitlag, m.freezeFrames || 0, electricFreeze ? Math.min(22, Math.floor(hitlag * 1.5)) : hitlag);
     transition(v, !jabReset && kb >= MELEE.TUMBLE_KB_THRESHOLD ? S.TUMBLE : S.HITSTUN, true);
     if (m.sleep) v.sleepTimer = v.def === MASTER_MITT ? 28 : 80;
     if (m.kind === 'cape') {
@@ -2747,16 +2774,18 @@ function strike(match, a, v, m, info) {
     } else {
       v.facing = Math.sign((a?.x ?? box?.x ?? v.x) - v.x) || -direction;
     }
-    v.squashX = 1.16;
-    v.squashY = 0.85;
+    const sq = weightTier === 'colossal' ? [1.34, 0.70] : weightTier === 'heavy' ? [1.24, 0.78] : weightTier === 'medium' ? [1.15, 0.86] : [1.08, 0.92];
+    v.squashX = sq[0];
+    v.squashY = sq[1];
   }
+  const tierInfo = classifyHitWeight(key, m, damage, kb, sweetspot, meteor);
   if (a && a !== v) a.lastFrameAdv = clamp((!armored && (!m.noFlinch || jabReset) ? v.hitstun : 0) - remaining, -40, 40);
   if (match.mode === MODE.HOMERUN && v.def === SAGGING_BAG && kb > 0) {
     v.derbyKnockback = kb;
     v.derbyHitFrame = match.frame;
   }
-  markHit(match, a, v, { damage, kb, sweetspot, meteor, moveKey: key, element: m.element,
-    angle: launchDegrees, ...material, ...(box && { x: box.x, y: box.y }) });
+  markHit(match, a, v, { damage, kb, sweetspot, meteor, trueSpike: Boolean(meteor && m.trueSpike), moveKey: key, element: m.element,
+    angle: launchDegrees, ...tierInfo, ...material, ...(box && { x: box.x, y: box.y }) });
   if (sweetspot && kb >= 80) event(match, 'crowdCheer', v, { intensity: Math.min(1, kb / 200) });
   if (armored) event(match, 'armor', v);
   if (m.iceDuration && !armored && !shattersIce) {
@@ -2836,9 +2865,68 @@ function moveHitboxes(f) {
 }
 
 function meleeCollisions(match, movable) {
+  // Authentic SSBM Grounded Attack Clank & Priority (9% damage threshold):
+  // When two grounded non-grab melee hitboxes collide, equal-tier attacks clank with rebound lag;
+  // an attack exceeding the rival's by > 9% damage wins priority cleanly.
+  const clanked = new Set();
+  const fighters = match.fighters;
+  for (let i = 0; i < fighters.length; i++) {
+    const a = fighters[i];
+    if (!movable.has(a) || !a.grounded || !a.activeHitboxes.length || clanked.has(a.port)) continue;
+    const boxesA = a.activeHitboxes.filter((b) => !b.grab && b.damage > 0 && !b.data?.unclankable);
+    if (!boxesA.length) continue;
+    for (let j = i + 1; j < fighters.length; j++) {
+      const b = fighters[j];
+      if (!rivals(a, b) || !movable.has(b) || !b.grounded || !b.activeHitboxes.length || clanked.has(b.port)) continue;
+      if (a.hitTargets.has(b.port) || b.hitTargets.has(a.port)) continue;
+      const boxesB = b.activeHitboxes.filter((bx) => !bx.grab && bx.damage > 0 && !bx.data?.unclankable);
+      if (!boxesB.length) continue;
+      let hitPair = null;
+      for (const ba of boxesA) {
+        for (const bb of boxesB) {
+          const dx = ba.x - bb.x, dy = ba.y - bb.y, rr = ba.r + bb.r;
+          if (dx * dx + dy * dy <= rr * rr) { hitPair = [ba, bb]; break; }
+        }
+        if (hitPair) break;
+      }
+      if (!hitPair) continue;
+      const [boxA, boxB] = hitPair;
+      const dA = boxA.damage * a.moveStale;
+      const dB = boxB.damage * b.moveStale;
+      const diff = dA - dB;
+      if (Math.abs(diff) <= MELEE.CLANK_DAMAGE_DIFF) {
+        clanked.add(a.port);
+        clanked.add(b.port);
+        a.hitTargets.add(b.port);
+        b.hitTargets.add(a.port);
+        const avg = (dA + dB) * 0.5;
+        const lag = Math.min(14, Math.floor(MELEE.CLANK_REBOUND_BASE + avg * 0.35));
+        const push = 3.6 + avg * 0.24;
+        const sep = Math.sign(a.x - b.x) || -a.facing || 1;
+        a.hitlag = Math.max(a.hitlag, lag);
+        b.hitlag = Math.max(b.hitlag, lag);
+        a.vx = sep * push * clamp(100 / Math.max(55, a.def.stats.weight), 0.7, 1.35);
+        b.vx = -sep * push * clamp(100 / Math.max(55, b.def.stats.weight), 0.7, 1.35);
+        stopMove(a);
+        stopMove(b);
+        a.landingLag = Math.min(18, Math.floor(MELEE.CLANK_REBOUND_BASE + avg * MELEE.CLANK_REBOUND_MULT));
+        b.landingLag = Math.min(18, Math.floor(MELEE.CLANK_REBOUND_BASE + avg * MELEE.CLANK_REBOUND_MULT));
+        transition(a, S.LANDING, true);
+        transition(b, S.LANDING, true);
+        match.screenShake = Math.max(match.screenShake, Math.min(10, 3 + avg * 0.25));
+        const cx = (boxA.x + boxB.x) * 0.5, cy = (boxA.y + boxB.y) * 0.5;
+        match.events.push({ type: 'clank', x: cx, y: cy, damage: avg, ports: [a.port, b.port] });
+        event(match, 'tech', a, { tech: 'CLANK!' });
+      } else if (diff > MELEE.CLANK_DAMAGE_DIFF) {
+        b.hitTargets.add(a.port);
+      } else {
+        a.hitTargets.add(b.port);
+      }
+    }
+  }
   const queue = [];
   for (const a of match.fighters) {
-    if (!movable.has(a)) continue;
+    if (!movable.has(a) || clanked.has(a.port)) continue;
     const boxes = a.activeHitboxes;
     const hits = a.hitTargets;
     if (!boxes.length) continue;

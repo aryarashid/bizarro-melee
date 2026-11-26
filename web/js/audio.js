@@ -68,14 +68,42 @@ TRACKS.battle_fountain = battleScore(116, 50, true, 'sine', [0,3,6,2,5,1,4,0], [
   '12 15 19 - 22 19 15 12 14 17 20 - 19 - 15 -',
   '24 - 19 15 17 - 14 10 12 - - - - - - -',
 ]);
+TRACKS.battle_arena = battleScore(146, 43, false, 'sawtooth', [0,4,5,3,0,4,3,4], [0,0,7,0,12,7,5,7], [
+  '12 - 16 19 - 19 21 19 16 - 14 16 19 - - -',
+  '24 - 21 19 - 16 14 12 14 - 16 19 21 - 19 -',
+  '12 12 - 16 19 - 16 14 12 - 14 16 14 - 12 -',
+  '24 - 24 21 19 - 16 19 21 - 19 16 12 - - -',
+]);
+TRACKS.battle_island = battleScore(134, 52, false, 'triangle', [0,3,4,0,5,3,1,4], [0,null,7,12,0,null,7,null], [
+  '12 16 19 - 21 19 16 - 14 16 12 - 16 19 - -',
+  '24 - 21 19 16 - 14 12 14 16 19 - 16 - 12 -',
+  '7 - 12 16 - 19 16 12 14 - 16 19 21 - 19 -',
+  '24 21 19 - 16 14 12 - 14 16 19 14 12 - - -',
+]);
+TRACKS.battle_space = battleScore(140, 44, false, 'sawtooth', [0,5,3,4,0,2,5,4], [0,7,12,7,0,7,12,7], [
+  '12 - - 19 21 - 19 16 19 - - 24 23 - 19 -',
+  '24 - 21 19 16 - 19 21 19 - 16 14 12 - - -',
+  '12 14 16 - 19 - 21 19 16 14 12 - 14 16 19 -',
+  '24 - - 21 19 - 16 19 21 - 24 23 24 - - -',
+]);
+TRACKS.battle_brinstar = battleScore(128, 39, true, 'sawtooth', [0,1,3,0,5,4,1,0], [0,12,0,7,0,12,6,0], [
+  '12 - 15 13 - 12 10 - 12 - 18 19 - 15 13 -',
+  '19 - 18 15 13 - 12 10 12 - 15 13 10 - 12 -',
+  '7 10 12 - 13 12 10 7 6 7 10 - 13 12 10 -',
+  '24 - 22 19 18 - 15 13 12 - 10 12 - - - -',
+]);
 
 const STAGE_MUSIC = new Map(Object.entries({
   battle_final: ['final-obligation'],
   battle_temple: ['lowrule-temple', 'great-bay-marina'],
   battle_fountain: ['puddle-of-insomnia', 'slush-summit'],
-  battle_scifi: ['corn-area', 'venom-barge', 'acid-vat-basement', 'acid-vat-depths', 'loud-suburb-highway', 'big-blue-commute'],
+  battle_arena: ['critter-arena', 'foreclosed-castle'],
+  battle_island: ['randalls-tax-shelter', 'yoshis-tax-island', 'tropic-condo-falls', 'jungle-japes-hoa'],
+  battle_space: ['corn-area', 'venom-barge', 'rainbow-highway'],
+  battle_brinstar: ['acid-vat-basement', 'acid-vat-depths'],
+  battle_scifi: ['loud-suburb-highway', 'big-blue-commute'],
   battle_retro: ['corporate-kingdom', 'corporate-kingdom-2', 'flat-screen-calc', 'retro-jungle-64', 'retro-tax-island-64', 'onett-strip-mall', 'fiveside-skyscrapers'],
-  battle_whimsical: ['randalls-tax-shelter', 'nightmare-suburb', 'rainbow-highway', 'tropic-condo-falls', 'jungle-japes-hoa', 'yoshis-tax-island', 'green-greens-suburb', 'critter-floats'],
+  battle_whimsical: ['nightmare-suburb', 'green-greens-suburb', 'critter-floats'],
 }).flatMap(([track, stages]) => stages.map((stage) => [stage, track])));
 
 const hz = (note) => 440 * 2 ** ((note - 69) / 12);
@@ -126,10 +154,32 @@ export class SoundEngine {
       this.sfxGain.connect(this.masterGain);
       this.musicFilter = this.ctx.createBiquadFilter();
       this.musicFilter.type = 'lowpass';
-      this.musicFilter.frequency.value = 2400;
-      this.musicFilter.Q.value = 0.65;
+      this.musicFilter.frequency.value = 3400;
+      this.musicFilter.Q.value = 0.7;
       this.musicGain.connect(this.musicFilter);
       this.musicFilter.connect(this.masterGain);
+      // Lightweight pure Web Audio chamber echo bus for studio-depth GameCube music mix
+      if (typeof this.ctx.createDelay === 'function') {
+        const d1 = this.ctx.createDelay(0.3);
+        const d2 = this.ctx.createDelay(0.3);
+        d1.delayTime.value = 0.068;
+        d2.delayTime.value = 0.113;
+        const damp = this.ctx.createBiquadFilter();
+        damp.type = 'lowpass';
+        damp.frequency.value = 1650;
+        const fb = this.ctx.createGain();
+        fb.gain.value = 0.24;
+        const wet = this.ctx.createGain();
+        wet.gain.value = 0.22;
+        this.musicGain.connect(d1);
+        d1.connect(damp);
+        damp.connect(d2);
+        d2.connect(fb);
+        fb.connect(d1);
+        damp.connect(wet);
+        d2.connect(wet);
+        wet.connect(this.musicFilter);
+      }
       const limiter = this.ctx.createDynamicsCompressor();
       limiter.threshold.value = -12;
       limiter.ratio.value = 8;
@@ -336,26 +386,61 @@ export class SoundEngine {
         (this.ctx.state === 'suspended' && !this.ctx.startRendering)) return;
     const kb = Number.isFinite(hit.kb) ? Math.max(0, hit.kb) : 0;
     const damage = Number.isFinite(hit.damage) ? Math.max(0, hit.damage) : 8;
-    const force = Math.min(1, damage / 44 + kb / 250);
-    const heavy = hit.heavy || kb >= 95 || damage >= 14;
-    const bright = hit.sweetspot || heavy;
-    this._noise(0.012 + 0.016 * force, (bright ? 4200 : 2750) + 850 * force, 0.85, 0.23 + 0.20 * force);
-    this._tone(125, 36, 0.055 + 0.19 * force, 'sine', 0.14 + 0.23 * force);
+    const tier = hit.weightTier || (kb >= 145 || (hit.sweetspot && damage >= 20) ? 'colossal'
+      : (hit.heavy || kb >= 95 || damage >= 14 || hit.sweetspot || hit.meteor) ? 'heavy'
+      : (kb >= 52 || damage >= 8) ? 'medium' : 'light');
+    const force = Number.isFinite(hit.hitWeight) ? Math.max(0, Math.min(1, hit.hitWeight)) : Math.min(1, damage / 42 + kb / 240);
+    const heavy = tier === 'heavy' || tier === 'colossal';
+    const colossal = tier === 'colossal';
 
-    if (hit.electric || hit.element === 'electric' || hit.element === 'lightning') this._electricZap(force);
+    if (tier === 'light') {
+      // Crisp, tight combo-starter pop (jabs, weak tilts, rapid multi-hits)
+      this._noise(0.014, 3400 + 600 * force, 1.1, 0.19 + 0.08 * force);
+      this._tone(195, 76, 0.048, 'triangle', 0.13 + 0.07 * force);
+    } else if (tier === 'medium') {
+      // Punchy mid-weight body impact (tilts, combo aerials, throws)
+      this._noise(0.022, 2650 + 500 * force, 0.9, 0.25 + 0.12 * force);
+      this._tone(152, 46, 0.095, 'sine', 0.20 + 0.12 * force);
+      this._tone(340, 120, 0.055, 'triangle', 0.11);
+    } else {
+      // Heavy & Colossal Melee bass-cannon impact + layered crack
+      this._noise(colossal ? 0.045 : 0.028, colossal ? 4600 : 3900, 0.78, colossal ? 0.42 : 0.34);
+      this._tone(colossal ? 138 : 124, colossal ? 28 : 34, colossal ? 0.29 : 0.19, 'sine', colossal ? 0.38 : 0.31);
+      this._tone(240, 62, colossal ? 0.14 : 0.09, 'sawtooth', colossal ? 0.16 : 0.11, 0.004);
+      if (colossal) {
+        this._noise(0.085, 980, 0.95, 0.34, 0.012);
+        this._tone(1560, 1120, 0.22, 'triangle', 0.18, 0.01);
+        this._tone(3120, 2240, 0.24, 'sine', 0.11, 0.014);
+      }
+    }
+
+    if (hit.electric || hit.element === 'electric' || hit.element === 'lightning') this._electricZap(Math.max(0.45, force));
     if (hit.slash || hit.element === 'slash') {
-      this._tone(2640, 1560, 0.095, 'triangle', 0.13);
-      this._tone(3910, 2450, 0.13, 'sine', 0.085, 0.004);
+      this._tone(2740, 1520, heavy ? 0.13 : 0.085, 'triangle', heavy ? 0.16 : 0.11);
+      this._tone(4120, 2480, heavy ? 0.16 : 0.10, 'sine', heavy ? 0.11 : 0.075, 0.004);
+    }
+    if (hit.meteor || hit.trueSpike) {
+      this._tone(hit.trueSpike ? 170 : 145, 30, 0.26, 'sawtooth', hit.trueSpike ? 0.24 : 0.18);
+      this._tone(hit.trueSpike ? 980 : 760, 190, 0.16, 'triangle', 0.16, 0.01);
     }
     if (hit.sweetspot || kb >= 115) {
-      this._noise(0.042, 920, 1.2, 0.30);
-      this._tone(1240, 910, 0.145, 'triangle', 0.15, 0.008);
-      this._tone(2480, 1820, 0.18, 'sine', 0.085, 0.01);
-    } else if (hit.element === 'fire' || hit.element === 'ice') {
-      const ring = hit.element === 'ice' ? 2120 : 320;
-      this._tone(ring, ring * 0.68, 0.09, 'triangle', 0.085);
+      this._noise(0.044, 920, 1.2, 0.30);
+      this._tone(1280, 920, 0.155, 'triangle', 0.16, 0.008);
+      this._tone(2560, 1840, 0.19, 'sine', 0.095, 0.01);
+    } else if (hit.element === 'fire') {
+      this._noise(0.11, 640, 0.75, 0.18);
+      this._tone(310, 118, 0.11, 'sawtooth', 0.10);
+    } else if (hit.element === 'ice') {
+      this._tone(2240, 1620, 0.11, 'sine', 0.11);
+      this._tone(3360, 2480, 0.09, 'triangle', 0.07, 0.01);
     }
-    if (kb >= 125) this._crowdCheer(Math.min(1, kb / 200));
+    if ((hit.comboCount || 0) >= 2) {
+      const step = Math.min(7, hit.comboCount - 2);
+      const comboNotes = [72, 74, 76, 79, 81, 84, 86, 88];
+      const cf = hz(comboNotes[step]);
+      this._tone(cf, cf * 1.03, 0.09, 'sine', 0.065, 0.012);
+    }
+    if (kb >= 120 || colossal) this._crowdCheer(Math.min(1, Math.max(0.55, kb / 190)));
   }
 
   playEvents(events) {
@@ -408,6 +493,12 @@ export class SoundEngine {
           break;
         case 'hit':
           this.playHit(e);
+          break;
+        case 'clank':
+          this._noise(0.032, 4800, 1.8, 0.22);
+          this._tone(1520, 1180, 0.14, 'triangle', 0.18);
+          this._tone(2290, 1780, 0.12, 'sine', 0.14, 0.004);
+          this._tone(3340, 2610, 0.09, 'square', 0.06, 0.008);
           break;
         case 'heavyAttack':
           this._voice(e, 'attack');
@@ -699,6 +790,13 @@ export class SoundEngine {
     schedule();
   }
 
+  _synthLead(freq, dur, wave, gainPeak, delay, bus) {
+    // Dual slightly-detuned oscillators for rich GameCube orchestral/synth lead body
+    this._tone(freq, freq * 1.001, dur, wave, gainPeak, delay, bus);
+    const subWave = wave === 'sawtooth' ? 'triangle' : 'sine';
+    this._tone(freq * 1.004, freq * 1.002, dur * 0.92, subWave, gainPeak * 0.52, delay, bus);
+  }
+
   _musicStep(track, score, stepIndex, beat, delay) {
     const i = stepIndex % 16;
     const bar = Math.floor(stepIndex / 16) % score.roots.length;
@@ -710,26 +808,41 @@ export class SoundEngine {
     const melody = motif[i];
     if (score.phrases ? melody != null : melody > 0) {
       const f = hz(lastChord ? score.finalNote : score.phrases ? root + melody : melody + root - score.roots[0]);
-      this._tone(f, f, lastChord ? 1.1 : beat * 1.45, score.lead, 0.115, delay, bus);
+      this._synthLead(f, lastChord ? 1.15 : beat * 1.55, score.lead, 0.105, delay, bus);
     }
+    // Harmonic chord pad on beats 1 and 3
     if (i === 0 || i === 8) {
       for (const interval of [0, score.thirds[bar], 7]) {
         const f = hz(root + 12 + interval);
-        this._tone(f * 0.998, f, lastChord ? 1.35 : beat * 7.8, 'triangle', 0.115, delay, bus);
+        this._tone(f * 0.998, f, lastChord ? 1.35 : beat * 7.8, 'triangle', 0.095, delay, bus);
       }
     }
+    // Sparkling 16th-note harp/bell arpeggio shimmer on orchestral/ethereal themes
+    if (!lastChord && (track === 'battle_fountain' || track === 'battle_temple' || track === 'battle_final' || track === 'battle_space' || track === 'menu') && i % 2 === 1) {
+      const arp = [0, score.thirds[bar], 7, 12][(i >> 1) % 4];
+      const af = hz(root + 24 + arp);
+      this._tone(af, af, beat * 0.85, 'sine', 0.042, delay, bus);
+    }
+    // Driving layered bass (warm sub + plucked upper harmonic)
     const bass = score.bass[i >> 1];
     if (i % 2 === 0 && bass != null) {
       const f = hz(root - 12 + bass);
-      this._tone(f * 1.02, f, beat * 1.72, 'triangle', 0.27, delay, bus);
+      this._tone(f * 1.015, f, beat * 1.72, 'triangle', 0.25, delay, bus);
+      this._tone(f * 2, f * 2, beat * 0.72, 'sawtooth', 0.042, delay, bus);
     }
-    if (i === 0 || i === 8 || score.phrases && i === 10) this._tone(132, 40, 0.105, 'sine', 0.32, delay, bus);
+    // Punchy Melee percussion kit + 8-bar section crash swell
+    if (i === 0 || i === 8 || (score.phrases && (i === 10 || (track === 'battle_arena' && i === 6)))) {
+      this._tone(138, 38, 0.115, 'sine', 0.34, delay, bus);
+    }
     if (i === 4 || i === 12) {
-      this._noise(0.095, 2000, 0.65, 0.22, delay, bus);
-      this._tone(188, 119, 0.07, 'triangle', 0.14, delay, bus);
+      this._noise(0.095, 2200, 0.65, 0.23, delay, bus);
+      this._tone(192, 116, 0.072, 'triangle', 0.15, delay, bus);
     }
-    if (i % 2 === 0 || track === 'boss' && i > 12) {
-      this._noise(i === 14 ? 0.10 : 0.032, 7200, 0.85, i % 4 ? 0.09 : 0.06, delay, bus);
+    if (i === 0 && bar % 8 === 0 && score.phrases) {
+      this._noise(0.42, 6200, 0.45, 0.13, delay, bus, 0.01);
+    }
+    if (i % 2 === 0 || (track === 'boss' && i > 12)) {
+      this._noise(i === 14 ? 0.10 : 0.032, 7400, 0.85, i % 4 ? 0.09 : 0.06, delay, bus);
     }
   }
 }

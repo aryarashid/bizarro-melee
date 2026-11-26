@@ -4524,42 +4524,48 @@ export class GameRenderer3D {
     if (e.victimPort != null) this.hitFocus.set(e.victimPort, { x, y, frame: t, angle, electric, hitlag, kb });
     const style = electric ? 'electric' : e.meteor ? 'meteor' : slash ? (e.sweetspot ? 'sweetSlash' : 'slash') : e.sweetspot ? 'sweet' : 'standard';
     const [rim, core, spark] = impactPaint[style];
-    const force = clamp(kb / 175), weight = clamp(damage / 28 * .45 + force * .66);
-    const size = mix(52, 135, Math.max(heavy ? .50 : 0, weight));
+    const tier = e.weightTier || (kb >= 145 ? 'colossal' : heavy ? 'heavy' : kb >= 52 ? 'medium' : 'light');
+    const colossal = tier === 'colossal';
+    const force = clamp(kb / 175);
+    const weight = Number.isFinite(e.hitWeight) ? clamp(e.hitWeight) : clamp(damage / 28 * .45 + force * .66);
+    const size = mix(tier === 'light' ? 38 : 54, colossal ? 162 : 138, Math.max(heavy ? .55 : 0, weight));
     const aspect = slash && !electric ? .65 : 1, tilt = slash ? .29 : .18;
-    this._particle('impactStar', x, y, 48, rim, size, 9 + Math.round(weight * 4), 0, 0, 0, t,
-      { angle, aspect, tilt, yaw: -.15, alpha: .94, solid: true });
-    this._particle('impactStar', x, y, 52, core, size * .68, 6 + Math.round(weight * 3), 0, 0, 0, t,
+    this._particle('impactStar', x, y, 48, colossal ? '#ff3b5c' : rim, size, 8 + Math.round(weight * 6), 0, 0, 0, t,
+      { angle, aspect, tilt, yaw: -.15, alpha: .95, solid: true });
+    this._particle('impactStar', x, y, 52, core, size * .68, 5 + Math.round(weight * 4), 0, 0, 0, t,
       { angle, aspect: aspect * .70, tilt, yaw: -.15, alpha: 1 });
-    const count = 14 + Math.round(weight * 13);
+    const count = tier === 'light' ? 8 : colossal ? 30 : 14 + Math.round(weight * 13);
     for (let i = 0; i < count + 5; i++) {
       const back = i >= count;
       const a = angle + (back ? Math.PI : 0) + (Math.random() * 2 - 1) * (back ? 35 : 28) * DEG;
-      const speed = (mix(5, 15, force) + Math.random() * mix(5, 12, force)) * (back ? .49 : 1);
+      const speed = (mix(5, colossal ? 19 : 15, force) + Math.random() * mix(5, 13, force)) * (back ? .49 : 1);
       this._particle('impactSpark', x, y, 24 + Math.random() * 19, i % 4 === 0 ? core : i % 3 === 0 ? rim : spark,
-        mix(8, 26, weight) * (.67 + Math.random() * .55) * (back ? .56 : 1), 10 + Math.floor(Math.random() * 8),
+        mix(7, colossal ? 31 : 26, weight) * (.67 + Math.random() * .55) * (back ? .56 : 1), 10 + Math.floor(Math.random() * 8),
         Math.cos(a) * speed, Math.sin(a) * speed, (Math.random() - .5) * 2.2, t, { angle: a });
     }
-    if (electric) for (let i = 0; i < 3; i++) this._electricArc(x, y, t, angle + i * TAU / 3, size * (1.1 + i * .16), i);
+    if (electric) for (let i = 0; i < (colossal ? 4 : 3); i++) this._electricArc(x, y, t, angle + i * TAU / (colossal ? 4 : 3), size * (1.1 + i * .16), i % 3);
     const fire = !electric && (e.element === 'fire' || move?.element === 'fire' || move?.style === 'fire');
-    if (e.meteor) this._particle('shockwave', x, y - 8, 18, '#ff4864', size * 0.22, 16, 0, -2.2, 0, t,
-      { end: size * 1.15, angle: -Math.PI / 2, tilt: Math.PI / 2 });
-    if (fire) for (let i = 0; i < 5; i++) {
+    if (e.meteor) {
+      this._particle('shockwave', x, y - 8, 18, e.trueSpike ? '#ff1f4c' : '#ff4864', size * 0.24, 18, 0, -2.5, 0, t,
+        { end: size * (e.trueSpike ? 1.42 : 1.15), angle: -Math.PI / 2, tilt: Math.PI / 2 });
+      if (e.trueSpike) this._particle('slash', x, y - 10, 44, '#ff3366', size * 1.12, 11, 0, -2.8, 0, t, { angle: -Math.PI / 2, tilt: 0.1 });
+    }
+    if (fire) for (let i = 0; i < (heavy ? 7 : 5); i++) {
       const a = angle + (i - 2) * 0.32;
-      this._particle('flame', x, y, 30, i % 2 ? '#ffd36a' : '#ff6a1a', size * 0.32, 10 + i,
-        Math.cos(a) * 1.6, Math.sin(a) * 1.6 + 0.8, 0, t, { angle: a + Math.PI / 2 });
+      this._particle('flame', x, y, 30, i % 2 ? '#ffd36a' : '#ff6a1a', size * 0.34, 10 + i,
+        Math.cos(a) * 1.8, Math.sin(a) * 1.8 + 0.9, 0, t, { angle: a + Math.PI / 2 });
     }
-    if (slash && !electric) this._particle('slash', x, y, 42, spark, size * 0.82, 8, 0, 0, 0, t, { angle, tilt: 0.18 });
+    if (slash && !electric) this._particle('slash', x, y, 42, spark, size * (colossal ? 1.02 : 0.84), 9, 0, 0, 0, t, { angle, tilt: 0.18 });
     if (kb >= 85 && (e.sweetspot || e.meteor || heavy)) {
-      this._particle('shockwave', x, y, 24, spark, size * .28, 17, 0, 0, 0, t,
-        { end: size * 1.38, angle, tilt: .26, yaw: .46 });
-      this._particle('shockwave', x, y, 27, core, size * .18, 11, 0, 0, 0, t,
-        { end: size * .99, angle, tilt: -.46, yaw: -.54 });
+      this._particle('shockwave', x, y, 24, colossal ? '#ff3b5c' : spark, size * .28, 18, 0, 0, 0, t,
+        { end: size * (colossal ? 1.65 : 1.38), angle, tilt: .26, yaw: .46 });
+      this._particle('shockwave', x, y, 27, core, size * .18, 12, 0, 0, 0, t,
+        { end: size * (colossal ? 1.22 : .99), angle, tilt: -.46, yaw: -.54 });
     }
-    this._flash(electric || slash ? '#a4f6ff' : '#ffca81', x, y, mix(38000, 122000, weight), t, weight > .6 ? 10 : 7, true);
-    if (kb >= 105 && (e.sweetspot || heavy) && (this.cameraKick?.frame !== t || kb >= this.cameraKick.kb)) {
-      const power = clamp((kb - 105) / 120);
-      this.cameraKick = { frame: t, kb, x: Math.cos(angle), y: Math.sin(angle), zoom: mix(.042, .058, power), shake: mix(5, 9, power) };
+    this._flash(colossal ? '#ff647c' : electric || slash ? '#a4f6ff' : '#ffca81', x, y, mix(36000, colossal ? 165000 : 122000, weight), t, colossal ? 13 : weight > .6 ? 10 : 7, true);
+    if ((colossal || kb >= 105) && (e.sweetspot || heavy) && (this.cameraKick?.frame !== t || kb >= this.cameraKick.kb)) {
+      const power = clamp((kb - 95) / 115);
+      this.cameraKick = { frame: t, kb, x: Math.cos(angle), y: Math.sin(angle), zoom: mix(.042, colossal ? .076 : .058, power), shake: mix(5, colossal ? 12 : 9, power) };
     }
   }
 
@@ -4637,6 +4643,18 @@ export class GameRenderer3D {
     }
     if (e.type === 'hit') {
       this._hitImpact(e, match, x, y);
+      return;
+    }
+    if (e.type === 'clank') {
+      this._particle('ring', x, y, 28, '#ffdf4d', 16, 13, 0, 0, 0, t, { end: 88, tilt: 0.35 });
+      this._particle('ring', x, y, 24, '#ffffff', 11, 9, 0, 0, 0, t, { end: 56, tilt: -0.5, yaw: 0.45 });
+      this._particle('impactStar', x, y, 42, '#fff1a6', 64, 8, 0, 0, 0, t, { angle: 0.78, aspect: 0.65, alpha: 0.96, solid: true });
+      for (let i = 0; i < 12; i++) {
+        const a = i * TAU / 12;
+        this._particle('impactSpark', x, y, 26, i % 2 ? '#ffdf4d' : '#ffffff', 12, 11,
+          Math.cos(a) * 8.5, Math.sin(a) * 8.5, (Math.random() - 0.5) * 2, t, { angle: a });
+      }
+      this._flash('#ffe88a', x, y, 105000, t, 9, true);
       return;
     }
     const burst = ['explosion', 'homerunPing', 'targetBreak', 'shine', 'shieldBreak'];

@@ -860,7 +860,68 @@ async function runUnitTests() {
     }
     assert.ok(sawFrozen, 'Throwing Freezie Cube at rival must freeze them (freezeFrames > 0)');
 
-    console.log('PASS: SSBM mechanics & Round 3/4 items validated (Crouch Cancel, Jab Reset, Parry, Float Cancel, Needles, Dancing Blade, Waveland, Tech Roll, Ledge-Hog, Frame Adv, Mash-Out, Tether, Metal/Bunny/Wand/Freezie)');
+    // Grounded Melee Clank (equal moves clank cleanly with 0 damage + rebound)
+    const mClank = mkDuel('garth', 'garth');
+    mClank.fighters[0].x = -38; mClank.fighters[1].x = 38;
+    let sawClank = false;
+    for (let t = 0; t < 16; t++) {
+      const i0 = createEmptyInput();
+      const i1 = createEmptyInput();
+      if (t === 0) {
+        i0.moveX = 0.6; i0.attack = i0.attackPressed = true;
+        i1.moveX = -0.6; i1.attack = i1.attackPressed = true;
+      }
+      stepMatch(mClank, [i0, i1]);
+      if (mClank.events.some((e) => e.type === 'clank')) { sawClank = true; break; }
+    }
+    assert.ok(sawClank && mClank.fighters[0].percent === 0 && mClank.fighters[1].percent === 0,
+      `Equal grounded melee attacks must clank cleanly with 0 damage (sawClank=${sawClank}, p0=${mClank.fighters[0].percent}, p1=${mClank.fighters[1].percent})`);
+
+    // Move weight tiers: light jab vs heavy/colossal fsmash emit distinct weightTier & hitlag
+    const mLight = mkDuel('faux', 'bario');
+    mLight.fighters[0].x = -24; mLight.fighters[1].x = 24;
+    let lightEv = null;
+    for (let t = 0; t < 12 && !lightEv; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.attack = i0.attackPressed = true; }
+      stepMatch(mLight, [i0, createEmptyInput()]);
+      lightEv = mLight.events.find((e) => e.type === 'hit');
+    }
+    const mHeavy = mkDuel('dadondorf', 'spitzu');
+    mHeavy.fighters[0].x = -26; mHeavy.fighters[1].x = 26; mHeavy.fighters[1].percent = 95;
+    let heavyEv = null;
+    for (let t = 0; t < 24 && !heavyEv; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.cStickX = 1; }
+      stepMatch(mHeavy, [i0, createEmptyInput()]);
+      heavyEv = mHeavy.events.find((e) => e.type === 'hit');
+    }
+    assert.equal(lightEv?.weightTier, 'light', `Faux jab at 0% must be light weightTier (got ${lightEv?.weightTier})`);
+    assert.ok(heavyEv && (heavyEv.weightTier === 'heavy' || heavyEv.weightTier === 'colossal'),
+      `Dadondorf fsmash on 95% Spitzu must be heavy/colossal (got ${heavyEv?.weightTier})`);
+    assert.ok(heavyEv.hitlag > lightEv.hitlag,
+      `Heavy/colossal hit must have greater hitlag than light jab (${heavyEv.hitlag} vs ${lightEv.hitlag})`);
+
+    // True Spike (Falcon't dair) sets meteorTrueSpike and cannot be meteor-canceled after 8 frames
+    const mSpike = mkDuel('falcont', 'bario');
+    mSpike.fighters[0].x = 0; mSpike.fighters[0].y = 140; mSpike.fighters[0].grounded = false; mSpike.fighters[0].state = STATE.AIRBORNE;
+    mSpike.fighters[1].x = 0; mSpike.fighters[1].y = 112; mSpike.fighters[1].grounded = false; mSpike.fighters[1].state = STATE.AIRBORNE;
+    mSpike.fighters[1].percent = 70;
+    let spikeHitFrame = -1;
+    let meteorCanceled = false;
+    for (let t = 0; t < 30; t++) {
+      const i0 = createEmptyInput();
+      const i1 = createEmptyInput();
+      if (t === 0) { i0.cStickY = -1; }
+      if (spikeHitFrame >= 0 && t >= spikeHitFrame + 10) { i1.jump = i1.jumpPressed = true; }
+      stepMatch(mSpike, [i0, i1]);
+      if (spikeHitFrame < 0 && mSpike.events.some((e) => e.type === 'hit' && e.trueSpike)) spikeHitFrame = t;
+      if (mSpike.events.some((e) => e.type === 'meteorCancel')) meteorCanceled = true;
+    }
+    assert.ok(spikeHitFrame >= 0 && !meteorCanceled,
+      `Falcon't dair must land as trueSpike and deny meteor cancel (hitFrame=${spikeHitFrame}, canceled=${meteorCanceled})`);
+
+    console.log('PASS: SSBM mechanics, Move Weights, Clank, True Spike & Round 3/4 items validated');
   }
 
   // Master Mitt 380 HP, Phase 2 transition, and multi-attack tells
@@ -1037,6 +1098,16 @@ async function runBrowserProof() {
         externalRequests.push(u);
       }
     });
+    // Isolate automated Playwright verification from any physical controllers connected to the host Mac
+    await ctx.addInitScript(() => {
+      if (typeof navigator.getGamepads === 'function') {
+        const orig = navigator.getGamepads.bind(navigator);
+        Object.defineProperty(navigator, 'getGamepads', {
+          value: () => { try { orig(); } catch {} return [null, null, null, null]; },
+          configurable: true,
+        });
+      }
+    });
     await page.goto(hostUrl + (legacy ? '/?legacy' : '/'));
     await page.waitForTimeout(600);
     const frame = page.frames().find((f) => f.url().startsWith(gameUrl));
@@ -1080,14 +1151,16 @@ async function runBrowserProof() {
       Object.defineProperty(navigator, 'getGamepads', { value: () => [mkPad()], configurable: true });
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       try {
+        // Reset title focus after installing mock so any physical hardware gamepad on the host machine doesn't pre-shift focus
+        window.__BIZARRO_MELEE__.openScreen('title');
         // Connecting a gamepad immediately highlights default (Quick Fight); first D-pad Right (15) moves to VS Mode
-        await wait(90);
+        await wait(120);
         const firstFocus = document.querySelector('.pad-focus')?.id || '';
-        state.pressed = [15]; await wait(90); state.pressed = []; await wait(70);
+        state.pressed = [15]; await wait(120); state.pressed = []; await wait(90);
         const secondFocus = document.querySelector('.pad-focus')?.id || '';
         const hintVisible = !document.getElementById('pad-hint-bar')?.hidden;
         // Press A (0) on VS Mode -> must enter CSS
-        state.pressed = [0]; await wait(120); state.pressed = []; await wait(90);
+        state.pressed = [0]; await wait(150); state.pressed = []; await wait(120);
         const cssScreen = window.__BIZARRO_MELEE__.getState().screen;
         // Press B (1) on CSS -> must return cleanly to Title
         state.pressed = [1]; await wait(120); state.pressed = []; await wait(90);
