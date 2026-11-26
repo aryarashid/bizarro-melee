@@ -470,7 +470,7 @@ export class GameRenderer3D {
     this.enabled = true;
     this.contextLost = false;
     this.width = 1280; this.height = 720; this.dpr = 1;
-    this.assets = Object.fromEntries(['characters', 'weapons', 'items', 'stage-props'].map((p) => [p, new Map()]));
+    this.assets = Object.fromEntries(['characters', 'weapons', 'items', 'stage-props', 'tripo-heads'].map((p) => [p, new Map()]));
     this.ownedGeometries = new WeakSet();
     this.ownedMaterials = new WeakSet();
     this.baseGeo = new Map();
@@ -2344,8 +2344,28 @@ export class GameRenderer3D {
       const torsoStyle = style.hat === 'elfCap' ? 'RangerTunic' : ['garth','troy'].includes(id) ? 'ArmorTorso'
         : TORSO_SCULPTS[sil] || 'HeroTorso';
       const dress = sil === 'dress';
-      if (puff || isFlat || !this._sculpt(torso, 'Body_' + torsoStyle, body, 0, chestSz * (dress ? .18 : .45), 0,
-        chestRx, chestSz * (dress ? .84 : .58), breadth)) this._bodyMesh(torso, profile, chestSz, chestRx, breadth, body);
+      const tripoHeadSrc = id !== 'mr-beep-blob' && this.assets['tripo-heads']?.get('Tripo_' + id);
+      if (puff && tripoHeadSrc) {
+        const tMesh = this._model('tripo-heads', 'Tripo_' + id);
+        if (tMesh) {
+          tMesh.position.set(0, chestSz * 0.52, 0);
+          tMesh.scale.set(chestRx * 1.14, chestSz * 0.58, breadth * 1.14);
+          if (f.paletteIndex > 0) {
+            tMesh.traverse((n) => {
+              if (n.isMesh && n.material?.color) {
+                const m = n.material.clone();
+                m.color.lerp(new T.Color(pal.body), 0.24);
+                this.ownedMaterials.add(m);
+                n.material = m;
+              }
+            });
+          }
+          torso.add(tMesh);
+          rig.hasTripoHead = true;
+        }
+      }
+      if (!rig.hasTripoHead && (puff || isFlat || !this._sculpt(torso, 'Body_' + torsoStyle, body, 0, chestSz * (dress ? .18 : .45), 0,
+        chestRx, chestSz * (dress ? .84 : .58), breadth))) this._bodyMesh(torso, profile, chestSz, chestRx, breadth, body);
       if (!puff && sil !== 'dress') {
         this._shape(pelvis, 'ball', pants, 0, -h * 0.020, 0, chestRx * 0.87, h * 0.104, breadth * 0.94);
         this._shape(torso, 'ball', detail, chestRx * 0.81, chestSz * 0.14, 0, 2.2, h * 0.039, breadth * 0.27);
@@ -2362,12 +2382,33 @@ export class GameRenderer3D {
       if (!puff) {
         const neckBand = this._shape(torso, 'ball', armor || style.prop === 'scarf' ? detail : pants, 0, neckY + 1, 0, rx * 0.66, h * 0.065, rz * 0.70);
         neckBand.rotation.z = 0.17;
-        const headKey = 'Head_' + (HEAD_SCULPTS[id] || 'HeroMale');
-        const paint = style.hat === 'visorHelm' ? pants : skin;
-        rig.skull = !isFlat && this._sculpt(head, headKey, paint, 0, 0, 0, rx, ry, rz);
-        if (!rig.skull) this._sculptHead(head, paint, rx, ry, rz, jaw);
-        if (!isFlat && !fur && !armor && id !== 'wonky-kong' && !headKey.startsWith('Head_Hero')) for (const s of [-1, 1]) {
-          this._shape(head, 'smallBall', skin, -rx * 0.14, -ry * 0.06, s * rz * 0.92, rx * 0.24, ry * 0.30, rz * 0.16);
+        const tripo = tripoHeadSrc && this._model('tripo-heads', 'Tripo_' + id);
+        if (tripo) {
+          const boost = id === 'squeegi' ? 1.38 : ['faux', 'falcont', 'broshee', 'sourzer', 'captain-pigeon', 'spitzu', 'chikapu', 'mewtooth'].includes(id) ? 1.36 : 1.30;
+          const uScale = Math.max(rx, ry) * boost;
+          tripo.position.set(rx * 0.05, ry * 0.24, 0);
+          tripo.scale.set(uScale, uScale, uScale);
+          if (f.paletteIndex > 0) {
+            tripo.traverse((n) => {
+              if (n.isMesh && n.material?.color) {
+                const m = n.material.clone();
+                m.color.lerp(new T.Color(pal.body), 0.20);
+                this.ownedMaterials.add(m);
+                n.material = m;
+              }
+            });
+          }
+          head.add(tripo);
+          rig.skull = tripo;
+          rig.hasTripoHead = true;
+        } else {
+          const headKey = 'Head_' + (HEAD_SCULPTS[id] || 'HeroMale');
+          const paint = style.hat === 'visorHelm' ? pants : skin;
+          rig.skull = !isFlat && this._sculpt(head, headKey, paint, 0, 0, 0, rx, ry, rz);
+          if (!rig.skull) this._sculptHead(head, paint, rx, ry, rz, jaw);
+          if (!isFlat && !fur && !armor && id !== 'wonky-kong' && !headKey.startsWith('Head_Hero')) for (const s of [-1, 1]) {
+            this._shape(head, 'smallBall', skin, -rx * 0.14, -ry * 0.06, s * rz * 0.92, rx * 0.24, ry * 0.30, rz * 0.16);
+          }
         }
       }
       if (flightCoat) for (const side of [-1,1]) {
@@ -2377,7 +2418,7 @@ export class GameRenderer3D {
       }
       if (dress) this._sculpt(torso,'Body_HeroTorsoFem',body,0,chestSz*.67,0,chestRx*.73,chestSz*.38,breadth*.70);
       const mantle = { main, pants, detail, dark, gold, skin, light };
-      this._dressHead(rig, f, style, sil, { rx, ry, rz, jaw, ...mantle });
+      if (!rig.hasTripoHead) this._dressHead(rig, f, style, sil, { rx, ry, rz, jaw, ...mantle });
       if (parent !== this.battleGroup && rig.muzzle && rig.face) {
         const grin = new T.PlaneGeometry(1, 1, 12, 6);
         const { position, uv } = grin.attributes;
@@ -2717,17 +2758,20 @@ export class GameRenderer3D {
       for (const ear of rig.ears) ear.removeFromParent();
       rig.ears = null;
     };
-    if (id === 'dadondorf' && !this.assets.characters.has('Hair_Beard')) this._pinPart(head, 'Part_Beard', rx * 0.12, -ry * 0.42, 0, rx * 1.05, ry * 0.95, rz * 0.9);
-    if (id === 'screech' && !this.assets.characters.has('Hair_Buns')) this._pinPart(head, 'Part_HairBun', -rx * 0.02, ry * 0.72, 0, rx * 0.95, ry * 0.85, rz * 0.9);
+    const skipHead = !!rig.hasTripoHead;
+    if (!skipHead && id === 'dadondorf' && !this.assets.characters.has('Hair_Beard')) this._pinPart(head, 'Part_Beard', rx * 0.12, -ry * 0.42, 0, rx * 1.05, ry * 0.95, rz * 0.9);
+    if (!skipHead && id === 'screech' && !this.assets.characters.has('Hair_Buns')) this._pinPart(head, 'Part_HairBun', -rx * 0.02, ry * 0.72, 0, rx * 0.95, ry * 0.85, rz * 0.9);
     if (id === 'broshee') {
-      const snout = this._pinPart(head, 'Part_DinoSnout', rx * 0.2, -ry * 0.12, 0, rx * 1.2, ry * 1.05, rz * 1.05);
-      if (snout && rig.muzzle) { rig.muzzle.removeFromParent(); rig.muzzle = null; }
+      if (!skipHead) {
+        const snout = this._pinPart(head, 'Part_DinoSnout', rx * 0.2, -ry * 0.12, 0, rx * 1.2, ry * 1.05, rz * 1.05);
+        if (snout && rig.muzzle) { rig.muzzle.removeFromParent(); rig.muzzle = null; }
+      }
       this._pinPart(rig.torso, 'Part_Spines', -chestRx * 0.15, chestSz * 0.72, 0, chestRx * 0.55, chestSz * 0.4, rz * 0.7);
     }
-    if (id === 'wonky-kong') {
+    if (!skipHead && id === 'wonky-kong') {
       this._shape(head, 'ball', this._mat('#8d95aa'), rx * 0.46, -ry * 0.38, 0, rx * 0.36, ry * 0.24, rz * 0.34);
     }
-    if (id === 'troy') {
+    if (!skipHead && id === 'troy') {
       this._pinPart(head, 'Hair_FlameSweep', -rx*.07,ry*.19,0,rx*1.02,ry*.95,rz*1.08,
         { CharOrange: '#ff5a1f', CharRed: '#ffb03a', CharGold: '#ffe14a' });
     }
@@ -2737,43 +2781,47 @@ export class GameRenderer3D {
       tube.rotation.y = Math.PI/2;
       this._shape(rig.torso,'smallBall',this._mat('#b9d1d7',{metalness:.70}),chestRx*.96,chestSz*.32,0,2.1,2.1,2.1);
     }
-    if (id === 'garth' && !this.assets.characters.has('Hair_SimpleParted')) {
+    if (!skipHead && id === 'garth' && !this.assets.characters.has('Hair_SimpleParted')) {
       this._pinPart(head, 'Part_HairCrest', -rx * 0.04, ry * 0.58, 0, rx * 1.05, ry * 0.82, rz * 0.95,
         { CharOrange: '#6a3b22', CharRed: '#4a2815', CharGold: '#8a5a32' });
     }
     if (id === 'mess') {
-      this._pinPart(head, 'Hat_Glasses', rx * 0.08, ry * 0.02, 0, rx * 0.82, ry * 0.7, rz * 0.82);
+      if (!skipHead) this._pinPart(head, 'Hat_Glasses', rx * 0.08, ry * 0.02, 0, rx * 0.82, ry * 0.7, rz * 0.82);
       this._pinPart(rig.torso, 'Part_Backpack', -chestRx * 0.72, chestSz * 0.42, 0, chestRx * 0.62, chestSz * 0.48, rz * 0.7);
     }
     if (id === 'spitzu') {
-      if (this._pinPart(head, 'Part_MouseEars', 0, ry*.43, 0, rx, ry*1.05, rz)) dropEars();
-      this._pinPart(head,'Hat_Glasses',rx*.08,ry*.53,0,rx*.90,ry*.83,rz*.94,{CharTeal:'#79bfbe',CharChrome:'#977044'});
+      if (!skipHead) {
+        if (this._pinPart(head, 'Part_MouseEars', 0, ry*.43, 0, rx, ry*1.05, rz)) dropEars();
+        this._pinPart(head,'Hat_Glasses',rx*.08,ry*.53,0,rx*.90,ry*.83,rz*.94,{CharTeal:'#79bfbe',CharChrome:'#977044'});
+      }
       this._pinPart(rig.torso, 'Part_Battery', -chestRx * 0.85, chestSz * 0.48, 0, chestRx * 0.7, chestSz * 0.42, rz * 0.75);
     }
-    if (id === 'chikapu') {
+    if (!skipHead && id === 'chikapu') {
       if (this._pinPart(head, 'Part_BoltEars', 0, ry*.45, 0, rx, ry*1.02, rz*1.12, { CharGold: '#ffe14a' })) dropEars();
       this._pinPart(head, 'Hat_Cap', 0, ry * 0.62, 0, rx * 0.78, ry * 0.42, rz * 0.82,
         { CharRed: '#e23b3b', CharBlue: '#e23b3b', CharWhite: '#fff6e8' });
     }
-    if (id === 'gigglefluff') {
+    if (!skipHead && id === 'gigglefluff') {
       this._pinPart(head, 'Part_CatEars', 0, ry * 0.28, 0, rx * 0.85, ry * 0.7, rz * 0.8);
       this._pinPart(head, 'Part_HairSwirl', rx * 0.02, ry * 0.48, 0, rx * 0.65, ry * 0.55, rz * 0.65);
     }
     if (id === 'velda') this._pinPart(rig.torso, 'Part_RoyalMantle', -chestRx*.70, chestSz*.45,0,
       chestRx*.54, chestSz*.75,rz*1.08,{NeutralTint:'#50247e'});
-    if (id === 'shriek') this._pinPart(head, 'Part_NinjaMask',rx*.30,-ry*.36,0,rx*.79,ry*.43,rz*.94,{NeutralTint:'#414766'});
-    if (id === 'velda') this._pinPart(head, 'Part_RoyalCowl', -rx*.12, ry*.04, 0, rx*1.06, ry*1.05, rz*1.10, { NeutralTint: '#4c1d95' });
-    if (id === 'bario' || style.prop === 'monocle') this._pinPart(head, 'Part_Monocle', rx * 0.08, ry * 0.02, 0, rx * 0.9, ry * 0.82, rz * 0.85);
+    if (!skipHead && id === 'shriek') this._pinPart(head, 'Part_NinjaMask',rx*.30,-ry*.36,0,rx*.79,ry*.43,rz*.94,{NeutralTint:'#414766'});
+    if (!skipHead && id === 'velda') this._pinPart(head, 'Part_RoyalCowl', -rx*.12, ry*.04, 0, rx*1.06, ry*1.05, rz*1.10, { NeutralTint: '#4c1d95' });
+    if (!skipHead && (id === 'bario' || style.prop === 'monocle')) this._pinPart(head, 'Part_Monocle', rx * 0.08, ry * 0.02, 0, rx * 0.9, ry * 0.82, rz * 0.85);
     if (id === 'sourzer') {
-      this._pinPart(head, 'Part_Snout', rx * 0.18, -ry * 0.22, 0, rx * 1.05, ry * 0.95, rz * 0.9);
-      this._pinPart(head, 'Part_Mohawk', -rx * 0.05, ry * 0.45, 0, rx * 0.85, ry * 0.8, rz * 0.65);
+      if (!skipHead) {
+        this._pinPart(head, 'Part_Snout', rx * 0.18, -ry * 0.22, 0, rx * 1.05, ry * 0.95, rz * 0.9);
+        this._pinPart(head, 'Part_Mohawk', -rx * 0.05, ry * 0.45, 0, rx * 0.85, ry * 0.8, rz * 0.65);
+      }
       this._pinPart(rig.torso, 'Part_Collar', chestRx * 0.05, chestSz * 0.86, 0, chestRx * 0.5, chestSz * 0.2, rz * 0.65);
     }
     if (id === 'shriek' && rig.torso) {
       const kunai = this._pinPart(rig.torso, 'Part_Kunai', chestRx * 0.15, chestSz * 0.15, rz * 0.85, 9, 9, 9);
       if (kunai) kunai.rotation.z = -0.7;
     }
-    if (id === 'zink' || id === 'tiny-zink' || id === 'dadondorf') {
+    if (!skipHead && (id === 'zink' || id === 'tiny-zink' || id === 'dadondorf')) {
       this._pinPart(head, 'Part_ElfEars', rx * 0.05, -ry * 0.02, 0, rx * 0.85, ry * 0.75, rz * 0.95,
         { CharCream: id === 'dadondorf' ? rig.pal.skin : '#f3d7b5' });
     }
