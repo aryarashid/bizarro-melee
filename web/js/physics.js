@@ -309,7 +309,7 @@ export function createMatch(config = {}) {
     koTarget: mode === MODE.EVENT && objective === 'koTarget' && Number.isFinite(config.koTarget) ? Math.max(0, Math.ceil(config.koTarget)) : 0,
     trainingCpuMode: config.trainingCpuMode ?? 'stand', timeScale: [0.25, 0.5].includes(config.timeScale) ? config.timeScale : 1,
     damageSequence: 0, lastDamageSequence: [], winner: null, winningTeam: null,
-    slowMoFrames: 0, dramaticFinish: null, hitstopFrames: 0, screenShake: 0, screenFlash: 0, platforms: resolveStagePlatforms(stage, 0), surfaces: resolveStageSolids(stage, 0),
+    slowMoFrames: 0, impactSlowMoFrames: 0, dramaticFinish: null, hitstopFrames: 0, screenShake: 0, screenFlash: 0, platforms: resolveStagePlatforms(stage, 0), surfaces: resolveStageSolids(stage, 0),
     stageForm: getStageForm(stage, 0), platformStates: {}, bridgeState: null, seesawOffset: 0,
     barrelCannon: stage.barrelCannon ? { x: (stage.barrelCannon.minX + stage.barrelCannon.maxX) / 2,
       y: stage.barrelCannon.y, angle: 0, occupantPort: null, fireTimer: 0, cooldown: 0 } : null,
@@ -2687,7 +2687,7 @@ function impactEvent(match, a, v, hit) {
   match.screenShake = Math.max(match.screenShake, Math.min(22, (2.0 + tierShake + kb * 0.082 + (sweetspot ? 4.5 : 0) + (electric ? 2.5 : 0)) * weightRatio));
   if (weightTier === 'colossal' || sweetspot || electric || kb >= 120) match.screenFlash = Math.max(match.screenFlash, weightTier === 'colossal' ? 6 : heavy ? 4 : 2);
   if (weightTier === 'colossal' && !match.dramaticFinish && match.mode !== MODE.HOMERUN && kb >= 145) {
-    match.slowMoFrames = Math.max(match.slowMoFrames, 4);
+    match.impactSlowMoFrames = Math.max(match.impactSlowMoFrames || 0, 4);
   }
   match.events.push({
     type: 'hit', x: v.x, y: v.y + v.def.stats.height * v.scale * 0.52, ...hit,
@@ -4236,6 +4236,7 @@ function finish(match, winner, stockVictory = false) {
   match.winnerPort = winner?.port ?? null;
   match.status = 'ended';
   match.endTimer = 150;
+  match.impactSlowMoFrames = 0;
   const ko = stockVictory && winner && match.events.slice().reverse().find((e) =>
     e.type === 'ko' && !teammates(winner, byPort(match, e.port)));
   if (ko) {
@@ -4296,7 +4297,7 @@ function beginSuddenDeath(match, tied) {
     match.barrelCannon.fireTimer = 0;
   }
   match.suddenDeath = true;
-  match.suddenDeathTimer = match.timeLeftFrames = match.introTimer = match.endTimer = match.slowMoFrames = 0;
+  match.suddenDeathTimer = match.timeLeftFrames = match.introTimer = match.endTimer = match.slowMoFrames = match.impactSlowMoFrames = 0;
   match.status = 'playing';
   match.winner = match.winnerPort = match.winningTeam = match.dramaticFinish = null;
   match.items.length = match.hazards.length = match.summons.length = match.projectiles.length = 0;
@@ -4581,6 +4582,10 @@ export function stepMatch(match, inputsByPort = []) {
     }
     match.endTimer = Math.max(0, match.endTimer - 1);
     return match;
+  }
+  if (match.impactSlowMoFrames > 0) {
+    match.impactSlowMoFrames--;
+    if (match.impactSlowMoFrames % 2 === 1) return match;
   }
   match.frame++;
   match.screenShake *= 0.83;

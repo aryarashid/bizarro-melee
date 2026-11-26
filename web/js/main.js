@@ -2804,6 +2804,8 @@ function wireUi() {
       app.match.screenFlash = 0;
       app.match.hitstopFrames = 0;
       app.match.slowMoFrames = 0;
+      app.match.impactSlowMoFrames = 0;
+      app.match.dramaticFinish = null;
       app.match.events = [];
     }
     app.matchClanks = [0, 0, 0, 0];

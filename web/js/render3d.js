@@ -4834,7 +4834,7 @@ export class GameRenderer3D {
       return;
     }
     if (e.type === 'dramaticFinish') {
-      this._startFinish(e, match);
+      if (match.status === 'ended' && match.dramaticFinish) this._startFinish(e, match);
       return;
     }
     if (e.type === 'shieldHit') {
@@ -5078,7 +5078,11 @@ export class GameRenderer3D {
 
   _finishAge(match) {
     if (!this.finish) return Infinity;
-    return this.finish.slow ? this.finish.duration - (match.slowMoFrames || 0) : match.frame - this.finish.frame;
+    if (match.status !== 'ended' || !match.dramaticFinish) return Infinity;
+    const frameAge = Math.max(0, match.frame - this.finish.frame);
+    return this.finish.slow
+      ? Math.max(this.finish.duration - (match.slowMoFrames || 0), frameAge)
+      : frameAge;
   }
 
   _flash(color, x, y, strength, frame, life, atContact = false) {
@@ -5580,7 +5584,12 @@ export class GameRenderer3D {
   }
 
   _renderBattle(match, options, delta) {
-    if (!this.finish && match.slowMoFrames > 0) this._startFinish(match.dramaticFinish || {}, match);
+    if (this.finish && (match.status !== 'ended' || !match.dramaticFinish || this._finishAge(match) >= this.finish.duration)) {
+      this.finish = null;
+    }
+    if (!this.finish && match.status === 'ended' && match.dramaticFinish && (match.slowMoFrames || 0) > 0) {
+      this._startFinish(match.dramaticFinish, match);
+    }
     this._updateStage(match);
     this._updateCamera(match, options, delta);
     this._syncCalloutFlags(match);
@@ -5667,7 +5676,7 @@ export class GameRenderer3D {
     if (!b) return;
     const age = match.frame - b.frame;
     if (age < 0 || age >= b.duration) {
-      if (age >= b.duration) this.killBurst = null;
+      this.killBurst = null;
       return;
     }
     // Defer to full dramaticFinish burst when active.

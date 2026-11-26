@@ -1041,6 +1041,12 @@ async function runUnitTests() {
       `Dadondorf fsmash on 95% Spitzu must be heavy/colossal (got ${heavyEv?.weightTier})`);
     assert.ok(heavyEv.hitlag > lightEv.hitlag,
       `Heavy/colossal hit must have greater hitlag than light jab (${heavyEv.hitlag} vs ${lightEv.hitlag})`);
+    assert.equal(mHeavy.dramaticFinish, null, 'Mid-match colossal hit must never trigger dramaticFinish');
+    assert.equal(mHeavy.slowMoFrames, 0, 'Mid-match colossal hit must never set match-ending slowMoFrames');
+    for (let drain = 0; drain < 12 && mHeavy.impactSlowMoFrames > 0; drain++) {
+      stepMatch(mHeavy, [createEmptyInput(), createEmptyInput()]);
+    }
+    assert.equal(mHeavy.impactSlowMoFrames, 0, 'Mid-match colossal impactSlowMoFrames must drain back to 0 cleanly');
 
     // True Spike (Falcon't dair) sets meteorTrueSpike and cannot be meteor-canceled after 8 frames
     const mSpike = mkDuel('falcont', 'bario');
