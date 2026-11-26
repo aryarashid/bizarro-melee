@@ -113,7 +113,7 @@
       <div class="css-body">
         <div class="css-left">
           <div class="css-pick-banner">
-            <span>Picking for:</span>
+            <span id="css-pick-label">Picking for:</span>
             <button id="btn-active-port-0" class="port-tab active" data-port="0" type="button">P1</button>
             <button id="btn-active-port-1" class="port-tab" data-port="1" type="button">P2</button>
             <button id="btn-active-port-2" class="port-tab" data-port="2" type="button" hidden>P3</button>
@@ -121,7 +121,10 @@
             <button id="btn-css-bio-toggle" class="btn btn-ghost btn-xs css-bio-toggle" type="button">Specials &amp; Bio</button>
             <span id="css-count-pill" class="count-pill">26 Bizarro Fighters</span>
           </div>
-          <div id="css-grid" class="css-grid" role="grid" aria-label="Fighter roster"></div>
+          <div id="css-grid-wrap" class="css-grid-wrap">
+            <div id="css-grid" class="css-grid" role="grid" aria-label="Fighter roster"></div>
+            <button id="css-ready-banner" class="css-ready-banner" type="button" hidden>READY TO FIGHT! &mdash; PRESS START</button>
+          </div>
         </div>
 
         <aside id="css-bio-panel" class="css-bio-panel" aria-live="polite">

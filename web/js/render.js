@@ -954,7 +954,9 @@ export class GameRenderer {
     let sx = f.squashX || 1;
     let sy = f.squashY || 1;
     let rot = 0;
-    if (f.state === STATE.CROUCH || f.state === STATE.JUMPSQUAT) {
+    if (f.state === STATE.JUMPSQUAT) {
+      sx *= 1.24; sy *= 0.68;
+    } else if (f.state === STATE.CROUCH) {
       sx *= 1.16; sy *= 0.8;
     } else if (f.state === STATE.DASH || f.state === STATE.RUN) {
       rot = f.facing * 0.14;
@@ -979,9 +981,19 @@ export class GameRenderer {
     if (rig.buddy) {
       const bob = Math.sin(t * 1.4) * 4;
       ctx.save();
-      ctx.translate(-34, bob);
-      ctx.scale(0.84, 0.84);
-      this._drawCharacterArtwork(ctx, { ...pal, body: pal.outfit, outfit: pal.body }, { ...rig, buddy: false }, w, h, f, t, activeSwing);
+      ctx.translate(-34, -h * 0.35 + bob);
+      ctx.fillStyle = '#ff4b8a';
+      ctx.strokeStyle = '#111122';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(-10, -8, 20, 22, 3); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#e23b3b';
+      ctx.beginPath(); ctx.roundRect(-8, -22, 16, 14, 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#7eefff';
+      ctx.fillRect(-4, -18, 4, 4); ctx.fillRect(2, -18, 4, 4);
+      ctx.strokeStyle = '#d0d4de'; ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(0, -30); ctx.stroke();
+      ctx.fillStyle = '#7eefff'; ctx.beginPath(); ctx.arc(0, -32, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#2a2438';
+      ctx.beginPath(); ctx.moveTo(-8, -2); ctx.lineTo(-16, 6); ctx.moveTo(8, -2); ctx.lineTo(16, 6); ctx.stroke();
       ctx.restore();
     }
 
@@ -1120,7 +1132,7 @@ export class GameRenderer {
     // Puff silhouettes (Flurby / Gigglefluff)
     if (sil === 'puff') {
       // Little feet
-      ctx.fillStyle = pal.outfit;
+      ctx.fillStyle = f?.def?.id === 'flurby' ? '#e23b3b' : pal.outfit;
       ctx.strokeStyle = outline; ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.ellipse(-9 + legSwing * 0.5, -5, 11, 6, 0, 0, Math.PI * 2);
@@ -1184,6 +1196,8 @@ export class GameRenderer {
       ctx.fillStyle = pal.accent;
       ctx.beginPath();
       ctx.moveTo(-bodyW * 0.75, shoulderY + 10); ctx.lineTo(-bodyW * 0.52, shoulderY + 4); ctx.lineTo(-bodyW * 0.52, shoulderY + 18); ctx.fill();
+      ctx.strokeStyle = '#d5dbe6'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-bodyW * 0.95, shoulderY + 8); ctx.lineTo(-bodyW * 1.2, shoulderY - 16); ctx.lineTo(-bodyW * 1.05, shoulderY - 28); ctx.stroke();
     } else {
       ctx.fillStyle = pal.outfit;
       ctx.fillRect(-bodyW * 0.42, shoulderY + bodyH * 0.42, bodyW * 0.84, bodyH * 0.46);
@@ -1255,6 +1269,19 @@ export class GameRenderer {
         ctx.fillStyle = pal.outfit;
         ctx.beginPath(); ctx.arc(0, -r * 0.5, r * 0.92, Math.PI, 0); ctx.fill(); ctx.stroke();
         ctx.fillRect(rig.hat === 'backCap' || rig.hat === 'snapback' ? -r * 1.35 : -2, -r * 0.55, r * 1.4, 5);
+        if (rig.hat === 'grillCap') {
+          ctx.fillStyle = '#ff6a1a';
+          ctx.beginPath(); ctx.moveTo(-8, -r * 0.7); ctx.lineTo(0, -r * 1.25); ctx.lineTo(8, -r * 0.7); ctx.fill();
+        }
+        break;
+      case 'glasses':
+        ctx.strokeStyle = '#1aa8b8'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(-6, -2, 6, 0, Math.PI * 2); ctx.arc(7, -2, 6, 0, Math.PI * 2); ctx.stroke();
+        break;
+      case 'hood':
+        ctx.fillStyle = pal.body;
+        ctx.beginPath(); ctx.arc(0, 2, r + 4, Math.PI * 1.05, Math.PI * 1.95); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = '#e7c56a'; ctx.stroke();
         break;
       case 'elfCap':
         ctx.fillStyle = pal.body;
@@ -1354,6 +1381,12 @@ export class GameRenderer {
       ctx.ellipse(7, 5, 9, 3.5, 0, 0, Math.PI * 2);
       ctx.fill();
     }
+    const who = f?.def?.id;
+    if (who === 'wonky-kong') { ctx.fillStyle = '#7ee7f2'; ctx.fillRect(-2, 6, 3, 6); ctx.fillRect(12, 7, 3, 5); }
+    if (who === 'screech') { ctx.strokeStyle = '#211628'; ctx.beginPath(); ctx.moveTo(2, -10); ctx.lineTo(8, -13); ctx.moveTo(10, -10); ctx.lineTo(16, -12); ctx.stroke(); }
+    if (who === 'velda') { ctx.fillStyle = '#ffe36a'; ctx.fillRect(5, -6, 2, 2); ctx.fillRect(12, -5, 2, 2); }
+    if (who === 'mewtooth') { ctx.fillStyle = '#7eefff'; ctx.fillRect(6, -4, 5, 3); }
+    if (who === 'flurby') { ctx.fillStyle = '#ff9ec4'; ctx.fillRect(0, -8, 16, 4); }
 
     ctx.restore();
   }
@@ -1380,16 +1413,22 @@ export class GameRenderer {
         ctx.beginPath(); ctx.arc(40, 0, 6, 0, Math.PI * 2); ctx.fill();
         break;
       case 'wrench':
-      case 'spork':
         ctx.fillStyle = '#cbd5e1';
-        ctx.fillRect(0, -4, prop === 'wrench' ? 34 : 24, 7);
-        ctx.strokeRect(0, -4, prop === 'wrench' ? 34 : 24, 7);
-        ctx.beginPath(); ctx.arc(prop === 'wrench' ? 36 : 26, 0, 8, 0.5, Math.PI * 1.85); ctx.fill(); ctx.stroke();
+        ctx.fillRect(0, -4, 34, 7);
+        ctx.strokeRect(0, -4, 34, 7);
+        ctx.beginPath(); ctx.arc(36, 0, 8, 0.5, Math.PI * 1.85); ctx.fill(); ctx.stroke();
+        break;
+      case 'spork':
+        ctx.fillStyle = '#d5dbe6';
+        ctx.fillRect(0, -3, 28, 5);
+        ctx.fillRect(26, -7, 3, 14); ctx.fillRect(31, -7, 3, 16); ctx.fillRect(36, -7, 3, 14);
         break;
       case 'spatula':
         ctx.fillStyle = '#94a3b8';
         ctx.fillRect(0, -3, 26, 5);
         ctx.fillRect(24, -10, 16, 20);
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(28, -6, 8, 2); ctx.fillRect(28, 1, 8, 2);
         ctx.strokeRect(24, -10, 16, 20);
         break;
       case 'armCannon':
@@ -1397,18 +1436,36 @@ export class GameRenderer {
         ctx.beginPath(); ctx.roundRect(-6, -9, 26, 18, 6); ctx.fill(); ctx.stroke();
         break;
       case 'judgeHammer':
-        ctx.fillStyle = '#111';
-        ctx.fillRect(0, -2, 22, 4);
-        ctx.fillStyle = pal.accent;
-        ctx.fillRect(16, -12, 12, 24);
+        ctx.strokeStyle = '#ff2e9a'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(28, -2, 9, 0.4, Math.PI * 1.7); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(28, 6); ctx.lineTo(28, 16); ctx.moveTo(0, 0); ctx.lineTo(20, 0); ctx.stroke();
         break;
       case 'fryingPan':
+        ctx.fillStyle = '#2a3142';
+        ctx.fillRect(0, -3, 22, 6);
+        ctx.beginPath(); ctx.ellipse(34, 0, 14, 12, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        break;
       case 'bat':
+        ctx.fillStyle = '#a56b3c';
+        ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(22, -3); ctx.lineTo(40, -7); ctx.lineTo(40, 7); ctx.lineTo(22, 3); ctx.closePath(); ctx.fill(); ctx.stroke();
+        break;
       case 'shovel':
+        ctx.fillStyle = '#8d5a32';
+        ctx.fillRect(0, -3, 24, 6);
+        ctx.fillStyle = '#9fd7ea';
+        ctx.fillRect(22, -12, 16, 24); ctx.strokeRect(22, -12, 16, 24);
+        break;
       case 'squeegee':
-        ctx.fillStyle = pal.accent;
+        ctx.fillStyle = '#7c3aed';
         ctx.fillRect(0, -3, 26, 6);
-        ctx.strokeRect(0, -3, 26, 6);
+        ctx.fillStyle = '#d5dbe6';
+        ctx.fillRect(24, -12, 4, 24);
+        ctx.fillStyle = '#1a1a1e';
+        ctx.fillRect(28, -11, 4, 22);
+        break;
+      case 'pill':
+        ctx.fillStyle = '#e23b3b'; ctx.beginPath(); ctx.ellipse(10, 0, 10, 7, 0, Math.PI / 2, Math.PI * 1.5); ctx.fill();
+        ctx.fillStyle = '#f5d90a'; ctx.beginPath(); ctx.ellipse(22, 0, 10, 7, 0, -Math.PI / 2, Math.PI / 2); ctx.fill();
         break;
     }
     ctx.restore();

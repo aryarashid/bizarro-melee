@@ -1,11 +1,11 @@
 import { ITEM_FREQUENCY, MELEE, MODE, MOVE, STATE, TICK_RATE, WORLD_SCALE, computeMeleeKnockback, detAtan2, detCos, detHypot, detSin, detTan } from './constants.js';
-import { CRITTER_SUMMONS, ITEM_DEF, pickRandomItemDef } from './items.js';
+import { CRITTER_SUMMONS, ITEM_DEF, TURNIPS, pickRandomItemDef } from './items.js';
 import { BIZARRO_INTERN, getFighterById, MASTER_MITT, SAGGING_BAG } from './roster.js';
 import { getStageById, getStageForm, getSurfaceY, HOMERUN_STAGE, TARGET_STAGE, resolveStagePlatforms, resolveStageSolids } from './stages.js';
 
 const S = STATE;
 const M = MOVE;
-const AIR_ATTACKS = new Set([M.NAIR, M.FAIR, M.BAIR, M.UAIR, M.DAIR]);
+const AIR_ATTACKS = new Set([M.NAIR, M.FAIR, M.BAIR, M.UAIR, M.DAIR, M.ZAIR]);
 const SMASH_MOVES = new Set([M.FSMASH, M.USMASH, M.DSMASH]);
 const JABS = [M.JAB, M.JAB2, M.JAB3];
 const GROUND_MOVEMENT = new Set([S.IDLE, S.WALK, S.DASH, S.RUN, S.TURN, S.CROUCH]);
@@ -30,6 +30,9 @@ const C_GROUND = 0.55;
 const C_AIR = 0.40;
 const DASH_FRAMES = 13;
 const MOVE_PACE = 0.76;
+const GETUP_ATTACK = { kind: 'strike', startup: 15, active: 3, endlag: 12,
+  damage: 6, bkb: 48, kbg: 48, angle: 35, offsetX: 36, offsetY: 17, radius: 31, bothSides: true };
+const LASER_USERS = new Set(['faux', 'falcont']);
 const DJC_FIGHTERS = new Set(['mess', 'mewtooth', 'broshee', 'screech']);
 const EMPTY = Object.freeze({});
 const ITEM_CAP = 6;
@@ -99,6 +102,11 @@ function stickPresses(match, f, input) {
 
 // Store button edges with their stick direction. Held buttons continue to come
 // from the current sample so buffering a tap never extends a charge or full hop.
+function freshHorizontalFlick(f, input) {
+  const x = input.moveX || 0;
+  return !input.tiltMod && Math.abs(x) >= SMASH && f.stickHist.some((s) => s.x * Math.sign(x) < 0.35);
+}
+
 function rememberPresses(match, f, input) {
   const x = input.cStickX || 0, y = input.cStickY || 0;
   const magnitude = Math.max(Math.abs(x), Math.abs(y));
@@ -114,7 +122,7 @@ function rememberPresses(match, f, input) {
   for (const key of INPUT_BUTTONS) {
     if (input[key + 'Pressed']) {
       f.inputBuffer[key] = { frame: match.frame, moveX: input.moveX || 0, moveY: input.moveY || 0,
-        prevX: f.prevMoveX || 0, prevY: f.prevMoveY || 0, tapJumpPressed: key === 'jump' && !!input.tapJumpPressed, shortHopPressed: key === 'jump' && !!input.shortHopPressed };
+        prevX: f.prevMoveX || 0, prevY: f.prevMoveY || 0, flickX: freshHorizontalFlick(f, input), tapJumpPressed: key === 'jump' && !!input.tapJumpPressed, shortHopPressed: key === 'jump' && !!input.shortHopPressed };
     } else if (f.inputBuffer[key] && match.frame - f.inputBuffer[key].frame > 5) {
       delete f.inputBuffer[key];
     }
@@ -127,7 +135,7 @@ function bufferedInput(f, input, keys) {
   const press = f.inputBuffer[key];
   delete f.inputBuffer[key];
   if (!press || input[key + 'Pressed']) return input;
-  return { ...input, moveX: press.moveX, moveY: press.moveY, prevX: press.prevX, prevY: press.prevY, tapJumpPressed: press.tapJumpPressed, shortHopPressed: input.shortHopPressed || press.shortHopPressed, [key + 'Pressed']: true };
+  return { ...input, moveX: press.moveX, moveY: press.moveY, prevX: press.prevX, prevY: press.prevY, flickX: press.flickX, tapJumpPressed: press.tapJumpPressed, shortHopPressed: input.shortHopPressed || press.shortHopPressed, [key + 'Pressed']: true };
 }
 
 function clearSpecial(f) {
@@ -140,8 +148,11 @@ function clearSpecial(f) {
 function transition(f, state, restart = false) {
   if (f.state === state && !restart) return;
   if (f.state === S.ATTACK) clearSpecial(f);
+  if (f.state === S.LEDGE_HANG && state !== S.LEDGE_HANG) f.ledgeCooldown = MELEE.LEDGE_REGRAB_COOLDOWN;
   if (state !== S.FREEFALL) f.parasolOpen = false;
-  if (f.state === S.ROLL_F) f.ledgeRollFrames = 0;
+  if (DODGES.has(f.state)) f.ledgeRollFrames = 0;
+  f.getupRolling = false;
+  if (state !== S.GRAB_HOLD && state !== S.THROW) f.cargo = false;
   if (f.state === S.JUMPSQUAT) f.bufferedAerial = null;
   if (state !== S.AIRBORNE && state !== S.AIRDODGE) f.ledgeDropFrame = null;
   if (state !== S.AIRBORNE) f.doubleJumping = false;
@@ -165,6 +176,8 @@ function stopMove(f) {
   f.chargeFrames = 0;
   f.smashChargeKey = null;
   f.smashChargeFrames = f.jabStep = f.jabWindow = 0;
+  f.bladeInput = null;
+  f.floatAerial = false;
   f.activeHitboxes = [];
 }
 
@@ -189,7 +202,7 @@ function zipCrouch(f) {
 
 export function getFighterHurtbox(f, state = f.state, x = f.x, y = f.y) {
   const { width, height } = f.def.stats;
-  const low = state === S.CROUCH || state === S.KNOCKDOWN || state === S.TECH || state === S.ATTACK && zipCrouch(f);
+  const low = state === S.CROUCH || state === S.KNOCKDOWN || state === S.TECH || state === S.ATTACK && f.moveKey === M.GETUP_ATTACK || state === S.ATTACK && zipCrouch(f);
   const hanging = state === S.LEDGE_HANG;
   const dodging = DODGES.has(state);
   const h = height * (f.scale ?? 1) * (low ? 0.46 : dodging ? 0.68 : 1);
@@ -234,7 +247,7 @@ function makeState(match, player, stocks) {
     set invulnTimer(frames) { this.invulnFrames = frames; },
     shieldHp: MELEE.SHIELD_MAX, shieldBroken: false, lCancelTimer: 0, techTimer: 0,
     chargeFrames: 0, judgeNum: 0, moveKey: null, moveData: null, moveFrame: 0, hitTargets: new Set(),
-    grabbedBy: null, grabbing: null, pummelTimer: 0, staleQueue: [], staleMultipliers: [...MELEE.STALE_WEIGHTS],
+    grabbedBy: null, grabbing: null, cargo: false, pummelTimer: 0, staleQueue: [], staleMultipliers: [...MELEE.STALE_WEIGHTS],
     lastHitBy: null, lastHitTimer: 0, animPhase: 0, squashX: 1, squashY: 1, activeHitboxes: [],
     shieldStun: 0, shieldDrop: 0, techLock: 0, dropTimer: 0, dropId: null, landingLag: 0,
     dodgeDir: 0, specialAimX: 0, specialAimY: 0, launchAngle: null, launchSpeed: 0,
@@ -243,6 +256,7 @@ function makeState(match, player, stocks) {
     shieldScale: 1, lightShielding: false, didShortHop: false, didAerial: false, didFastFall: false,
     shineJump: false, sdiCount: 0, lastKnockback: 0, trueComboCount: 0, comboMoves: [], receivedCombo: null,
     shieldAge: 0, smashChargeKey: null, smashChargeFrames: 0, jabStep: 0, jabWindow: 0,
+    getupRolling: false, jabReset: false, needleCount: 0, bucketCount: 0, bladeInput: null, floatAerial: false,
     meteorHitFrame: -999, wallJumpCooldown: 0, starHits: new Map(),
   };
   clearSpecial(f);
@@ -387,10 +401,10 @@ function leaveFloor(f) {
 }
 
 function jump(match, f, input) {
-  if (!f.grounded && f.jumpsUsed >= f.def.stats.maxJumps) return false;
+  if (!f.grounded && (f.hammerTimer || f.jumpsUsed >= f.def.stats.maxJumps)) return false;
   stopMove(f);
   if (f.grounded) {
-    f.shortHop = !!input.shortHopPressed || !input.jump;
+    f.shortHop = !!input.shortHopPressed || !input.jump || !!f.hammerTimer;
     f.queuedAttack = null;
     f.tapJumpSquat = !!input.tapJumpPressed;
     f.bufferedAerial = null;
@@ -500,7 +514,8 @@ function moveData(f, key) {
   if (!m && (key === M.JAB2 || key === M.JAB3)) {
     const jab = f.def.moves[M.JAB];
     const finisher = key === M.JAB3;
-    return { ...jab, name: finisher ? 'Jab Finisher' : 'Jab Follow-Up',
+    const { hitboxes, ...base } = jab;
+    return { ...base, name: finisher ? 'Jab Finisher' : 'Jab Follow-Up',
       damage: jab.damage * (finisher ? 1.45 : 0.85), offsetX: (jab.offsetX ?? 34) + (finisher ? 9 : 4),
       bkb: finisher ? 41 : 15, kbg: finisher ? 81 : 21, angle: finisher ? 38 : 361,
       endlag: finisher ? jab.endlag + 3 : jab.endlag };
@@ -512,6 +527,7 @@ function moveData(f, key) {
 }
 
 function startMove(match, f, key, input = EMPTY, data = moveData(f, key)) {
+  f.floatAerial = f.floating && AIR_ATTACKS.has(key);
   if (!f.grounded && AIR_ATTACKS.has(key)) {
     f.didAerial = true;
     if (f.doubleJumping && f.doubleJumpFrame <= 12 && DJC_FIGHTERS.has(f.fighterId)) {
@@ -524,6 +540,16 @@ function startMove(match, f, key, input = EMPTY, data = moveData(f, key)) {
     clearMeteor(f);
   }
   if (!f.grounded && key === M.SIDE_B && data.kind === 'dashBurst') f.sideBUsed = true;
+  if (data.missile) {
+    const flick = input.flickX ?? freshHorizontalFlick(f, input);
+    data = flick ? { ...data, name: 'Super Duct Missile', damage: 14, bkb: 54, kbg: 104, projSpeed: 22,
+      homing: false, sweetspot: true } : { ...data, homing: true };
+  } else if (data.kind === 'needles' && f.needleCount > 0) {
+    data = needleBurst(data, f.needleCount);
+  } else if (data.kind === 'bucket' && f.bucketCount === 3) {
+    data = { ...data, kind: 'oilSplash', name: 'Grease Dump', startup: 7, active: 4, endlag: 26,
+      damage: 32, bkb: 78, kbg: 130, angle: 48, offsetX: 61, offsetY: 32, radius: 52, sweetspot: true };
+  }
   if (data.bossTell) {
     f.bossAttackCount++;
     f.bossLastAttack = data.bossTell;
@@ -552,6 +578,7 @@ function startMove(match, f, key, input = EMPTY, data = moveData(f, key)) {
   if (data.storableCharge && !f.charging) f.chargeFrames = Math.round(f.chargeShotLevel * 60);
   f.smashChargeKey = (SMASH_MOVES.has(key) || data.chargeable && key === M.ITEM_SWING) && input.attack ? key : null;
   f.smashChargeFrames = f.jabWindow = 0;
+  f.bladeInput = null;
   f.jabStep = JABS.indexOf(key) + 1;
   f.specialAimX = input.moveX || 0;
   f.specialAimY = input.moveY || 0;
@@ -658,6 +685,7 @@ function grabTarget(match, attacker, victim) {
   victim.grabbedBy = attacker.port;
   victim.vx = victim.vy = victim.kbVx = victim.kbVy = 0;
   victim.hitstun = 0;
+  victim.jabReset = false;
   victim.launchAngle = null;
   victim.facing = -attacker.facing;
   transition(victim, S.GRABBED);
@@ -681,7 +709,6 @@ function ledgeAction(match, f, input) {
 
   const id = f.ledgeId;
   f.ledgeId = null;
-  f.ledgeCooldown = MELEE.LEDGE_REGRAB_COOLDOWN;
   if (input.specialPressed || drop) {
     f.invulnFrames = 8;
     f.vx = (input.moveX || 0) * 2;
@@ -782,7 +809,7 @@ function shieldPressure(f, input) {
 function neutral(match, f, input) {
   const keys = [];
   if (f.grounded || f.jumpsUsed < f.def.stats.maxJumps) keys.push('jump');
-  if (f.grounded || f.heldItemId != null) keys.push('grab');
+  keys.push('grab');
   if (!f.grounded || f.shieldDrop <= 0) keys.push('shield');
   keys.push('special', 'attack');
   input = bufferedInput(f, input, keys);
@@ -818,9 +845,11 @@ function neutral(match, f, input) {
     }
     return;
   }
-  if (!f.grounded && input.grabPressed) {
+  if (!f.grounded && input.grabPressed && !input.specialPressed) {
     delete f.inputBuffer.grab;
-    input = { ...input, attackPressed: true };
+    delete f.inputBuffer.cStick;
+    startMove(match, f, f.def.moves[M.ZAIR] ? M.ZAIR : M.NAIR, input);
+    return;
   }
   if (selectAttack(match, f, input)) return;
   if (f.grounded && input.tauntPressed) {
@@ -849,24 +878,26 @@ function spawnProjectile(match, f, m, source = f) {
   const { facing } = source;
   const aim = (m.projAngle ?? ((m.projBounce || m.projSlide) && m.projGravity > 0 ? -6 : 0)) * RAD;
   const ratio = m.kind === 'chargeShot' ? 0.35 + 0.65 * f.chargeFrames / 60 : 1;
-  const x = source.x + facing * Math.max(24, Math.abs(m.offsetX ?? 30));
+  const x = m.spawnAtOrigin ? source.x : source.x + facing * Math.max(24, Math.abs(m.offsetX ?? 30));
   const y = source.y + (m.offsetY ?? f.def.stats.height * 0.5);
   const style = m.projStyle ?? 'fireball';
   const radius = Math.max(5, Math.round((m.radius ?? 18) * 0.7 * Math.sqrt(ratio)));
   const life = m.projLife ?? 60;
-  match.projectiles.push({
-    id: match.nextEntityId++, muzzleRootX: source.x, x, y, vx: facing * (m.projSpeed ?? 12) * detCos(aim), vy: (m.projSpeed ?? 12) * detSin(aim),
+  const projectile = {
+    id: match.nextEntityId++, muzzleRootX: m.spawnAtOrigin ? null : source.x, x, y, vx: facing * (m.projSpeed ?? 12) * detCos(aim), vy: (m.projSpeed ?? 12) * detSin(aim),
     r: radius, radius, ownerPort: f.port, port: f.port, style, life, maxLife: life, facing,
     damage: m.damage * ratio, moveKey: source.moveKey, sourceFighterId: f.fighterId,
     moveData: m.storableCharge && ratio < 1 ? { ...m, sweetspot: false } : m, mult: source.moveStale,
     varied: ratio, hitTargets: new Set(), recorded: false, age: 0, reflections: 0,
-  });
+  };
+  match.projectiles.push(projectile);
   match.events.push({ type: 'projectile', x, y, style, port: f.port });
   if (m.selfLiftY) {
     leaveFloor(f);
     f.vy = Math.max(f.vy, m.selfLiftY);
     f.fastFalling = false;
   }
+  return projectile;
 }
 
 function stickAngle(match, f, input) {
@@ -991,6 +1022,27 @@ function tickSpecial(match, f, m, input, frame) {
   }
 }
 
+function danceSlash(f, m, y) {
+  const stage = (m.bladeStage ?? 1) + 1;
+  const up = y > 0.44;
+  const down = y < -0.44;
+  const final = stage === 4;
+  const finisher = final && !down;
+  const troy = f.fighterId === 'troy';
+  return { ...m, bladeStage: stage, startup: final ? 6 : 4, active: 4, endlag: final ? 21 : 15,
+    damage: finisher ? (troy ? 13 : 11) : 5 + stage / 2, offsetX: troy ? 37 : 53,
+    offsetY: up ? 57 : down ? 21 : 35, bkb: finisher ? 49 : up ? 36 : 24, kbg: finisher ? 98 : 35,
+    angle: up ? 85 : down && !f.grounded ? 270 : down ? 75 : final ? 34 : 42,
+    meteor: final && down, sweetspot: finisher, element: troy ? 'fire' : 'slash',
+    ...(final && down && { damage: 5, active: 11, offsetY: 19,
+      multiHit: { hits: 4, interval: 3, linkDamage: 2, finalDamage: 6, finalAngle: f.grounded ? 55 : 270,
+        finalBkb: 40, finalKbg: 78 } }) };
+}
+
+function needleBurst(m, count) {
+  return { ...m, kind: 'needleBurst', active: count * 2 - 1, shotInterval: 2 };
+}
+
 function activateSpecial(match, f, m) {
   if (m.bossTell === 'gun') {
     const dx = Math.max(1, (f.bossTargetX - f.x) * f.facing - Math.abs(m.offsetX));
@@ -1002,14 +1054,23 @@ function activateSpecial(match, f, m) {
     spawnProjectile(match, f, m);
     if (m.storableCharge) f.chargeShotLevel = 0;
   }
-  if (m.dropItem) spawnItem(match, ITEM_DEF[m.dropItem], f.x + f.facing * 40, f.y + 48, f.facing * 2, 5);
-  if (m.kind === 'itemShot') {
-    const item = heldItem(match, f);
-    if (item?.id === m.itemId && item.ammo > 0) {
-      item.ammo--;
-      spawnProjectile(match, f, m);
-    }
+  if (m.kind === 'needleBurst') {
+    f.needleCount = 0;
+    spawnProjectile(match, f, m);
+  } else if (m.kind === 'turnipPull' && f.grounded && !heldItem(match, f)) {
+    const roll = drawRng(match);
+    const def = roll < 0.75 ? TURNIPS[0] : roll < 0.90 ? TURNIPS[1] :
+      roll < 0.96 ? TURNIPS[2] : roll < 0.99 ? TURNIPS[3] : ITEM_DEF.alarm_omb;
+    pickupItem(match, f, spawnItem(match, def, f.x, f.y));
+  } else if (m.kind === 'thunderCall') {
+    spawnProjectile(match, f, { damage: 8, bkb: 40, kbg: 52, angle: 270, meteor: true,
+      projStyle: 'bolt', projLife: 60, projSpeed: 32, projAngle: -90, radius: 30, offsetY: 0, spawnAtOrigin: true,
+      thunder: true, element: 'lightning' }, { ...f, y: Math.min(match.stage.blastzones.top - 12, f.y + 540) });
+  } else if (m.kind === 'oilSplash') {
+    f.bucketCount = 0;
   }
+  if (m.dropItem) spawnItem(match, ITEM_DEF[m.dropItem], f.x + f.facing * 40, f.y + 48, f.facing * 2, 5);
+  if (m.kind === 'itemShot' || m.kind === 'itemStream') fireItem(match, f, m);
   if (m.kind === 'reflector') event(match, 'shine', f);
   if (m.kind === 'dashBurst') {
     const misfire = m.misfireChance && drawRng(match) < m.misfireChance;
@@ -1040,10 +1101,10 @@ function activateSpecial(match, f, m) {
   }
 }
 
-function storeCharge(match, f) {
+function storeCharge(match, f, level = f.chargeShotLevel) {
   stopMove(f);
   transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
-  event(match, 'chargeStored', f, { level: f.chargeShotLevel });
+  event(match, 'chargeStored', f, { level });
 }
 
 function tickAttack(match, f, input) {
@@ -1059,6 +1120,53 @@ function tickAttack(match, f, input) {
     faceInput(f, x);
     f.vx = approach(f.vx, x * f.def.stats.walkSpeed * 1.5,
       f.def.stats.traction * (match.stage.iceTraction ?? 1) * 2.5);
+  }
+  const held = heldItem(match, f);
+  if (m.kind === 'itemCharge') {
+    if (!held || held.id !== m.itemId) {
+      stopMove(f);
+      transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
+      return;
+    }
+    if (input.attack && f.chargeFrames < held.def.chargeLimit) {
+      f.chargeFrames++;
+      return;
+    }
+    const full = f.chargeFrames >= held.def.chargeLimit && held.ammo >= held.def.chargeCost;
+    const shot = full ? { damage: 25, bkb: 68, kbg: 111, radius: 31, projSpeed: 24,
+      sweetspot: true, hitstunOnly: false, ammoCost: held.def.chargeCost, endlag: 18 }
+      : { damage: held.def.shotDamage, hitstunOnly: true, endlag: 5 };
+    startMove(match, f, M.ITEM_SWING, EMPTY, { ...m, ...shot, kind: 'itemShot' });
+    return;
+  }
+  if (m.kind === 'itemStream' && (!input.attack || !held?.ammo) && f.moveFrame >= m.startup && f.moveFrame < m.startup + m.active) {
+    f.moveFrame = m.startup + m.active;
+  }
+  if (!f.grounded && input.grabPressed && held && !f.hammerTimer &&
+      detHypot(input.moveX || 0, input.moveY || 0) < 0.35) zDrop(match, f, held);
+  if (m.kind === 'dancingBlade' && (m.bladeStage ?? 1) < 4 &&
+      f.moveFrame >= m.startup - 2 && f.moveFrame < m.startup + m.active + 7) {
+    input = bufferedInput(f, input, ['special']);
+    if (input.specialPressed) f.bladeInput = input;
+    if (f.bladeInput && f.moveFrame >= m.startup + m.active - 1) {
+      startMove(match, f, M.SIDE_B, f.bladeInput, danceSlash(f, m, f.bladeInput.moveY || 0));
+      return;
+    }
+  }
+  if (m.kind === 'needles') {
+    f.needleCount = Math.min(6, Math.floor(f.moveFrame / 7));
+    if (input.shieldPressed || input.jumpPressed && (f.grounded || f.jumpsUsed < f.def.stats.maxJumps)) {
+      storeCharge(match, f, f.needleCount / 6);
+      neutral(match, f, input);
+      return;
+    }
+    if (input.special && f.needleCount < 6) {
+      f.moveFrame++;
+      return;
+    }
+    if (f.needleCount > 0) storeCharge(match, f, f.needleCount / 6);
+    else startMove(match, f, M.NEUTRAL_B, input, needleBurst(m, 1));
+    return;
   }
   const reverseWindow = m.kind === 'powerPunch' ? f.moveFrame >= 5 && f.moveFrame < 18 : f.moveFrame >= 1 && f.moveFrame <= 3;
   if (!f.bReversed && (f.moveKey === M.NEUTRAL_B || f.moveKey === M.DOWN_B) &&
@@ -1077,12 +1185,13 @@ function tickAttack(match, f, input) {
     f.shineJump = shine && f.grounded;
     return;
   }
-  if (f.jabStep > 0 && f.jabStep < JABS.length && f.grounded) {
+  if (f.jabStep > 0 && f.grounded && (f.jabStep < JABS.length || m.rapidJab)) {
     const elapsed = f.moveFrame - m.startup - m.active + 1;
     f.jabWindow = elapsed >= 0 ? Math.max(0, m.endlag - elapsed + 1) : 0;
     if (f.jabWindow > 0) input = bufferedInput(f, input, ['attack']);
     if (input.attackPressed && f.jabWindow > 0) {
-      startMove(match, f, JABS[f.jabStep], input);
+      delete f.inputBuffer.attack;
+      startMove(match, f, JABS[Math.min(f.jabStep, JABS.length - 1)], input);
       return;
     }
   }
@@ -1144,8 +1253,9 @@ function tickAttack(match, f, input) {
       if (victim?.grabbedBy === f.port) {
         victim.grabbedBy = null;
         f.grabbing = null;
-        victim.x = f.x + 26 * f.facing;
+        victim.x = f.x + (m.releaseX ?? (f.moveKey === M.BTHROW ? -26 : 23)) * f.facing;
         victim.y = f.y;
+        f.cargo = false;
         strike(match, f, victim, m, { key: f.moveKey, mult: f.moveStale, unblockable: true });
         if (!f.moveRecorded) stale(f, f.moveKey);
         f.moveRecorded = true;
@@ -1153,13 +1263,15 @@ function tickAttack(match, f, input) {
     } else activateSpecial(match, f, m);
   }
   if (m.shotInterval && activeFrame > 0 && activeFrame < m.active && activeFrame % m.shotInterval === 0) {
-    spawnProjectile(match, f, m);
+    if (m.kind === 'itemStream') fireItem(match, f, m);
+    else spawnProjectile(match, f, m);
   }
   if (f.moveFrame >= m.startup + m.active + m.endlag) {
     stopMove(f);
     const helpless = m.kind === 'recovery' || m.kind === 'teleport' || m.technique === 'illusion';
     transition(f, f.grounded ? S.IDLE : helpless ? S.FREEFALL : S.AIRBORNE);
-    if (f.inputBuffer.cStick && f.state !== S.FREEFALL) neutral(match, f, input);
+    if ((!helpless || f.grounded) && (f.inputBuffer.cStick || f.inputBuffer.attack || f.inputBuffer.special ||
+        f.inputBuffer.grab || f.inputBuffer.jump || f.inputBuffer.shield)) neutral(match, f, input);
   }
 }
 
@@ -1206,6 +1318,21 @@ function tickGrabHold(match, f, input) {
     return;
   }
   const c = f.inputBuffer.cStick;
+  if (f.cargo && !c) {
+    input = bufferedInput(f, input, ['attack', 'grab']);
+    const x = input.moveX || 0, y = input.moveY || 0;
+    if (input.attackPressed || input.grabPressed || Math.abs(y) > 0.57 ||
+        x * f.facing < -0.57 && (f.prevMoveX || 0) * f.facing >= -0.57) {
+      const key = Math.max(Math.abs(x), Math.abs(y)) < 0.57 ? M.FTHROW : throwDirection(f, x, y);
+      startMove(match, f, key);
+    } else {
+      const floor = match.surfaces.find((s) => s.id === f.onPlatformId) ??
+        match.platforms.find((s) => s.id === f.onPlatformId);
+      const speed = x * f.def.stats.walkSpeed * 0.67;
+      f.vx = floor && withinX(f.x + speed * 2, floor, -5) ? speed : 0;
+    }
+    return;
+  }
   if (c && Math.max(Math.abs(c.x), Math.abs(c.y)) >= C_GROUND) {
     delete f.inputBuffer.cStick;
     startMove(match, f, throwDirection(f, c.x, c.y));
@@ -1224,7 +1351,11 @@ function tickGrabHold(match, f, input) {
   }
   const { moveX: x = 0, moveY: y = 0 } = input;
   if (f.stateFrame < 5 || f.pummelTimer > 4 || Math.max(Math.abs(x), Math.abs(y)) < 0.57) return;
-  startMove(match, f, throwDirection(f, x, y));
+  const key = throwDirection(f, x, y);
+  if (f.fighterId === 'wonky-kong' && f.grounded && key === M.FTHROW) {
+    f.cargo = true;
+    event(match, 'tech', f, { tech: 'CARGO CARRY' });
+  } else startMove(match, f, key);
 }
 
 function throwDirection(f, x, y) {
@@ -1261,7 +1392,7 @@ function updateState(match, f, input) {
   if (f.sleepImmuneFrames > 0) f.sleepImmuneFrames--;
   if (f.sleepTimer > 0 && --f.sleepTimer === 0) wakeFromSleep(match, f);
   if (f.hitlag > 0) {
-    if (HURT.has(f.state)) hitlagDI(match, f, input);
+    if (HURT.has(f.state) && !f.jabReset) hitlagDI(match, f, input);
     f.hitlag--;
     if (!f.hitlag && f.launchAngle != null) applyDI(f, input);
     return false;
@@ -1298,7 +1429,7 @@ function updateState(match, f, input) {
     case S.HITSTUN:
     case S.TUMBLE:
       if (tryMeteorCancel(match, f, input)) break;
-      if (f.hitstun > 0) f.hitstun--;
+      if (f.hitstun > 0 && --f.hitstun === 0) f.jabReset = false;
       if (f.state === S.TUMBLE && !f.hitstun && (f.inputBuffer.cStick || input.jumpPressed || input.specialPressed || input.attackPressed ||
           (Math.abs(input.moveX || 0) > 0.65 && Math.abs(f.prevMoveX || 0) <= 0.65))) {
         transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
@@ -1324,24 +1455,31 @@ function updateState(match, f, input) {
       if (f.state === S.ATTACK) tickAttack(match, f, input);
       break;
     case S.SHIELD_STUN:
-      if (--f.shieldStun <= 0) transition(f, S.SHIELD);
-      break;
+      if (--f.shieldStun > 0) break;
+      transition(f, S.SHIELD);
+      // falls through to the first actionable shield frame
     case S.SHIELD:
       if (f.inputBuffer.cStick?.y >= C_GROUND && !f.inputBuffer.cStick.tilt &&
           f.inputBuffer.cStick.y >= Math.abs(f.inputBuffer.cStick.x)) {
         delete f.inputBuffer.cStick;
         startMove(match, f, M.USMASH, input);
         event(match, 'tech', f, { tech: 'JC UPSMASH' });
+        tickAttack(match, f, input);
         break;
       }
       input = bufferedInput(f, input, ['special', 'jump', 'grab', 'attack']);
-      if (input.moveY <= -0.52 && match.platforms.some((p) => p.id === f.onPlatformId) &&
-          (input.moveY > -0.92 || f.lightShielding && (f.prevMoveY || 0) > -0.52 || input.jumpPressed)) {
+      if (input.moveY <= -0.52 && input.moveY > -0.92 && !input.specialPressed && !input.attackPressed &&
+          !input.jumpPressed && !input.grabPressed && match.platforms.some((p) => p.id === f.onPlatformId)) {
         dropThrough(f);
         event(match, 'tech', f, { tech: 'SHIELD DROP' });
       } else if (input.specialPressed && input.moveY > 0.42) {
         delete f.inputBuffer.jump;
         startMove(match, f, M.UP_B, input);
+      } else if (input.attackPressed && input.moveY >= SMASH && Math.abs(input.moveX || 0) <= input.moveY) {
+        delete f.inputBuffer.jump;
+        delete f.inputBuffer.attack;
+        startMove(match, f, M.USMASH, input);
+        event(match, 'tech', f, { tech: 'JC UPSMASH' });
       } else if (input.jumpPressed) {
         jump(match, f, input);
       } else if (input.grabPressed || input.attackPressed) {
@@ -1356,6 +1494,7 @@ function updateState(match, f, input) {
       } else if ((f.shieldHp -= MELEE.SHIELD_DRAIN * (f.lightShielding ? 0.6 : 1)) <= 0) {
         breakShield(match, f);
       }
+      if (f.state === S.ATTACK) tickAttack(match, f, input);
       break;
     case S.SHIELD_BREAK:
       if (f.grounded) {
@@ -1372,8 +1511,10 @@ function updateState(match, f, input) {
     case S.SPOTDODGE: {
       const duration = f.ledgeRollFrames || (f.state === S.SPOTDODGE ? MELEE.SPOTDODGE_FRAMES : MELEE.ROLL_FRAMES);
       if (f.stateFrame >= duration) {
-        if (f.ledgeRollFrames) f.vx = 0;
+        if (f.ledgeRollFrames || f.getupRolling) f.vx = 0;
+        const getup = f.getupRolling;
         transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
+        if (getup) neutral(match, f, input);
       } else {
         const peak = f.ledgeRollFrames ? 94 * detTan(Math.PI / (2 * duration)) : 6.7;
         f.vx = f.dodgeDir * detSin(Math.PI * f.stateFrame / duration) * peak;
@@ -1406,15 +1547,30 @@ function updateState(match, f, input) {
         neutral(match, f, input);
       }
       break;
-    case S.KNOCKDOWN:
-      if (f.stateFrame >= 45 || f.stateFrame >= 14 &&
-          (input.attackPressed || input.shieldPressed || input.jumpPressed || Math.abs(input.moveX || 0) > 0.5)) {
-        f.inputBuffer = {};
-        f.invulnFrames = Math.max(f.invulnFrames, 9);
-        f.landingLag = 11;
+    case S.KNOCKDOWN: {
+      if (!f.grounded || f.stateFrame < 8) break;
+      input = bufferedInput(f, input, ['attack', 'jump', 'shield']);
+      const x = input.moveX || 0;
+      const roll = Math.abs(x) > 0.5;
+      if (f.stateFrame < 45 && !roll && !input.attackPressed && !input.jumpPressed &&
+          !input.shieldPressed && !(input.moveY > 0.5)) break;
+      f.inputBuffer = {};
+      f.vx = f.kbVx = 0;
+      if (input.attackPressed) {
+        f.invulnFrames = Math.max(f.invulnFrames, 16);
+        startMove(match, f, M.GETUP_ATTACK, EMPTY, GETUP_ATTACK);
+      } else if (roll) {
+        transition(f, x * f.facing > 0 ? S.ROLL_F : S.ROLL_B);
+        f.getupRolling = true;
+        f.dodgeDir = Math.sign(x);
+        f.invulnFrames = Math.max(f.invulnFrames, 16);
+      } else {
+        f.invulnFrames = Math.max(f.invulnFrames, 14);
+        f.landingLag = 24;
         transition(f, S.LANDING);
       }
       break;
+    }
     case S.TAUNT:
       if (f.stateFrame >= 45) transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
       break;
@@ -1431,6 +1587,8 @@ function land(match, f, surface, input, velocity) {
   const shffl = f.didShortHop && f.didFastFall && f.didAerial;
   f.didShortHop = f.didFastFall = f.didAerial = false;
   const activeAerial = prior === S.ATTACK && AIR_ATTACKS.has(f.moveKey);
+  const floatCancel = activeAerial && f.fighterId === 'screech' && (f.floating || f.floatAerial);
+  const laserCancel = prior === S.ATTACK && f.moveKey === M.NEUTRAL_B && LASER_USERS.has(f.fighterId);
   f.grounded = true;
   f.onPlatformId = surface.id;
   f.y = getSurfaceY(surface, f.x);
@@ -1470,6 +1628,12 @@ function land(match, f, surface, input, velocity) {
     return;
   }
   if (prior === S.HITSTUN) return;
+  if (laserCancel) {
+    f.landingLag = 4;
+    stopMove(f);
+    transition(f, S.LANDING);
+    return;
+  }
   if (prior === S.AIRDODGE) {
     f.landingLag = 10;
     const cap = MELEE.WAVEDASH_LANDING_SPEED * Math.sqrt(80 / f.def.stats.weight);
@@ -1488,9 +1652,10 @@ function land(match, f, surface, input, velocity) {
   } else if (activeAerial && !f.moveData.bossTell) {
     const m = f.moveData;
     const lag = m.landingLag ?? 12;
-    const autoCancel = f.moveFrame < Math.max(2, m.startup - 1) ||
+    const autoCancel = floatCancel || f.moveFrame < Math.max(2, m.startup - 1) ||
       f.moveFrame > m.startup + m.active + Math.floor((m.endlag || 10) * 0.65);
     f.landingLag = autoCancel ? 4 : lag;
+    if (floatCancel) event(match, 'tech', f, { tech: 'FLOAT CANCEL' });
     if (f.lCancelTimer > 0) {
       delete f.inputBuffer.shield;
       delete f.inputBuffer.grab;
@@ -1983,6 +2148,7 @@ function integrate(match, f, input, priorTerrain) {
     }
     f.floating = !!(f.floating && canHover && f.floatFrames > 0);
     if (f.floating) {
+      if (f.state === S.ATTACK && AIR_ATTACKS.has(f.moveKey)) f.floatAerial = true;
       f.floatFrames--;
       f.vy = 0;
       f.fastFalling = false;
@@ -2122,7 +2288,7 @@ function integrate(match, f, input, priorTerrain) {
 function intangible(f) {
   if (f.vanished || f.invulnFrames > 0 || f.state === S.RESPAWN || f.state === S.DEAD) return true;
   if (f.state === S.AIRDODGE) return f.stateFrame >= MELEE.AIRDODGE_INTANGIBLE_START && f.stateFrame <= MELEE.AIRDODGE_INTANGIBLE_END;
-  if (DODGES.has(f.state)) return f.stateFrame >= 3 && f.stateFrame <= (f.state === S.SPOTDODGE ? 14 : 18);
+  if (!f.getupRolling && DODGES.has(f.state)) return f.stateFrame >= 3 && f.stateFrame <= (f.state === S.SPOTDODGE ? 14 : 18);
   return false;
 }
 
@@ -2133,13 +2299,15 @@ function circleHits(b, rect) {
 }
 
 function shieldHits(b, f) {
-  if (!isShield(f)) return false;
+  if (!isShield(f) || f.shieldHp <= 0) return false;
+  if (f.fighterId === 'broshee' && circleHits(b, f.hurtbox)) return true;
   const s = f.def.stats;
   const r = s.shieldRadius * f.scale * f.shieldScale * (0.35 + 0.65 * f.shieldHp / MELEE.SHIELD_MAX);
   return detHypot(b.x - (f.x + f.facing * 5), b.y - (f.y + s.height * f.scale * 0.48)) <= b.r + r;
 }
 
-const powerShield = (f) => f.state === S.SHIELD && !f.lightShielding && f.shieldAge < MELEE.POWERSHIELD_WINDOW;
+const eggParry = (f) => f.fighterId === 'broshee' && f.state === S.SHIELD && f.shieldAge < 6;
+const powerShield = (f) => f.fighterId !== 'broshee' && f.state === S.SHIELD && !f.lightShielding && f.shieldAge < MELEE.POWERSHIELD_WINDOW;
 
 function breakShield(match, f) {
   releaseGrab(match, f);
@@ -2202,7 +2370,6 @@ function hitlagDI(match, f, input) {
       f.vy = f.kbVy = f.jumpsUsed = 0;
       f.fastFalling = f.didShortHop = f.didFastFall = f.didAerial = false;
       f.launchAngle = null;
-      f.hitstun = Math.ceil(f.hitstun * 0.6);
       transition(f, S.HITSTUN);
       event(match, 'tech', f, { tech: 'ASDI DOWN' });
       return;
@@ -2305,6 +2472,10 @@ function strike(match, a, v, m, info) {
   const damage = roundDamage((info.damage ?? m.damage) * mult * (a?.permanentGiant ? 1.48 : 1));
   const direction = info.facing ?? a?.facing ?? 1;
   if (!unblockable && box && shieldHits(box, v)) {
+    if (eggParry(v)) {
+      event(match, 'tech', v, { tech: 'PARRY' });
+      return false;
+    }
     if (powerShield(v)) {
       event(match, 'powershield', v);
       return false;
@@ -2360,13 +2531,15 @@ function strike(match, a, v, m, info) {
     kb -= Math.max(0, kb - openingForce) * 0.94 * taper;
   }
   if (m.hitstunOnly) kb = Math.min(kb, 17);
-  const crouchFactor = v.grounded && v.state === S.CROUCH ? MELEE.CROUCH_CANCEL_MULT : 1;
+  const crouchFactor = v.grounded && !unblockable && v.state !== S.KNOCKDOWN &&
+    (v.state === S.CROUCH || (v.currentInput?.moveY ?? 0) <= -0.58) ? MELEE.CROUCH_CANCEL_MULT : 1;
   kb *= crouchFactor;
   const armored = doubleJumpArmorActive(v) && kb < v.def.doubleJumpArmor && !unblockable;
-  const jabReset = v.state === S.KNOCKDOWN && damage <= 7 && kb < MELEE.TUMBLE_KB_THRESHOLD;
+  const jabReset = v.state === S.KNOCKDOWN && !unblockable && (damage <= 7 || m.hitstunOnly || m.noFlinch);
   const material = hitMaterial(info.sourceFighterId ?? a?.fighterId, key, m, sweetspot);
   let launchDegrees = 0;
-  if (!m.noFlinch && !armored) {
+  if ((!m.noFlinch || jabReset) && !armored) {
+    v.jabReset = jabReset;
     v.lastKnockback = kb;
     v.sdiCount = 0;
     v.didShortHop = v.didFastFall = v.didAerial = false;
@@ -2414,18 +2587,22 @@ function strike(match, a, v, m, info) {
         v.meteorTimer = 90;
       }
     }
-    v.hitstun = m.sleep ? 0 : Math.max(1, Math.floor(m.hitstunOnly ? 7 * crouchFactor : kb * MELEE.HITSTUN_MULT));
+    v.hitstun = m.sleep ? 0 : Math.max(1, Math.floor((m.minHitstun ?? 0) * crouchFactor), Math.floor(m.hitstunOnly ? 7 * crouchFactor : kb * MELEE.HITSTUN_MULT));
     if (jabReset) {
-      v.hitstun = 16;
+      v.hitstun = 14;
+      v.launchAngle = null;
+      v.vy = 3.6;
+      leaveFloor(v);
       event(match, 'jabReset', v);
-    }
+      event(match, 'tech', v, { tech: 'JAB RESET' });
+    } else if (crouchFactor < 1 && damage >= 6) event(match, 'tech', v, { tech: 'CROUCH CANCEL' });
     if (m.freezeFrames) v.hitstun = Math.max(v.hitstun, 18);
     const accent = sweetspot ? 2 : SMASH_MOVES.has(key) && (kb >= 95 || damage >= 14) ? 1 : 0;
-    const hitlag = m.link ? 2 : Math.floor(damage * MELEE.HITLAG_MULT + MELEE.HITLAG_BASE) + accent;
+    const hitlag = m.link ? 2 : Math.floor(damage * MELEE.HITLAG_MULT + MELEE.HITLAG_BASE) + accent + (m.homerun ? 10 : 0);
     if (a && !projectile) a.hitlag = Math.max(a.hitlag, hitlag);
     const electricFreeze = !m.link && material.electric;
     v.hitlag = Math.max(v.hitlag, m.freezeFrames || 0, electricFreeze ? Math.min(20, Math.floor(hitlag * 1.5)) : hitlag);
-    transition(v, kb >= MELEE.TUMBLE_KB_THRESHOLD ? S.TUMBLE : S.HITSTUN, true);
+    transition(v, !jabReset && kb >= MELEE.TUMBLE_KB_THRESHOLD ? S.TUMBLE : S.HITSTUN, true);
     if (m.sleep) v.sleepTimer = v.def === MASTER_MITT ? 28 : 80;
     if (m.kind === 'cape') {
       v.facing *= -1;
@@ -2459,7 +2636,8 @@ function moveHitboxes(f) {
   if (f.state !== S.ATTACK || !m || f.vanished) return [];
   const burn = m.burnInterval && f.moveFrame > 0 && f.moveFrame < m.startup && f.moveFrame % m.burnInterval === 0;
   if (!burn && !activeMove(f)) return [];
-  if (['projectile', 'chargeShot', 'counter', 'itemShot', 'itemThrow'].includes(m.kind)) return [];
+  if (['projectile', 'chargeShot', 'counter', 'itemShot', 'itemThrow', 'needles', 'needleBurst', 'turnipPull',
+      'thunderCall', 'bucket', 'itemCharge', 'itemStream'].includes(m.kind)) return [];
   const frame = f.moveFrame - m.startup;
   const pulse = m.multiHit;
   const final = pulse && frame >= (pulse.hits - 1) * pulse.interval;
@@ -2521,9 +2699,14 @@ function meleeCollisions(match, movable) {
       hitTargets(match, box, box);
       damageBridge(match, box, box, box.damage * a.moveStale, hits);
       for (const item of match.items) {
-        if (!damageableCrate(item) || hits.has(item.id) || !circleSweep(box, box, itemPoint(item))) continue;
-        hits.add(item.id);
-        damageCrate(match, item, box.damage * a.moveStale);
+        if (!pickupable(item) || hits.has(item.id) || !circleSweep(box, box, itemPoint(item))) continue;
+        if (item.def.category === 'shell') {
+          hits.add(item.id);
+          launchShell(item, a, box.facing ?? (Math.sign(item.x - a.x) || a.facing));
+        } else if (damageableCrate(item)) {
+          hits.add(item.id);
+          damageCrate(match, item, box.damage * a.moveStale);
+        }
       }
     }
     for (const v of match.fighters) {
@@ -2549,6 +2732,10 @@ function meleeCollisions(match, movable) {
     hits.add(v.port);
     const landed = strike(match, a, v, b.data, { key, mult, facing, box: b, charge: b.charge,
       damage: b.damage, sweetspot: b.sweetspot, unblockable: b.grab });
+    if (landed && key === M.DAIR && a.moveData?.pogo && !a.grounded && !a.moveRecorded) {
+      a.vy = Math.max(a.vy, 9);
+      a.fastFalling = false;
+    }
     if (landed && key !== M.ITEM_SWING && !a.moveRecorded) {
       stale(a, key);
       a.moveRecorded = true;
@@ -2593,12 +2780,22 @@ function reflectProjectile(match, p, f, contact, power = false) {
   return true;
 }
 
+const ABSORBABLE = new Set(['fireball', 'greenFire', 'flame', 'bolt', 'laser', 'orb', 'chargeOrb', 'shadowOrb']);
+
 function projectileSurvivesContact(match, p, old, a) {
   const m = p.moveData;
   let alive = true;
   let reflectedAway = false;
   for (const f of match.fighters) {
     if (!rivals(a, f) || f.state !== S.ATTACK || !activeMove(f)) continue;
+    if (f.moveData?.kind === 'bucket' && ABSORBABLE.has(p.style)) {
+      const bucket = { x: f.x + f.facing * 22 * f.scale, y: f.y + 31 * f.scale, r: 49 * f.scale };
+      if (circleSweep(old, p, bucket)) {
+        f.bucketCount = Math.min(3, f.bucketCount + 1);
+        event(match, 'absorb', f, { count: f.bucketCount, style: p.style });
+        return false;
+      }
+    }
     if (f.moveData?.reflects) {
       for (const box of f.activeHitboxes) {
         const contact = circleContact(old, p, box);
@@ -2676,6 +2873,25 @@ function projectileSurvivesContact(match, p, old, a) {
   return alive || reflectedAway;
 }
 
+function tickThunder(match, p, old, owner) {
+  p.y += p.vy;
+  const self = projectileContact(p, old, owner);
+  // Stop the damaging column at the caller rather than hitting below the impact point.
+  if (self) p.y = self.y;
+  for (const v of match.fighters) {
+    if (!rivals(owner, v) || intangible(v) || p.hitTargets.has(v.port)) continue;
+    const box = projectileContact(p, old, v);
+    if (!box) continue;
+    p.hitTargets.add(v.port);
+    strike(match, owner, v, p.moveData, { key: M.DOWN_B, box, projectile: true });
+  }
+  if (self) {
+    blast(match, owner, { x: owner.x, y: owner.y + 33 }, 76,
+      { damage: 17, bkb: 65, kbg: 117, angle: 74, sweetspot: true, element: 'lightning' }, M.DOWN_B, false);
+  }
+  return !self && p.y > match.stage.blastzones.bottom;
+}
+
 const BOUNCY = new Set(['fireball', 'pill', 'bolt', 'bomb']);
 
 function updateProjectiles(match) {
@@ -2687,6 +2903,10 @@ function updateProjectiles(match) {
     const a = byPort(match, p.ownerPort);
     if (!a) continue;
     const old = { x: p.x, y: p.y };
+    if (m.thunder) {
+      if (a.state !== S.DEAD && a.state !== S.RESPAWN && tickThunder(match, p, old, a)) keep.push(p);
+      continue;
+    }
     if (p.muzzleRootX != null) {
       const root = { x: p.muzzleRootX, y: p.y };
       p.muzzleRootX = null;
@@ -2700,6 +2920,14 @@ function updateProjectiles(match) {
       p.vx = approach(p.vx, (Math.sign(a.x - p.x) || 1) * Math.abs(m.projSpeed), 1.8);
       p.vy = approach(p.vy, clamp((a.y + 32 - p.y) * 0.095, -9, 9), 1.15);
       if (p.age > 34 && detHypot(a.x - p.x, a.y + 32 - p.y) < 28) continue;
+    }
+    if (m.homing && p.age >= 4) {
+      const target = match.fighters.filter((v) => rivals(a, v) && v.state !== S.RESPAWN &&
+        (v.x - p.x) * p.facing > -12).sort((u, v) => distance(u, p) - distance(v, p))[0];
+      if (target) {
+        p.vx = p.facing * m.projSpeed;
+        p.vy = approach(p.vy, clamp((target.y + target.def.stats.height * 0.46 - p.y) * 0.09, -6, 6), 0.45);
+      }
     }
     p.facing = Math.sign(p.vx) || p.facing;
     p.vy -= m.projGravity ?? 0;
@@ -2762,7 +2990,7 @@ function spawnItem(match, def, x, y, vx = 0, vy = 0) {
   const item = { id: 'item-' + match.nextEntityId++, itemId: def.id, def, x, y, vx, vy,
     grounded: false, holderPort: null, thrownBy: null, active: true, age: 0, ammo: def.ammo ?? null,
     hp: def.hp ?? 0, rot: 0, fuse: def.fuseFrames ?? 0, state: 'ground',
-    restFrames: 0, floorId: null, hitUntil: new Map() };
+    restFrames: 0, floorId: null, hitUntil: new Map(), armedFrames: 0 };
   match.items.push(item);
   return item;
 }
@@ -2828,6 +3056,7 @@ function pickupItem(match, f, item) {
     f.heldItemId = item.id;
     item.holderPort = f.port;
     item.thrownBy = null;
+    item.restFrames = item.armedFrames = 0;
     item.state = 'held';
     item.vx = item.vy = 0;
     item.grounded = false;
@@ -2835,6 +3064,7 @@ function pickupItem(match, f, item) {
     placeHeldItem(item, f);
     if (def.category === 'hammer') {
       f.hammerTimer = def.durationFrames;
+      item.headPopAt = drawRng(match) < def.headPopOdds ? match.frame + 18 : null;
       swingItem(match, f, item, EMPTY);
     }
   }
@@ -2843,16 +3073,59 @@ function pickupItem(match, f, item) {
 function swingItem(match, f, item, input) {
   const def = item.def;
   const hammer = def.category === 'hammer';
-  const homerun = def.id === 'plunger_bat';
-  const reach = def.swingReach ?? (hammer ? 98 : 110);
-  const chargeable = f.grounded && !hammer && (Math.abs(input.cStickX ?? 0) >= C_GROUND ||
-    Math.abs(input.moveX ?? 0) >= SMASH);
+  const x = input.moveX || 0;
+  const y = input.moveY || 0;
+  const c = input.itemStick;
+  const prevX = input.prevX ?? f.prevMoveX ?? 0;
+  const prevY = input.prevY ?? f.prevMoveY ?? 0;
+  const flick = Math.abs(x) >= SMASH && Math.abs(prevX) < SMASH || Math.abs(y) >= SMASH && Math.abs(prevY) < SMASH;
+  const smash = f.grounded && !hammer && (c ? !c.tilt : flick && !input.tiltMod);
+  const tilt = !!c || detHypot(x, y) > 0.32;
+  const plunger = def.id === 'plunger_bat';
+  const homerun = plunger && smash;
+  const reach = hammer ? 98 : plunger ? (smash ? 115 : 77) : (smash ? 114 : tilt ? def.swingReach : 65);
+  const damage = hammer ? (item.headless ? 0 : def.swingDamage) :
+    plunger ? (smash ? def.swingDamage : def.pokeDamage) : smash ? def.swingDamage : tilt ? 12 : 8;
+  const tip = { offsetX: reach * 0.82, radius: reach * 0.19, priority: 1, sweetspot: true, homerun: true };
+  const handle = { offsetX: reach * 0.41, radius: reach * 0.37, damage: 18, bkb: 65, kbg: 107, homerun: false };
   startMove(match, f, M.ITEM_SWING, input, {
-    startup: homerun ? 15 : hammer ? 4 : 8, active: hammer ? 8 : 5, endlag: hammer ? 7 : 15,
-    damage: def.swingDamage, bkb: def.swingBkb, kbg: def.swingKbg, angle: def.swingAngle,
+    startup: homerun ? 24 : hammer || !tilt && !smash ? 4 : smash ? 11 : 7,
+    active: hammer ? 8 : 5, endlag: homerun ? 25 : hammer ? 7 : smash ? 18 : 10,
+    damage, bkb: plunger && !smash ? 28 : def.swingBkb, kbg: plunger && !smash ? 60 : def.swingKbg, angle: def.swingAngle,
     offsetX: reach * 0.57, offsetY: 37, radius: reach * 0.43,
-    kind: 'strike', chargeable, homerun, hammer, sweetspot: homerun, slash: def.id === 'glow_saber',
+    kind: item.headless ? 'itemThrow' : 'strike', hammer, slash: def.id === 'glow_saber',
+    ...(homerun && { hitboxes: [tip, handle] }),
   });
+}
+
+function fireItem(match, f, move) {
+  const item = heldItem(match, f);
+  const cost = move.ammoCost ?? 1;
+  if (item?.id !== move.itemId || item.ammo < cost) return;
+  item.ammo -= cost;
+  spawnProjectile(match, f, move);
+}
+
+function detachItem(f, item) {
+  item.holderPort = null;
+  item.thrownBy = f.port;
+  item.state = 'thrown';
+  item.age = item.restFrames = item.armedFrames = 0;
+  item.grounded = false;
+  item.floorId = null;
+  item.hitUntil.clear();
+  f.heldItemId = null;
+}
+
+function zDrop(match, f, item) {
+  detachItem(f, item);
+  item.x = f.x;
+  item.y = f.y - item.def.radius * 0.35;
+  item.vx = f.vx * 0.15;
+  item.vy = -2.7;
+  delete f.inputBuffer.grab;
+  event(match, 'itemThrow', f, { x: item.x, y: item.y, itemId: item.itemId });
+  event(match, 'tech', f, { tech: 'Z-DROP' });
 }
 
 function throwItem(match, f, item, input) {
@@ -2865,14 +3138,9 @@ function throwItem(match, f, item, input) {
   const amount = detHypot(x, y);
   faceInput(f, x);
   placeHeldItem(item, f);
-  item.holderPort = null;
-  item.thrownBy = f.port;
-  item.state = 'thrown';
-  item.age = item.restFrames = 0;
-  item.hitUntil.clear();
+  detachItem(f, item);
   item.vx = 19 * x / amount;
   item.vy = 17 * y / amount + 2;
-  f.heldItemId = null;
   startMove(match, f, M.ITEM_THROW, input, {
     startup: 1, active: 1, endlag: 9, damage: 0, kind: 'itemThrow',
   });
@@ -2896,7 +3164,9 @@ function itemAction(match, f, input) {
     if (!input.attackPressed && !input.grabPressed) return false;
     const s = f.def.stats;
     const hand = { x: f.x, y: f.y + s.height * f.scale * 0.41 };
-    const nearest = match.items.filter(pickupable)
+    const airCatch = !f.grounded && input.grabPressed;
+    const nearest = match.items.filter((it) => pickupable(it) || airCatch && it.active && it.holderPort == null &&
+        (it.state === 'thrown' || it.state === 'sliding'))
       .map((it) => ({ it, point: itemPoint(it) }))
       .filter(({ point }) => distance(hand, point) <= point.r + 33 * f.scale)
       .sort((a, b) => distance(hand, a.point) - distance(hand, b.point))[0];
@@ -2904,20 +3174,24 @@ function itemAction(match, f, input) {
     if (input.grabPressed) delete f.inputBuffer.grab;
     if (input.attackPressed) delete f.inputBuffer.attack;
     pickupItem(match, f, nearest.it);
+    if (airCatch) event(match, 'tech', f, { tech: 'ITEM CATCH' });
     return true;
   }
   delete f.inputBuffer.cStick;
   const def = item.def;
-  if (input.grabPressed || !['batter', 'shooter'].includes(def.category)) throwItem(match, f, item, input);
+  if (!f.grounded && input.grabPressed && detHypot(x, input.moveY || 0) < 0.35) zDrop(match, f, item);
+  else if (input.grabPressed || !['batter', 'shooter'].includes(def.category)) throwItem(match, f, item, input);
   else {
     faceInput(f, Math.abs(cx) > 0.28 ? cx : x);
-    if (def.category === 'batter') swingItem(match, f, item, { ...input, cStickX: cx });
+    if (def.category === 'batter') swingItem(match, f, item, { ...input, itemStick: c });
     else if (item.ammo > 0) {
       startMove(match, f, M.ITEM_SWING, input, {
-        startup: 3, active: 1, endlag: def.id === 'hotsauce_flower' ? 7 : 11,
+        startup: 3, active: def.streamInterval ? 121 : 1, endlag: def.streamInterval ? 7 : 9,
         damage: def.shotDamage, bkb: def.shotBkb, kbg: def.shotKbg, angle: 32, radius: 15,
-        kind: 'itemShot', itemId: item.id, projStyle: def.projStyle, projSpeed: def.shotSpeed,
-        projLife: def.id === 'hotsauce_flower' ? 16 : 55,
+        kind: def.chargeLimit ? 'itemCharge' : def.streamInterval ? 'itemStream' : 'itemShot',
+        itemId: item.id, projStyle: def.projStyle, projSpeed: def.shotSpeed,
+        projLife: def.streamInterval ? 6 : 55, shotInterval: def.streamInterval,
+        hitstunOnly: !!(def.stunShot || def.streamInterval),
       });
     } else event(match, 'emptyClick', f, { itemId: def.id });
   }
@@ -2964,13 +3238,13 @@ function damageBridge(match, from, to, damage, hits) {
   match.events.push({ type: 'explosion', x: deck.x + deck.w / 2, y: deck.y, radius: 90, port: 0 });
 }
 
-function blast(match, a, point, radius, m, key) {
+function blast(match, a, point, radius, m, key, hitOwner = true) {
   const box = { ...point, r: radius };
   damageBridge(match, box, box, m.damage);
   match.events.push({ type: 'explosion', x: point.x, y: point.y, radius });
   hitTargets(match, box, box);
   for (const v of match.fighters) {
-    if (teammates(a, v) || intangible(v) ||
+    if ((!hitOwner && a === v) || teammates(a, v) || intangible(v) ||
         !circleHits(box, v.hurtbox) && !shieldHits(box, v)) continue;
     strike(match, a, v, m, { key, facing: Math.sign(v.x - box.x) || a?.facing || 1, box, projectile: true });
   }
@@ -2988,9 +3262,22 @@ function explodeItem(match, item) {
 function summonCritter(match, item, facing) {
   const critter = CRITTER_SUMMONS[Math.floor(drawRng(match) * CRITTER_SUMMONS.length)];
   match.summons.push({ id: 'summon-' + match.nextEntityId++, critter, ownerPort: item.thrownBy,
-    x: item.x, y: item.y, vx: 0, vy: 0, life: critter.duration, maxLife: critter.duration, facing });
+    x: item.x, y: item.y, vx: 0, vy: 0, life: critter.duration, maxLife: critter.duration, facing, hitUntil: new Map() });
   match.events.push({ type: 'summon', x: item.x, y: item.y, name: critter.name, color: critter.color });
   removeItem(match, item);
+}
+
+function shellRicochet(item) {
+  item.vx = -(Math.sign(item.vx) || 1) * Math.min(item.def.maxSlideSpeed,
+    Math.max(item.def.slideSpeed, Math.abs(item.vx) * 1.14));
+}
+
+function launchShell(item, fighter, facing) {
+  item.thrownBy = fighter.port;
+  item.state = item.grounded ? 'sliding' : 'thrown';
+  item.age = item.restFrames = 0;
+  item.hitUntil.clear();
+  item.vx = facing * item.def.slideSpeed;
 }
 
 function itemFloor(match, item) {
@@ -3014,7 +3301,8 @@ function advanceItem(match, item, priorTerrain, gravity) {
         .sort((a, b) => (a - b) * dir)[0];
       if (wall != null) {
         item.x = wall;
-        item.vx *= -1;
+        if (item.state === 'sliding') shellRicochet(item);
+        else item.vx *= -1;
         return null;
       }
     }
@@ -3025,7 +3313,8 @@ function advanceItem(match, item, priorTerrain, gravity) {
     }
     if (item.state === 'sliding' || item.state === 'walking') {
       item.x = clamp(nextX, current.x, current.x + current.w);
-      item.vx *= -1;
+      if (item.state === 'sliding') shellRicochet(item);
+      else item.vx *= -1;
       return null;
     }
   }
@@ -3068,7 +3357,8 @@ function advanceItem(match, item, priorTerrain, gravity) {
     item.floorId = impact.surface.id;
     item.vy = 0;
   } else if (impact?.side === 'wall') {
-    item.vx *= -0.55;
+    if (item.def.category === 'shell' && item.state === 'thrown') shellRicochet(item);
+    else item.vx *= -0.55;
   } else if (impact?.side === 'bottom') item.vy = -Math.abs(item.vy) * 0.5;
   return impact;
 }
@@ -3082,7 +3372,8 @@ function itemHits(match, item, old) {
   const deployOnImpact = explosive || ['summon', 'container'].includes(def.category);
   if (item.state !== 'walking') hitTargets(match, old, point);
   const colliders = match.fighters
-    .filter((v) => v.state !== S.DEAD && v.state !== S.RESPAWN && v !== owner && !teammates(owner, v) &&
+    .filter((v) => v.state !== S.DEAD && v.state !== S.RESPAWN &&
+      (item.state === 'bumper' ? item.age > 22 || v !== owner : v !== owner && !teammates(owner, v)) &&
       (explosive || !intangible(v)) && (item.hitUntil.get(v.port) ?? -1) <= match.frame)
     .map((v) => ({ v, box: projectileContact(point, old, v) }))
     .filter(({ box }) => box)
@@ -3099,17 +3390,28 @@ function itemHits(match, item, old) {
       damage: def.hitDamage ?? def.throwDamage ?? 6,
       bkb: def.hitBkb ?? def.throwBkb ?? 29, kbg: def.hitKbg ?? def.throwKbg ?? 60,
       angle: item.state === 'bumper' ? 30 : 39,
+      minHitstun: def.category === 'turnip' ? 16 : 0,
     }, { box, key: M.ITEM_THROW, facing, projectile: true });
     item.hitUntil.set(v.port, match.frame + 34);
+    if (item.state === 'sliding') {
+      shellRicochet(item);
+      item.x = box.x;
+      return true;
+    }
     if (!thrown) continue;
     item.x = box.x;
     item.y = box.y - def.radius * 0.55;
     item.grounded = false;
     item.floorId = null;
     if (deployOnImpact) return true;
-    if (def.category === 'mine' || def.category === 'bumper') return true;
+    if (def.category === 'bumper') return true;
+    if (def.category === 'mine') {
+      item.vx *= -0.25;
+      item.vy = 2;
+      return true;
+    }
     if (def.category === 'shell') {
-      item.vx *= -0.8;
+      shellRicochet(item);
       item.vy = 4;
     } else {
       item.state = 'ground';
@@ -3147,9 +3449,19 @@ function updateItems(match, priorTerrain) {
       const f = byPort(match, item.holderPort);
       if (f) placeHeldItem(item, f);
       if (cat === 'hammer' && !f?.hammerTimer) removeItem(match, item);
+      else if (cat === 'hammer' && match.frame === item.headPopAt) {
+        item.headless = true;
+        if (f.moveData?.hammer) f.moveData = { ...f.moveData, kind: 'itemThrow', damage: 0 };
+        const head = spawnItem(match, { ...def, category: 'hammerHead', throwDamage: 24, throwBkb: 80, throwKbg: 108 },
+          item.x, item.y, f.facing * 8, 6);
+        head.state = 'thrown';
+        head.thrownBy = f.port;
+        event(match, 'tech', f, { tech: 'HAMMER HEAD POP' });
+      }
     }
     if (cat === 'explosive') {
-      item.fuse--;
+      if (item.shortFuse || item.state !== 'ground' || item.age >= def.walkAfterFrames) item.fuse--;
+      if (item.state === 'walking') item.fuse = Math.min(item.fuse, 119);
       if (item.fuse <= 0) {
         explodeItem(match, item);
         continue;
@@ -3166,41 +3478,64 @@ function updateItems(match, priorTerrain) {
       removeItem(match, item);
       continue;
     }
+    if (item.state === 'armed' || item.state === 'bumper') {
+      const floor = itemFloor(match, item);
+      const previous = priorTerrain.find((s) => s.id === floor?.id);
+      if (item.grounded && floor && previous) {
+        item.x += floor.x - previous.x;
+        item.y = getSurfaceY(floor, item.x);
+      }
+    }
     if (item.state === 'armed') {
+      item.armedFrames++;
+      item.fuse = 118 - item.armedFrames % 54;
+      if (item.armedFrames % 30 === 1) {
+        match.screenFlash = Math.max(match.screenFlash, 1);
+        match.events.push({ type: 'bombTick', id: item.id, itemId: item.itemId,
+          fuse: item.fuse, x: item.x, y: item.y });
+      }
       if (match.fighters.some((v) => v.state !== S.DEAD && v.state !== S.RESPAWN &&
           circleHits({ ...itemPoint(item), r: def.triggerRadius }, v.hurtbox))) explodeItem(match, item);
       continue;
     }
     if (item.state === 'bumper') {
-      itemHits(match, item, itemPoint(item));
+      if (++item.restFrames >= def.activeFrames) removeItem(match, item);
+      else itemHits(match, item, itemPoint(item));
       continue;
     }
-    if (item.state === 'thrown' && cat === 'mine' && item.stuck) {
-      if (++item.restFrames >= def.armFrames) item.state = 'armed';
+    if (cat === 'mine' && item.grounded && ++item.restFrames >= def.armFrames) {
+      item.state = 'armed';
+      item.vx = item.vy = 0;
       continue;
     }
     if (item.grounded && item.state === 'ground') {
       if (cat === 'explosive' && item.age >= def.walkAfterFrames) {
         item.state = 'walking';
-        item.vx = (drawRng(match) < 0.5 ? -1 : 1) * 3.4;
+        item.vx = (drawRng(match) < 0.5 ? -1 : 1) * def.walkSpeed;
       } else item.vx = approach(item.vx, 0, 0.65);
+    }
+    if (item.state === 'walking' && item.age % 10 === 0) {
+      const target = match.fighters.filter((f) => f.state !== S.DEAD && f.state !== S.RESPAWN && distance(item, f) <= 300)
+        .sort((a, b) => distance(a, item) - distance(b, item))[0];
+      if (target && Math.abs(target.x - item.x) > 4) item.vx = Math.sign(target.x - item.x) * def.walkSpeed;
     }
     const old = itemPoint(item);
     const facing = Math.sign(item.vx) || 1;
     const impact = advanceItem(match, item, priorTerrain, 0.62);
     item.rot += item.grounded ? item.vx * 0.035 : item.vx * 0.025;
     const thrown = item.state === 'thrown';
-    const hit = (thrown || item.state === 'walking' || item.state === 'sliding') && itemHits(match, item, old);
+    const hit = (thrown && !(cat === 'mine' && item.grounded) || item.state === 'walking' ||
+      item.state === 'sliding') && itemHits(match, item, old);
     if (!item.active || !thrown) continue;
     if (cat === 'bumper' && (impact || hit || item.age >= 14)) {
       item.state = 'bumper';
       item.vx = item.vy = 0;
-    } else if (cat === 'mine' && (impact || hit)) {
-      item.stuck = true;
-      item.vx = item.vy = 0;
+    } else if (cat === 'mine' && impact?.side === 'top') {
+      item.state = 'ground';
+      item.vx = item.vy = item.restFrames = 0;
     } else if (cat === 'shell' && impact?.side === 'top' && !hit) {
       item.state = 'sliding';
-      item.vx = def.slideSpeed * facing;
+      item.vx = Math.max(def.slideSpeed, Math.abs(item.vx)) * facing;
     } else if (impact || hit) {
       if (cat === 'explosive') explodeItem(match, item);
       else if (cat === 'summon') summonCritter(match, item, facing);
@@ -3246,12 +3581,17 @@ function updateStarContacts(match) {
   }
 }
 
-const CRITTER_ATTACKS = {
-  bodySlam: { radius: 78, period: 55, speed: 6.5, height: 34, angle: 65 },
-  flameRing: { radius: 103, period: 42, speed: 0, height: 23, angle: 43 },
-  whirlwind: { radius: 88, period: 37, speed: 4, height: 56, angle: 79 },
-  shockBurst: { radius: 79, period: 34, speed: 8, height: 24, angle: 50 },
-};
+function summonStrike(match, sm, owner, old, box, move, cooldown) {
+  hitTargets(match, old, box);
+  for (const v of match.fighters) {
+    if (!rivals(owner, v) || intangible(v) || (sm.hitUntil.get(v.port) ?? -1) > match.frame) continue;
+    const contact = projectileContact(box, old, v);
+    if (!contact) continue;
+    sm.hitUntil.set(v.port, match.frame + cooldown);
+    strike(match, owner, v, move, { key: sm.critter.id, box: contact,
+      facing: Math.sign(v.x - sm.x) || sm.facing, projectile: true });
+  }
+}
 
 function updateSummons(match) {
   for (const sm of match.summons) {
@@ -3261,38 +3601,72 @@ function updateSummons(match) {
       sm.life = 0;
       continue;
     }
-    const { critter } = sm;
+    const { critter: c } = sm;
     const age = sm.maxLife - sm.life;
-    if (critter.style === 'healOwner') {
-      if (age === 1) healFighter(owner, critter.heal);
-      continue;
-    }
-    const nearby = match.fighters.filter((f) => rivals(owner, f) && !intangible(f))
+    const rival = match.fighters.filter((f) => rivals(owner, f) && !intangible(f))
       .sort((a, b) => distance(sm, a) - distance(sm, b))[0];
-    if (nearby) sm.facing = Math.sign(nearby.x - sm.x) || sm.facing;
-    if (critter.style === 'laserBarrage') {
-      if (age % 28 === 10) {
-        spawnProjectile(match, owner, { damage: critter.damage, bkb: critter.bkb, kbg: critter.kbg, angle: 35,
-          projStyle: 'laser', projSpeed: 19, projLife: 55, offsetY: 32 },
-        { ...sm, moveKey: M.ITEM_THROW, moveStale: 1 });
-      }
-      continue;
-    }
-    const attack = CRITTER_ATTACKS[critter.style];
-    const deck = match.surfaces.filter((s) => withinX(sm.x, s) && getSurfaceY(s, sm.x) <= sm.y + 25)
+    const deck = [...match.surfaces, ...match.platforms]
+      .filter((s) => withinX(sm.x, s) && getSurfaceY(s, sm.x) <= sm.y + 25)
       .sort((a, b) => getSurfaceY(b, sm.x) - getSurfaceY(a, sm.x))[0];
-    if (nearby && deck) {
-      sm.vx = Math.abs(nearby.x - sm.x) > 25 ? attack.speed * sm.facing : 0;
-      sm.x = clamp(sm.x + sm.vx, deck.x, deck.x + deck.w);
-      sm.y = getSurfaceY(deck, sm.x);
-    }
-    if (age % attack.period !== 12) continue;
-    const box = { x: sm.x, y: sm.y + attack.height, r: attack.radius };
-    hitTargets(match, box, box);
-    for (const v of match.fighters) {
-      if (!rivals(owner, v) || intangible(v) || !circleHits(box, v.hurtbox) && !shieldHits(box, v)) continue;
-      strike(match, owner, v, { damage: critter.damage, bkb: critter.bkb, kbg: critter.kbg, angle: attack.angle },
-        { key: critter.id, box, facing: Math.sign(v.x - sm.x) || sm.facing, projectile: true });
+    const floor = deck ? getSurfaceY(deck, sm.x) : sm.y;
+    const old = { x: sm.x, y: sm.y };
+    const move = { damage: c.damage, bkb: c.bkb, kbg: c.kbg, angle: 50 };
+    const moveOnDeck = (dx) => {
+      if (deck) sm.x = clamp(sm.x + dx, deck.x + 2, deck.x + deck.w - 2);
+      return deck ? getSurfaceY(deck, sm.x) : floor;
+    };
+    const fire = (shot) => spawnProjectile(match, owner, { ...move, ...shot },
+      { ...sm, moveKey: M.ITEM_THROW, moveStale: 1 });
+    const pulse = (height, radius, patch = EMPTY, cooldown = 12, sweep = false) => {
+      const box = { x: sm.x, y: sm.y + height, r: radius };
+      summonStrike(match, sm, owner, sweep ? { x: old.x, y: old.y + height } : box, box, { ...move, ...patch }, cooldown);
+    };
+    if (c.style === 'laserBarrage') {
+      if (rival) sm.facing = Math.sign(rival.x - sm.x) || sm.facing;
+      const frame = age % 42;
+      if ([8, 12, 16].includes(frame)) fire({ damage: 5, projStyle: 'laser', projSpeed: 23,
+        projLife: 44, offsetY: 27 + (frame - 8) * 3, hitstunOnly: frame !== 16 });
+    } else if (c.style === 'bodySlam') {
+      const frame = age % 65;
+      if (frame === 5) {
+        sm.facing = Math.sign((rival?.x ?? sm.x) - sm.x) || sm.facing;
+        sm.jumpFloor = floor;
+      }
+      if (frame >= 5 && frame < 25) {
+        sm.y = moveOnDeck(sm.facing * 5) + 103 * detSin(Math.PI * (frame - 5) / 20);
+      } else sm.y = deck ? floor : (sm.jumpFloor ?? floor);
+      if (frame === 25) {
+        match.events.push({ type: 'explosion', x: sm.x, y: sm.y, radius: 82 });
+        pulse(23, 82, { angle: 75, sweetspot: true }, 35);
+      }
+    } else if (c.style === 'flameRing') {
+      sm.y = floor;
+      const frame = age % 57;
+      if (frame >= 12 && frame <= 32 && (frame - 12) % 5 === 0) {
+        for (const facing of [-1, 1]) {
+          sm.facing = facing;
+          fire({ damage: 4, bkb: 12, kbg: 24, projStyle: 'flame', projSpeed: 10,
+            projLife: 11, projAngle: 9 + (frame - 12), offsetY: 24, hitstunOnly: true, element: 'fire' });
+        }
+      }
+    } else if (c.style === 'whirlwind') {
+      const frame = age % 48;
+      if (rival) sm.facing = Math.sign(rival.x - sm.x) || sm.facing;
+      sm.y = moveOnDeck(frame >= 8 && frame < 36 ? sm.facing * 4 : 0);
+      if (frame >= 8 && frame <= 33 && (frame - 8) % 5 === 0) {
+        pulse(47, 80, { damage: frame === 33 ? 10 : 2, angle: 89,
+          bkb: frame === 33 ? 48 : 20, kbg: frame === 33 ? 89 : 28 }, 5, true);
+      }
+    } else if (c.style === 'shockBurst') {
+      const frame = age % 44;
+      if (frame === 9 && rival) sm.facing = Math.sign(rival.x - sm.x) || sm.facing;
+      sm.y = moveOnDeck(frame >= 9 && frame <= 21 ? sm.facing * 10 : 0);
+      if (frame >= 9 && frame <= 21) pulse(24, 34, { element: 'electric', angle: 43 }, 22, true);
+    } else if (c.style === 'healOwner' && [16, 64, 112].includes(age)) {
+      healFighter(owner, c.heal);
+      if (rival) sm.facing = Math.sign(rival.x - sm.x) || sm.facing;
+      fire({ damage: 5, bkb: 25, kbg: 41, projStyle: 'pancake', projSpeed: 10,
+        projLife: 40, projAngle: 35, projGravity: 0.45, offsetY: 28 });
     }
   }
   match.summons = match.summons.filter((sm) => sm.life > 0);
@@ -3383,7 +3757,8 @@ function knockout(match, f, dir) {
     if (victim === f || victim.receivedCombo?.port === f.port) victim.receivedCombo = null;
   }
   f.didShortHop = f.didFastFall = f.didAerial = false;
-  f.chargeShotLevel = f.floatFrames = 0;
+  f.chargeShotLevel = f.floatFrames = f.bucketCount = f.needleCount = 0;
+  f.jabReset = false;
   f.upBUsed = f.sideBUsed = f.floating = f.floatUsed = false;
   f.cpuHeldInput = null;
   f.cpuThinkTimer = f.cpuPauseTimer = 0;
@@ -3803,8 +4178,8 @@ export function stepMatch(match, inputsByPort = []) {
   for (const f of match.fighters) {
     const holder = byPort(match, f.grabbedBy);
     if (holder && holder.grabbing === f.port) {
-      f.x = holder.x + holder.facing * 30;
-      f.y = holder.y;
+      f.x = holder.x + holder.facing * (holder.cargo ? 13 : 30);
+      f.y = holder.y + (holder.cargo ? 36 : 0);
       f.grounded = holder.grounded;
       f.onPlatformId = holder.onPlatformId;
     }

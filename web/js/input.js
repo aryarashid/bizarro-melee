@@ -61,7 +61,8 @@ const PAD_SONY_HID = { attack: [1], special: [2], jump: [0, 3], grab: [4, 5], sh
 const PAD_8BITDO_HID = { attack: [0], special: [1], jump: [3, 4, 2], grab: [6, 7], shield: [8, 9], taunt: [10, 12], pause: [11] };
 // Nintendo Switch Pro / Joy-Con / NSO Bluetooth layout (A=1 right, B=0 bottom, Y=2 left, X=3 top)
 const PAD_NINTENDO = { attack: [1], special: [0], jump: [2, 3], shield: [6, 7], grab: [4, 5], taunt: [8, 12], pause: [9] };
-const MAYFLASH = { attack: [1], special: [0], jump: [2, 3], grab: [7], shield: [4, 5], taunt: [12], pause: [9] };
+// Mayflash 4-Port GameCube Adapter (PC HID mode: 0=X, 1=A, 2=B, 3=Y, 4=L, 5=R, 7=Z, 9=Start, 12=D-Up)
+const MAYFLASH = { attack: [1], special: [2], jump: [0, 3], grab: [7], shield: [4, 5], taunt: [12], pause: [9] };
 const WUP = { attack: [0], special: [1], jump: [2, 3], grab: [6], shield: [4, 5], taunt: [8], pause: [7] };
 const COMPACT_GC = { attack: [0], special: [1], jump: [2, 3], grab: [4], shield: [5, 6], taunt: [8], pause: [7] };
 
@@ -261,7 +262,9 @@ function samplePad(pad, config, padSlot = 0) {
 
   const rawAxisX = unit(pad.axes?.[0] ?? 0);
   const rawAxisY = unit(-(pad.axes?.[1] ?? 0));
-  const [moveX, rawMoveY] = radialStick(rawAxisX, rawAxisY, config.deadzone, 1.35);
+  // Near-linear Melee octagonal-gate response (1.08 curve) for crisp dash-dance, tilts, shield drops & smash flicks.
+  const [moveX, rawMoveY] = radialStick(rawAxisX, rawAxisY, config.deadzone, 1.08);
+  const [linMoveX, linMoveY] = radialStick(rawAxisX, rawAxisY, config.deadzone, 1.0);
   const cDeadzone = Math.min(config.deadzone, 0.16);
   const [cStickX, cStickY] = radialStick(pad.axes?.[cXIdx] ?? 0, -(pad.axes?.[cYIdx] ?? 0), cDeadzone, 1.0);
 
@@ -274,15 +277,15 @@ function samplePad(pad, config, padSlot = 0) {
   const values = {
     moveX,
     moveY: rawMoveY,
-    rawMoveX: Math.hypot(rawAxisX, rawAxisY) >= config.deadzone ? rawAxisX : 0,
-    rawMoveY: Math.hypot(rawAxisX, rawAxisY) >= config.deadzone ? rawAxisY : 0,
+    rawMoveX: linMoveX,
+    rawMoveY: linMoveY,
     cStickX,
     cStickY,
     attack: binds('attack').some(pressed),
     special: binds('special').some(pressed),
     jump: config.zJump ? pressed(z) : jumps.some(pressed),
     grab: config.zJump ? jumps.some(pressed) || grabs.some((i) => i !== z && pressed(i)) : grabs.some(pressed),
-    stickJump: config.tapJump && rawMoveY >= 0.8,
+    stickJump: config.tapJump && linMoveY >= 0.78,
     shieldAnalog,
     shield: shieldAnalog >= 0.18,
     taunt: binds('taunt').some(pressed),

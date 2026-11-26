@@ -410,6 +410,10 @@ export class SoundEngine {
           this._tone(620, 2520, 0.09, 'sine', 0.20);
           this._tone(1180, 3160, 0.07, 'triangle', 0.09, 0.022);
           break;
+        case 'absorb':
+          this._tone(320, 980, 0.09, 'sine', 0.19);
+          this._tone(540, 1480, 0.11, 'triangle', 0.14, 0.025);
+          break;
         case 'chargeStored':
           this._tone(698, 698, 0.06, 'triangle', 0.16);
           this._tone(1046, 1046, 0.12, 'sine', 0.17, 0.052);
@@ -443,8 +447,24 @@ export class SoundEngine {
           }
           break;
         case 'tech':
-          this._noise(0.018, 3400, 1.8, 0.045);
-          this._tone(1050, 1330, 0.045, 'sine', 0.055);
+          if (e.tech === 'PARRY') {
+            this._tone(1320, 2240, 0.12, 'triangle', 0.22);
+            this._tone(1980, 2960, 0.14, 'sine', 0.16, 0.015);
+          } else if (e.tech === 'JAB RESET') {
+            this._noise(0.02, 3800, 1.1, 0.16);
+            this._tone(860, 320, 0.055, 'triangle', 0.16, 0.015);
+          } else if (e.tech === 'CROUCH CANCEL') {
+            this._tone(180, 115, 0.08, 'triangle', 0.15);
+          } else if (e.tech === 'FLOAT CANCEL') {
+            this._tone(1180, 1620, 0.06, 'sine', 0.10);
+          } else {
+            this._noise(0.018, 3400, 1.8, 0.045);
+            this._tone(1050, 1330, 0.045, 'sine', 0.055);
+          }
+          break;
+        case 'meteorCancel':
+          this._tone(420, 1120, 0.11, 'triangle', 0.18);
+          this._tone(840, 1680, 0.10, 'sine', 0.12, 0.025);
           break;
         case 'comboCallout': {
           const root = hz(62 + Math.min(12, e.count || 2));

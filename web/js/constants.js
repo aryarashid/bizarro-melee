@@ -1,4 +1,4 @@
-/** Shared combat constants, action states and enums. */
+/* Shared combat constants, action states and enums. */
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -35,7 +35,7 @@ export const MELEE = {
   SHIELD_BREAK_DIZZY_FRAMES: 240,
   LCANCEL_WINDOW: 7,
   TECH_WINDOW: 20,
-  LEDGE_INVINCIBILITY: 30,
+  LEDGE_INVINCIBILITY: 28,
   LEDGE_REGRAB_COOLDOWN: 35,
   RESPAWN_INVINCIBILITY: 120,
   RESPAWN_PLATFORM_MAX: 180,
@@ -50,7 +50,7 @@ export const MELEE = {
   STALE_WEIGHTS: [0.09, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01],
 };
 
-/**
+/*
  * Calculate launch force after damage, weight, move scaling and charge.
  */
 export function computeMeleeKnockback(percent, damage, weight, bkb, kbg, setKb = 0, ratio = 1.0) {
@@ -125,6 +125,8 @@ export const MOVE = Object.freeze({
   UTHROW: 'uthrow',
   DTHROW: 'dthrow',
   LEDGE_ATTACK: 'ledgeAttack',
+  GETUP_ATTACK: 'getupAttack',
+  ZAIR: 'zair',
   ITEM_SWING: 'itemSwing',
   ITEM_THROW: 'itemThrow',
 });

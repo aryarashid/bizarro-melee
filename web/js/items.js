@@ -1,4 +1,4 @@
-/**
+/*
  * Bizarro Melee Full 18-Item Catalog + 6 Critter Capsule Summons.
  * Mirrors Melee's iconic item roster (src/melee/it/kinds/) as hilarious Bizarro parodies.
  */
@@ -13,13 +13,14 @@ export const ITEM_DEF = {
     color: '#ff4265',
     radius: 24,
     uses: 99,
+    pokeDamage: 9,
     swingDamage: 32,
     swingBkb: 115,
     swingKbg: 185,
     swingAngle: 34,
     throwDamage: 18,
-    throwBkb: 62,
-    throwKbg: 105,
+    throwBkb: 72,
+    throwKbg: 111,
     weight: 10,
     despawnFrames: 900,
   },
@@ -52,6 +53,7 @@ export const ITEM_DEF = {
     color: '#ffdf4d',
     radius: 26,
     durationFrames: 420,
+    headPopOdds: 1 / 16,
     swingDamage: 24,
     swingBkb: 88,
     swingKbg: 132,
@@ -67,7 +69,8 @@ export const ITEM_DEF = {
     mesh: 'Item_AlarmOmb',
     color: '#ff7b24',
     radius: 20,
-    walkAfterFrames: 210,
+    walkAfterFrames: 165,
+    walkSpeed: 3.5,
     fuseFrames: 450,
     blastRadius: 135,
     blastDamage: 28,
@@ -173,9 +176,10 @@ export const ITEM_DEF = {
     color: '#38f5ff',
     radius: 20,
     ammo: 12,
-    shotDamage: 9,
-    shotBkb: 32,
-    shotKbg: 68,
+    shotDamage: 7,
+    shotBkb: 18,
+    shotKbg: 32,
+    stunShot: true,
     shotSpeed: 23,
     projStyle: 'laser',
     throwDamage: 10,
@@ -191,9 +195,11 @@ export const ITEM_DEF = {
     color: '#42e695',
     radius: 22,
     ammo: 16,
-    shotDamage: 13,
-    shotBkb: 44,
-    shotKbg: 92,
+    shotDamage: 4,
+    shotBkb: 14,
+    shotKbg: 34,
+    chargeLimit: 30,
+    chargeCost: 4,
     shotSpeed: 19,
     projStyle: 'chargeOrb',
     throwDamage: 12,
@@ -209,9 +215,10 @@ export const ITEM_DEF = {
     color: '#ff6b35',
     radius: 20,
     ammo: 24,
-    shotDamage: 5,
-    shotBkb: 18,
-    shotKbg: 42,
+    shotDamage: 3,
+    shotBkb: 14,
+    shotKbg: 28,
+    streamInterval: 5,
     shotSpeed: 13,
     projStyle: 'flame',
     throwDamage: 9,
@@ -230,6 +237,7 @@ export const ITEM_DEF = {
     hitBkb: 52,
     hitKbg: 96,
     slideSpeed: 16,
+    maxSlideSpeed: 28,
     weight: 10,
     despawnFrames: 900,
   },
@@ -259,8 +267,9 @@ export const ITEM_DEF = {
     color: '#facc15',
     radius: 26,
     hitDamage: 10,
-    hitBkb: 74,
+    hitBkb: 92,
     hitKbg: 88,
+    activeFrames: 185,
     weight: 7,
     despawnFrames: 960,
   },
@@ -284,13 +293,24 @@ export const ITEM_DEF = {
 
 export const ITEM_LIST = Object.values(ITEM_DEF);
 
+// Fighter-generated articles are not part of the random item catalog.
+export const TURNIPS = [
+  ['normal', 'Turnip', 7, 29, 52, '#e3edba'],
+  ['wink', 'Winking Turnip', 10, 35, 63, '#d4f29a'],
+  ['dot-eyes', 'Dot-Eyes Turnip', 16, 48, 80, '#ffe993'],
+  ['stitch', 'Stitch Face Turnip', 30, 82, 112, '#ffac89'],
+].map(([face, name, throwDamage, throwBkb, throwKbg, color]) => ({
+  id: 'turnip', face, name, color, category: 'turnip', radius: 17,
+  throwDamage, throwBkb, throwKbg, despawnFrames: 540,
+}));
+
 export const CRITTER_SUMMONS = [
   { id: 'laser_duck', name: 'Laser Duck', mesh: 'Summon_LaserDuck', color: '#38f5ff', duration: 240, style: 'laserBarrage', damage: 10, bkb: 44, kbg: 88 },
   { id: 'snore_sloth', name: 'Snore-Sloth', mesh: 'Summon_SnoreSloth', color: '#a855f7', duration: 210, style: 'bodySlam', damage: 24, bkb: 76, kbg: 120 },
   { id: 'fire_toaster', name: 'Raging Toaster', mesh: 'Summon_RagingToaster', color: '#ff6b35', duration: 240, style: 'flameRing', damage: 14, bkb: 54, kbg: 96 },
   { id: 'tornado_pigeon', name: 'Tornado Pigeon', mesh: 'Summon_TornadoPigeon', color: '#ffdf4d', duration: 220, style: 'whirlwind', damage: 12, bkb: 64, kbg: 98 },
   { id: 'volt_hamster', name: 'Volt Hamster', mesh: 'Summon_VoltHamster', color: '#fde047', duration: 200, style: 'shockBurst', damage: 16, bkb: 58, kbg: 104 },
-  { id: 'tax_piggy', name: 'Audit Piggy', mesh: 'Summon_AuditPiggy', color: '#ff77c8', duration: 180, style: 'healOwner', damage: 0, heal: 25 },
+  { id: 'tax_piggy', name: 'Audit Piggy', mesh: 'Summon_AuditPiggy', color: '#ff77c8', duration: 180, style: 'healOwner', damage: 0, heal: 10 },
 ];
 
 export function pickRandomItemDef(rng = Math.random, excludeContainers = false) {

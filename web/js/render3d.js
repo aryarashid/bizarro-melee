@@ -145,14 +145,15 @@ const HATS = {
   backCap: 'Hat_Cap', snapback: 'Hat_Cap', grillCap: 'Hat_Cap', birdHelmet: 'Hat_BirdHelmet',
   foxEars: 'Hat_FoxHead', toucanBeak: 'Hat_ToucanHead', visorHelm: 'Hat_SpaceHelm',
   tiara: 'Hat_Crown', mysticCrown: 'Hat_Crown', tiaraHair: 'Hat_Crown', elfCap: 'Hat_ElfCap',
+  glasses: 'Hat_Glasses',
 };
 const WEAPONS = {
   yardstick: ['Weapon_Yardstick', 27, 62], fireBroom: ['Weapon_FireBroom', 24, 57],
   armCannon: ['Weapon_ArmCannon', 15, 22], fryingPan: ['Weapon_FryingPan', 18, 29],
   spatula: ['Weapon_Spatula', 18, 31], shovel: ['Weapon_Shovel', 19, 29], wrench: ['Weapon_Wrench', 17, 26],
-  spork: ['Weapon_Wrench', 12, 19], judgeHammer: ['Weapon_JudgeHammer', 16, 20],
-  crystal: ['Weapon_Crystal', 18, 18], squeegee: ['Weapon_Shovel', 16, 25],
-  bat: ['Item_PlungerBat', 15, 23, 'items'],
+  spork: ['Weapon_Spork', 16, 24], judgeHammer: ['Weapon_JudgeHammer', 16, 20],
+  crystal: ['Weapon_Crystal', 18, 18], squeegee: ['Weapon_Squeegee', 16, 26],
+  bat: ['Weapon_Bat', 16, 26], pill: ['Weapon_Pill', 14, 18],
 };
 const SUMMONS = {
   laser_duck: 'Summon_LaserDuck', fire_toaster: 'Summon_RagingToaster', tax_piggy: 'Summon_AuditPiggy',
@@ -223,6 +224,8 @@ const strikePoses = {
   [M.BTHROW]: [{ arm: 0.72, elbow: 1.36, off: 1.22 }, { arm: 1.80, off: 1.72, spin: Math.PI * 1.2 }],
   [M.UTHROW]: [{ arm: 0.82, elbow: 1.36, off: 0.92 }, { arm: 2.93, off: 2.8, lift: 0.10 }],
   [M.DTHROW]: [{ arm: 1.92, off: 2.05, lean: 0.23 }, { arm: 0.71, off: 0.72, lean: -0.48, lift: -0.18 }],
+  [M.GETUP_ATTACK]: [{ roll: -Math.PI * 0.5, lift: -0.22, arm: 0.35, off: 0.2, leg: 0.15, knee: -0.2 },
+    { roll: -0.15, lift: -0.06, arm: 1.42, elbow: 0.16, lean: -0.42, slide: 0.24, leg: 0.62, knee: -0.35 }],
 };
 
 const pose = (values) => ({ ...neutral, ...values });
@@ -311,9 +314,15 @@ function attackPose(f, key, m, accent) {
     yaw: (hit.yaw || 0) - twist * .31, lean: (hit.lean || 0) - (up ? .08 : reach * .18) };
   follow = { ...hit, ...follow, yaw: follow?.yaw ?? hit.yaw * .62, lean: follow?.lean ?? hit.lean * .7,
     arm: follow?.arm ?? (hit.arm ?? neutral.arm) + (jab ? .22 : .38), slide: hit.slide * .58, lift: hit.lift * .55 };
+  if (f.def.id === 'sourzer' && (key === M.NAIR || key === M.UP_B)) hit = { ...hit, spin: (hit.spin || 0) + TAU * 1.25 };
+  if (m?.kind === 'reflector') wind = { ...wind, lean: 0.48, lift: -0.32, knee: -1.55, offKnee: -1.35, leg: 0.95 };
+  if (m?.kind === 'powerPunch') {
+    wind = { ...wind, lean: 0.55, arm: -0.95, elbow: 1.45, slide: -0.18 };
+    hit = { ...hit, lean: -0.78, slide: 0.62, arm: 1.92, elbow: 0.04, yaw: -0.22 };
+  }
   if (smashes.has(key)) wind = pose(smashCues[key]);
   if (f.state === S.SMASH_CHARGE || f.charging) {
-    const tremor = Math.sin((f.smashChargeFrames ?? f.stateFrame) * 2.35) * 0.06;
+    const tremor = Math.sin((f.smashChargeFrames ?? f.stateFrame) * 2.35) * 0.11;
     return pose({ ...wind, head: tremor, lift: (wind.lift || -0.10) + tremor * 0.3, arm: (wind.arm || 0) + tremor });
   }
   const startup = Math.max(1, m?.startup || 1), active = Math.max(1, m?.active || 4), endlag = Math.max(1, m?.endlag || 9);
@@ -355,7 +364,7 @@ function locomotion(f, rig, tick, delta, accent, launchSpeed) {
   }
   if (rig.slideUntil > tick && f.grounded && speed > 1) {
     const p = ease((rig.slideUntil - tick) / 14);
-    return blendPose(neutral, { ...crouch, lean: -0.40, leg: 0.37, offLeg: -0.49, knee: -0.6, offKnee: -0.53, off: -0.60 }, p);
+    return blendPose(neutral, { ...crouch, lean: -0.72, lift: -0.28, leg: 0.95, offLeg: 0.15, knee: -1.55, offKnee: -1.22, arm: 0.35, off: -0.25 }, p);
   }
   if ([S.WALK, S.RUN, S.DASH, S.TURN].includes(f.state)) {
     const stride = clamp(speed / (f.def.stats.runSpeed || 10));
@@ -367,11 +376,17 @@ function locomotion(f, rig, tick, delta, accent, launchSpeed) {
       knee: -0.12 - Math.max(0, -wave) * (0.48 + stride * 0.43), offKnee: -0.12 - Math.max(0, wave) * (0.48 + stride * 0.43),
       arm: 0.19 - wave * swing * 0.63, off: 0.19 + wave * swing * 0.69,
       elbow: 0.27 + stride * 0.44, offElbow: 0.25 + stride * 0.40,
-      lean: -stride * 0.33 - push * 0.25, yaw: wave * 0.14, head: stride * 0.14, tool: 1.14 });
+      lean: -stride * (f.state === S.DASH ? 0.62 : 0.33) - push * (f.state === S.DASH ? 0.42 : 0.25), yaw: wave * 0.14, head: stride * 0.14, tool: 1.14 });
   }
   switch (f.state) {
-    case S.CROUCH: case S.JUMPSQUAT: case S.LANDING:
-      return blendPose(neutral, crouch, f.state === S.LANDING ? clamp(1 - sf / 10) * 0.85 : 1);
+    case S.CROUCH:
+      return pose(crouch);
+    case S.JUMPSQUAT:
+      return pose({ lean: 0.34, lift: -0.30, leg: 1.05, knee: -1.62, offLeg: 0.92, offKnee: -1.48, arm: -0.55, off: -0.35, elbow: 0.55, offElbow: 0.42, head: 0.22 });
+    case S.LANDING: {
+      const cancel = f.lCancelTimer > 0 ? 0.16 : 0;
+      return blendPose(neutral, { ...crouch, lift: crouch.lift - cancel, knee: crouch.knee - cancel }, clamp(1 - sf / 10) * 0.85);
+    }
     case S.SHIELD: case S.SHIELD_STUN:
       return pose({ ...crouch, lean: f.state === S.SHIELD_STUN ? 0.23 : -0.2, lift: -0.10, arm: 0.97, off: 1.04, elbow: 1.06, offElbow: 1.19, spread: 0.37, head: -0.13 });
     case S.ROLL_F: case S.ROLL_B: case S.TECH: {
@@ -382,21 +397,27 @@ function locomotion(f, rig, tick, delta, accent, launchSpeed) {
     case S.AIRDODGE:
       return pose({ leg: 0.9, knee: -1.4, offLeg: 0.58, offKnee: -1.38, arm: 1.09, off: 1, roll: (f.facing || 1) * (f.vy || 0) * 0.08, spin: TAU * ease(sf / MELEE.AIRDODGE_FRAMES) });
     case S.AIRBORNE: {
-      const tuck = clamp((f.vy || 0) / 18);
-      const rising = f.animPose === 'jump' || f.animPose === 'doubleJump' || f.vy > 0;
       const flip = f.doubleJumping || f.animPose === 'doubleJump';
       const floating = f.floating || f.animPose === 'float';
+      if (f.fastFalling && !floating) {
+        return pose({ lean: 0.72, arm: 0.48, elbow: 1.35, off: 0.36, offElbow: 1.28,
+          leg: 1.15, knee: -1.72, offLeg: 1.05, offKnee: -1.68, head: 0.35, spread: 0.08 });
+      }
+      const tuck = clamp(Math.max(0, f.vy || 0) / 18);
+      const rising = f.animPose === 'jump' || flip || f.vy > 0;
+      const somersault = flip ? { arm: 1.2, elbow: 1.35, off: 1.05, offElbow: 1.28, leg: 1.35, knee: -1.7, offLeg: 1.15, offKnee: -1.62,
+        roll: -TAU * ease(Math.min(1, sf / 14)), spread: 0.06 } : {};
       return pose({ lift: floating ? 0.04 + bob * 0.03 : 0, arm: rising ? 0.78 + tuck * 0.65 : 0.42 + bob * 0.47,
         off: rising ? -0.53 : 0.94 - bob * 0.39, lean: clamp((f.vx || 0) * (f.facing || 1) / -38, -0.42, 0.42),
         leg: 0.52 + tuck * 0.62, offLeg: -0.16 + tuck * 0.54, knee: -0.45 - tuck * 0.74, offKnee: -0.60 - tuck * 0.58,
-        roll: flip ? -TAU * ease(sf / 17) : 0, spread: floating ? 0.68 : 0.32, head: 0.19 });
+        roll: 0, spread: floating ? 0.68 : 0.32, head: 0.19, ...somersault });
     }
     case S.FREEFALL:
       return pose({ lean: 0.19, arm: 2.0 + bob * 0.63, off: 1.94 - bob * 0.74, spread: 0.58,
         leg: 0.33 + bob * 0.55, offLeg: 0.36 - bob * 0.55, knee: -0.69, offKnee: -0.9, head: 0.2 });
     case S.LEDGE_HANG: case S.LEDGE_CLIMB:
-      return pose({ lean: -0.22, arm: 2.94, off: 2.62, elbow: 0.21, offElbow: 0.35,
-        leg: 0.20 + bob * 0.21, offLeg: 0.18 - bob * 0.13, knee: -0.47, offKnee: -0.55, head: 0.31 });
+      return pose({ lean: 0.55, lift: -0.16, arm: 2.62, off: 2.48, elbow: 0.38, offElbow: 0.42,
+        leg: 0.08 + bob * 0.08, offLeg: 0.06, knee: -0.12, offKnee: -0.16, head: 0.42 });
     case S.TUMBLE: {
       const force = clamp(((f.lastKnockback ?? launchSpeed / LAUNCH_PER_KB) - 70) / 110);
       const spinDir = rig.tumbleDir || 1;
@@ -409,7 +430,8 @@ function locomotion(f, rig, tick, delta, accent, launchSpeed) {
       return pose({ lean: 0.47, arm: 1.89, off: 1.57, elbow: 0.31, offElbow: 0.52, tilt: 0.26,
         leg: 0.27, offLeg: -0.38, knee: -0.58, offKnee: -0.78, spread: 0.34, head: 0.36 });
     case S.KNOCKDOWN:
-      return pose({ roll: -Math.PI * 0.49, lift: -0.11, arm: 0.92, off: 0.63, spread: 0.36, knee: -0.44 });
+      return pose({ roll: -Math.PI * 0.5, lift: -0.22, arm: 1.35, off: 0.22, elbow: 0.15, spread: 0.58,
+        leg: 0.42, offLeg: -0.28, knee: -0.18, offKnee: -0.12, head: 0.08 });
     case S.GRAB: case S.GRAB_HOLD:
       return pose({ lean: -0.24, arm: 1.52, off: 1.41, elbow: 0.38, offElbow: 0.44, leg: 0.29, lift: -0.06 });
     case S.TAUNT:
@@ -892,6 +914,7 @@ export class GameRenderer3D {
       this.solidMeshes.set(s.id, this._deck(s, stage, palette, false, joined));
     }
     for (const p of platforms) this.platMeshes.set(p.id, this._deck(p, stage, palette, true));
+    this.formAccent = formIndex > 0 && form?.accent ? form.accent : null;
     if (formIndex > 0 && form) this._buildFormBackdrop(form);
   }
 
@@ -1320,6 +1343,17 @@ export class GameRenderer3D {
       }
       const ray = this._energy('#c5ffa3', 0.19, { map: getCloudTexture(T, this) });
       for (let i = 0; i < 4; i++) this._shape(root, 'plane', ray, -335 + i * 162, 141, -273, 76, 440, 1, false).rotation.z = -0.42;
+      for (let i = 0; i < 7; i++) this._shape(root, 'smallBall', scenic, -390 + i * 130, 18, -150, 10, 8, 10, false);
+    }
+    if (form.id === 'fire') {
+      for (let i = 0; i < 5; i++) {
+        const flame = this._shape(root, 'cone', this._basic('#ffb25a', { transparent: true, opacity: 0.75, depthWrite: false }),
+          -360 + i * 180, 78, -220, 18, 52, 18, false);
+        this.terrainAnimations.push({ type: 'torch', node: flame, a: flame.scale.y, i });
+      }
+    } else if (form.id === 'rock') {
+      const block = this._mat('#6b5e54', { roughness: 0.95 });
+      for (let i = 0; i < 4; i++) this._shape(root, 'box', block, -320 + i * 210, 22, -240, 78, 40, 52, false);
     }
     this._ambientPoints(form.id === 'grass' ? 12 : -44, form.id === 'fire' ? 'acid' : 'mist',
       form.accent, 90, root, this.terrainAnimations);
@@ -1509,6 +1543,30 @@ export class GameRenderer3D {
       }
       this._ambientPoints(id === 'critter-arena' ? 14 : 59, 'crowd', '#bde1ff', 330);
     }
+    if (id === 'arguefield') {
+      const stone = this._mat('#8d93b4', { roughness: 0.88 });
+      for (const side of [-1, 1]) {
+        this._shape(backdrop, 'box', stone, side * 1040, 180, -1680, 64, 460, 64, false);
+        this._shape(backdrop, 'cone', stone, side * 1040, 460, -1680, 86, 120, 86, false);
+      }
+      this._ambientPoints(210, 'mist', '#ffb067', 70);
+    }
+    if (id === 'final-obligation') {
+      const ob = this._mat(pal.accent, { emissive: pal.accent, emissiveIntensity: 0.4, roughness: 0.35 });
+      for (const side of [-1, 1]) this._shape(backdrop, 'box', ob, side * 280, 390, -1480, 26, 240, 26, false);
+    }
+    if (id === 'lowrule-temple') {
+      const column = this._mat('#f3ead8', { roughness: 0.7 });
+      for (let i = 0; i < 7; i++) this._shape(backdrop, 'rod', column, (i - 3) * 210, 150, -1020, 26, 320, 26, false);
+    }
+    if (id === 'randalls-tax-shelter') this._ambientPoints(160, 'mist', '#ffd0e4', 60);
+    if (/highway|commute|skyscrapers/.test(id)) {
+      const streak = this._energy(pal.accent, 0.28);
+      for (let i = 0; i < 5; i++) {
+        const band = this._shape(backdrop, 'plane', streak, 0, 70 + i * 34, -640 - i * 30, 2100, 3.5, 1, false);
+        this.stageAnimations.push({ type: 'streak', node: band, i, y: band.position.y });
+      }
+    }
   }
 
   _ambientPoints(y, mode, tint, count, parent = this.stageGroup, animations = this.stageAnimations) {
@@ -1681,6 +1739,16 @@ export class GameRenderer3D {
         -scale * 2.05, 0, 0, scale * 0.46, scale * 1.4, scale * 0.46, false);
       core.rotation.z = Math.PI / 2;
       this.stageAnimations.push({ node: core, a: core.scale.y, type: 'thruster', i: prop.x * 0.01 });
+    } else if (type === 'Prop_Arwing') {
+      this.stageAnimations.push({ node: mount, type: 'patrol', i: prop.x * 0.001, x: prop.x, y: prop.y, z: mount.position.z });
+    } else if (type === 'Prop_Torch') {
+      const flame = mount.children[0] || mount;
+      this.stageAnimations.push({ node: flame, type: 'torch', a: flame.scale.y || 1, i: prop.x * 0.01 });
+    } else if (type === 'Prop_RuneRing') {
+      const halo = this._bone(mount, 'rune spin');
+      this.stageAnimations.push({ node: mount, type: 'gyro', i: prop.x > 0 ? 1 : 0, y: prop.y, halo });
+    } else if (type === 'Prop_CraftCloud') {
+      this.stageAnimations.push({ node: mount, type: 'sway', i: prop.x * 0.01, y: prop.y });
     }
     return bounds;
   }
@@ -1927,6 +1995,19 @@ export class GameRenderer3D {
       if (type === 'thruster') {
         node.scale.y = a * (0.88 + 0.19 * Math.sin(t * 0.19 + i) + 0.09 * Math.cos(t * 0.39));
         node.material.opacity = 0.40 + Math.sin(t * 0.23 + i) * 0.09;
+      }
+      if (type === 'patrol') {
+        const phase = t * 0.01 + i;
+        const dir = Math.cos(phase);
+        node.position.x = x + Math.sin(phase) * 900;
+        node.position.y = y + Math.sin(t * 0.017 + i) * 28;
+        node.rotation.y = dir >= 0 ? 0 : Math.PI;
+        node.rotation.z = -dir * 0.55;
+      }
+      if (type === 'torch') node.scale.y = (a || 1) * (0.86 + 0.22 * Math.abs(Math.sin(t * 0.22 + (i || 0))));
+      if (type === 'streak') {
+        node.position.x = Math.sin(t * 0.02 + i) * 420;
+        node.material.opacity = 0.16 + 0.22 * Math.abs(Math.sin(t * 0.05 + i));
       }
       if (type === 'jumbotron') this._updateJumbotron(entry, match);
       if (type === 'fountain') {
@@ -2176,6 +2257,7 @@ export class GameRenderer3D {
         rig.tailTip = tip;
       }
       this._articulate(rig, f, { puff, depth, breadth, chestRx, shoulders, build, ...mantle });
+      this._portraitExtras(rig, f, style, sil, { rx, ry, rz, chestRx, chestSz, breadth });
       if (style.buddy) this._buildBuddy(rig, pants, detail, light, dark);
     }
     const edged = new Map(), zones = new Map();
@@ -2203,6 +2285,7 @@ export class GameRenderer3D {
       };
       node.material = Array.isArray(node.material) ? node.material.map(rim) : rim(node.material);
     });
+    if (style.eyes === 'none') this._flatOutline(rig);
     if (parent === this.battleGroup) this._buildFighterEffects(rig, f);
     return rig;
   }
@@ -2245,10 +2328,10 @@ export class GameRenderer3D {
     const T = this.T, head = rig.head, pal = rig.pal, hatKey = HATS[style.hat];
     const helmet = style.hat === 'visorHelm' || style.hat === 'birdHelmet';
     const cap = hatKey === 'Hat_Cap';
-    const paintedVisor = ['foxEars', 'toucanBeak', 'visorHelm'].includes(style.hat);
-    const hat = hatKey && !paintedVisor && this._model('characters', hatKey,
+    const hat = hatKey && this._model('characters', hatKey,
       { NeutralTint: pal.outfit, CharGreen: pal.body, CharOrange: sil === 'fox' ? pal.body : '#ff982d',
-        CharRed: cap || helmet ? pal.outfit : pal.body, CharCyan: pal.accent });
+        CharRed: cap || helmet ? pal.outfit : pal.body, CharCyan: pal.accent,
+        CharTeal: style.hat === 'glasses' ? '#1aa8b8' : pal.accent });
     if (hat) {
       let x = 0, y = ry * 0.64, sx = rx, sy = ry * 0.71, sz = rz;
       if (cap) {
@@ -2260,6 +2343,10 @@ export class GameRenderer3D {
       if (style.hat === 'elfCap') { y = ry * 0.94; sx *= 0.81; sy *= 0.93; sz *= 0.91; }
       if (hatKey === 'Hat_Crown') { y = ry * 0.32; sy *= 0.98; }
       if (helmet) { x = -rx * 0.08; y = ry * 0.08; sx *= 1.12; sy = ry * 1.02; sz *= 1.09; }
+      if (style.hat === 'foxEars') { x = -rx * 0.05; y = -ry * 0.02; sx = rx * 0.92; sy = ry * 0.95; sz = rz * 0.92; }
+      if (style.hat === 'toucanBeak') { x = -rx * 0.02; y = -ry * 0.06; sx = rx * 1.08; sy = ry * 1.02; sz = rz * 1.02; }
+      if (style.hat === 'visorHelm') { x = -rx * 0.18; y = ry * 0.02; sx = rx * 1.08; sy = ry * 1.06; sz = rz * 1.08; }
+      if (style.hat === 'glasses') { x = rx * 0.12; y = ry * 0.06; sx = rx * 0.92; sy = ry * 0.78; sz = rz * 0.9; }
       hat.position.set(x, y, 0);
       hat.scale.set(sx, sy, sz);
       head.add(hat);
@@ -2337,7 +2424,7 @@ export class GameRenderer3D {
     if (style.hat === 'lcdNose') {
       this._shape(head, 'ball', main, rx * 0.91, -ry * 0.09, 0, rx * 0.46, ry * 0.25, rz * 0.85);
       this._shape(head, 'ball', detail, rx * 0.86, ry * 0.02, rz * 0.36, 2.9, 2.9, 1.3);
-    } else if (['dino', 'fox', 'rodent', 'tinyRodent', 'tallCat'].includes(sil)) {
+    } else if (['dino', 'fox', 'rodent', 'tinyRodent', 'tallCat'].includes(sil) && !(sil === 'fox' && hat)) {
       const muzzle = this._shape(head, 'ball', sil === 'dino' || sil === 'fox' ? light : skin,
         rx * 0.68, -ry * 0.36, 0, rx * 0.52, ry * 0.35, rz * 0.63);
       muzzle.rotation.z = -0.09;
@@ -2364,7 +2451,73 @@ export class GameRenderer3D {
       if (helmet) material.emissiveMap = material.map;
       rig.face = this._add(head, this._featurePatch(faceRx, ry, faceRz, jaw), material, 0, 0, 0, false);
       rig.face.renderOrder = 1;
+      if (['visorHelm', 'birdHelmet', 'foxEars', 'toucanBeak', 'glasses'].includes(style.hat)) {
+        rig.face.position.x = style.hat === 'visorHelm' || style.hat === 'birdHelmet' ? rx * 0.26 : rx * 0.12;
+        rig.face.renderOrder = 5;
+      }
       rig.expression = 'normal';
+    }
+  }
+
+  _pinPart(parent, name, x, y, z, sx, sy, sz, tint) {
+    const node = this._model('characters', name, tint);
+    if (!node || !parent) return null;
+    node.position.set(x, y, z);
+    node.scale.set(sx, sy, sz);
+    parent.add(node);
+    return node;
+  }
+
+  _portraitExtras(rig, f, style, sil, { rx, ry, rz, chestRx, chestSz }) {
+    const id = f.def.id, head = rig.head;
+    if (!head) return;
+    const dropEars = () => {
+      if (!rig.ears) return;
+      for (const ear of rig.ears) ear.removeFromParent();
+      rig.ears = null;
+    };
+    if (id === 'dadondorf') this._pinPart(head, 'Part_Beard', rx * 0.12, -ry * 0.42, 0, rx * 1.05, ry * 0.95, rz * 0.9);
+    if (id === 'screech') this._pinPart(head, 'Part_HairBun', -rx * 0.02, ry * 0.72, 0, rx * 0.95, ry * 0.85, rz * 0.9);
+    if (id === 'broshee') {
+      const snout = this._pinPart(head, 'Part_DinoSnout', rx * 0.2, -ry * 0.12, 0, rx * 1.2, ry * 1.05, rz * 1.05);
+      if (snout && rig.muzzle) { rig.muzzle.removeFromParent(); rig.muzzle = null; }
+      this._pinPart(rig.torso, 'Part_Spines', -chestRx * 0.15, chestSz * 0.72, 0, chestRx * 0.55, chestSz * 0.4, rz * 0.7);
+    }
+    if (id === 'wonky-kong' || id === 'mess' || id === 'troy') {
+      this._pinPart(head, 'Part_HairCrest', 0, ry * 0.62, 0, rx * 0.9, ry * 0.75, rz * 0.85);
+    }
+    if (id === 'spitzu') {
+      if (this._pinPart(head, 'Part_MouseEars', 0, ry * 0.35, 0, rx * 1.15, ry * 1.05, rz * 1.2)) dropEars();
+    }
+    if (id === 'chikapu') {
+      if (this._pinPart(head, 'Part_BoltEars', 0, ry * 0.42, 0, rx * 1.1, ry * 1.0, rz * 1.05)) dropEars();
+      this._pinPart(head, 'Hat_Cap', 0, ry * 0.58, 0, rx * 0.82, ry * 0.52, rz * 0.88, { NeutralTint: '#e23b3b' });
+    }
+    if (id === 'gigglefluff') {
+      this._pinPart(head, 'Part_CatEars', 0, ry * 0.28, 0, rx * 0.85, ry * 0.7, rz * 0.8);
+      this._pinPart(head, 'Part_HairSwirl', rx * 0.02, ry * 0.48, 0, rx * 0.65, ry * 0.55, rz * 0.65);
+    }
+    if (id === 'velda') this._pinPart(head, 'Hat_Hood', -rx * 0.08, ry * 0.05, 0, rx * 1.08, ry * 1.02, rz * 1.05, { NeutralTint: rig.pal.body });
+    if (id === 'bario' || style.prop === 'monocle') this._pinPart(head, 'Part_Monocle', rx * 0.08, ry * 0.02, 0, rx * 0.9, ry * 0.82, rz * 0.85);
+    if (id === 'zink' || id === 'tiny-zink' || id === 'dadondorf') {
+      this._pinPart(head, 'Part_ElfEars', rx * 0.05, -ry * 0.02, 0, rx * 0.85, ry * 0.75, rz * 0.95);
+    }
+    if (id === 'mewtooth' && rig.turn) {
+      const orb = this._shape(rig.turn, 'smallBall', this._mat('#7eefff', { emissive: '#7eefff', emissiveIntensity: 0.8 }),
+        rx * 1.55, ry * 0.15, rz * 0.35, 7, 7, 7);
+      orb.name = 'xray orb';
+    }
+  }
+
+  _flatOutline(rig) {
+    const T = this.T;
+    const mat = this._mat('#f4f8ff', { side: T.BackSide, emissive: '#ffffff', emissiveIntensity: 1.4, roughness: 0.35 });
+    const meshes = [];
+    rig.turn?.traverse((node) => { if (node.isMesh && !node.material?.transparent) meshes.push(node); });
+    for (const node of meshes) {
+      const shell = new T.Mesh(node.geometry, mat);
+      shell.scale.set(1.045, 1.045, 1.08);
+      node.add(shell);
     }
   }
 
@@ -2404,9 +2557,10 @@ export class GameRenderer3D {
       this._shape(leg, 'ball', pants, 0, -thigh * 0.40, 0, girth * 0.126, thigh * 0.79, girth * 0.12 * depth);
       this._shape(kneeCap, 'smallBall', pauldron ? detail : pants, w * 0.025, 0, 0, w * 0.103, w * 0.111, w * 0.108 * depth);
       this._shape(shin, 'ball', pants, 0, -calf * 0.42, 0, girth * 0.109, calf * 0.77, girth * 0.102 * depth);
-      const leather = style.stache ? new this.T.Color('#704039').lerp(new this.T.Color(pal.outfit), 0.36) : pal.outfit;
+      const flurby = f.def.id === 'flurby';
+      const leather = flurby ? '#e23b3b' : style.stache ? new this.T.Color('#704039').lerp(new this.T.Color(pal.outfit), 0.36) : pal.outfit;
       const boot = this._model('characters', 'Part_Boot', { NeutralTint: leather });
-      const bootSize = w * (puff ? 0.37 : 0.32);
+      const bootSize = w * (flurby ? 0.52 : puff ? 0.37 : 0.32);
       if (boot) {
         boot.scale.set(bootSize, bootSize * (puff ? 0.61 : 0.79), bootSize * depth);
         boot.position.set(bootSize * 0.04, bootSize * 0.05, 0);
@@ -2414,7 +2568,23 @@ export class GameRenderer3D {
       } else {
         this._shape(foot, 'ball', pants, bootSize * 0.24, -2, 0, bootSize * 0.58, bootSize * 0.33, bootSize * 0.41 * depth);
       }
+      if (style.silhouette === 'armor') {
+        const coil = this._model('characters', 'Part_DuctCoil');
+        if (coil) {
+          coil.scale.set(girth * 0.42, u * 0.85, girth * 0.42);
+          coil.position.y = -u * 0.48;
+          arm.add(coil);
+        }
+      }
       rig.limbs.push({ shoulder, arm, fore, grip, hip, leg, shin, kneeCap, foot });
+    }
+    if (style.silhouette === 'armor') {
+      const waist = this._model('characters', 'Part_DuctCoil');
+      if (waist) {
+        waist.scale.set(w * 0.22, h * 0.08, w * 0.22);
+        waist.position.y = h * 0.02;
+        rig.pelvis.add(waist);
+      }
     }
     const hand = rig.limbs[0].grip;
     rig.tool = this._bone(hand, 'weapon socket');
@@ -2427,7 +2597,6 @@ export class GameRenderer3D {
       const model = this._model(spec[3] || 'weapons', spec[0]);
       if (model) {
         model.scale.setScalar(spec[1]);
-        if (style.prop === 'bat') { model.rotation.z = -Math.PI / 2; model.position.x = 11; }
         if (style.prop === 'crystal') model.position.x = -8;
         rig.tool.add(model);
       } else {
@@ -2459,6 +2628,14 @@ export class GameRenderer3D {
   _buildBuddy(rig, pants, detail, light, dark) {
     const h = rig.h;
     const buddy = this._bone(rig.turn, 'Nana-Bot', -29, 0, -22);
+    const bot = this._model('characters', 'Buddy_NanaBot');
+    if (bot) {
+      bot.scale.setScalar(h * 0.42);
+      bot.position.y = h * 0.12;
+      buddy.add(bot);
+      rig.buddy = buddy;
+      return;
+    }
     this._shape(buddy, 'ball', detail, 0, h * 0.30, 0, 11, h * 0.21, 10);
     this._shape(buddy, 'ball', pants, 0, h * 0.52, 0, 10, 10, 10);
     this._shape(buddy, 'ball', light, 7, h * 0.52, 0, 4, 6.5, 8);
@@ -2659,6 +2836,8 @@ export class GameRenderer3D {
     rig.shield.visible = false;
     rig.shieldColor = new T.Color(playerColor(f.port));
     rig.pastelShield = rig.shieldColor.clone().lerp(new T.Color('#edf0ff'), 0.61);
+    rig.shieldWarn = new T.Color('#ff4d62');
+    rig.shieldInk = new T.Color();
     rig.lightShieldBand = this._shape(rig.shield, 'ring', this._energy(rig.pastelShield, 0.20), 0, 0, 0, 1.01, 1.01, 0.47, false);
     rig.shine = this._bone(root, 'Reflector', 0, h * 0.49, 0);
     const electro = this._energy('#39bfff', 0.28);
@@ -3117,10 +3296,12 @@ export class GameRenderer3D {
       rig.shield.rotation.y = tick * (light ? 0.024 : 0.006);
       const u = rig.shield.material.uniforms;
       u.clock.value = tick / 60;
-      u.paint.value.copy(light ? rig.pastelShield : rig.shieldColor);
-      u.alpha.value = light ? 0.47 : state === S.SHIELD_STUN ? 1.0 : 0.78 + (1 - bubble) * 0.19;
+      const tired = 1 - bubble;
+      rig.shieldInk.copy(light ? rig.pastelShield : rig.shieldColor).lerp(rig.shieldWarn, tired * (light ? 0.25 : 0.82));
+      u.paint.value.copy(rig.shieldInk);
+      u.alpha.value = light ? 0.47 : state === S.SHIELD_STUN ? 1.0 : 0.78 + tired * 0.19;
       u.pattern.value = light ? 0 : 1;
-      u.power.value = light ? 3.2 : 1.8;
+      u.power.value = (light ? 3.2 : 1.8) + tired * 1.6;
       rig.lightShieldBand.visible = light;
       rig.lightShieldBand.rotation.set(0.48 + Math.sin(tick * 0.07) * 0.46, tick * 0.039, 0.26);
     }
@@ -3740,6 +3921,7 @@ export class GameRenderer3D {
     const bolt = kind === 'lightning';
     const blending = smoke || opts.solid ? T.NormalBlending : T.AdditiveBlending;
     const type = damageSmoke || puff ? 'plane' : kind === 'ring' || kind === 'shockwave' || kind === 'impactStar' ? kind
+      : kind === 'flame' ? 'flameTongue' : kind === 'slash' ? 'swingRim'
       : bolt ? 'lightning:' + opts.variant : kind === 'beam' ? 'cone' : smoke || kind === 'core' ? 'smallBall' : 'gem';
     let effect = this.combatFxPool.get(kind)?.pop();
     if (effect) {
@@ -3756,7 +3938,7 @@ export class GameRenderer3D {
         toneMapped: false, fog: smoke, blending,
         ...(puff ? { map: getImpactPuffTexture(kind, T, this) } : damageSmoke ? { map: getDamageSmokeTexture(T, this) } : {}),
         ...(bolt ? { vertexColors: true } : {}),
-        ...(bolt || kind === 'ring' || kind === 'shockwave' || kind === 'beam' ? { side: T.DoubleSide } : {}) });
+        ...(bolt || kind === 'ring' || kind === 'shockwave' || kind === 'beam' || kind === 'flame' || kind === 'slash' ? { side: T.DoubleSide } : {}) });
       const mesh = this._shape(this.fxGroup, type, mat, x, y, z, size, size, size, false);
       mesh.name = kind;
       effect = { mesh, kind };
@@ -3764,6 +3946,7 @@ export class GameRenderer3D {
     Object.assign(effect, { x, y, z, vx, vy, vz, size, life, born: frame }, opts);
     const { mesh } = effect;
     if (kind === 'spark') mesh.rotation.z = Math.atan2(vy, vx);
+    if (kind === 'flame' || kind === 'slash') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.angle || 0);
     if (kind === 'impactStar' || bolt || kind === 'shockwave') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.angle, 'ZYX');
     if (kind === 'impactSpark' || kind === 'speedStreak') mesh.rotation.z = opts.angle;
     if (kind === 'ring') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.roll || 0);
@@ -3930,6 +4113,15 @@ export class GameRenderer3D {
         Math.cos(a) * speed, Math.sin(a) * speed, (Math.random() - .5) * 2.2, t, { angle: a });
     }
     if (electric) for (let i = 0; i < 3; i++) this._electricArc(x, y, t, angle + i * TAU / 3, size * (1.1 + i * .16), i);
+    const fire = !electric && (e.element === 'fire' || move?.element === 'fire' || move?.style === 'fire');
+    if (e.meteor) this._particle('shockwave', x, y - 8, 18, '#ff4864', size * 0.22, 16, 0, -2.2, 0, t,
+      { end: size * 1.15, angle: -Math.PI / 2, tilt: Math.PI / 2 });
+    if (fire) for (let i = 0; i < 5; i++) {
+      const a = angle + (i - 2) * 0.32;
+      this._particle('flame', x, y, 30, i % 2 ? '#ffd36a' : '#ff6a1a', size * 0.32, 10 + i,
+        Math.cos(a) * 1.6, Math.sin(a) * 1.6 + 0.8, 0, t, { angle: a + Math.PI / 2 });
+    }
+    if (slash && !electric) this._particle('slash', x, y, 42, spark, size * 0.82, 8, 0, 0, 0, t, { angle, tilt: 0.18 });
     if (kb >= 85 && (e.sweetspot || e.meteor || heavy)) {
       this._particle('shockwave', x, y, 24, spark, size * .28, 17, 0, 0, 0, t,
         { end: size * 1.38, angle, tilt: .26, yaw: .46 });
@@ -4050,10 +4242,24 @@ export class GameRenderer3D {
       this._flash('#9efcff', x, cy, 125000, t, 12);
       return;
     }
+    if (e.type === 'lCancel') {
+      this._particle('ring', x, y + 4, 6, '#b6ffd0', 10, 12, 0, 0, 0, t, { end: 54, tilt: Math.PI / 2 });
+      this._particle('ring', x, y + 4, 8, '#ffffff', 6, 10, 0, 0, 0, t, { end: 36, tilt: Math.PI / 2 });
+      return;
+    }
     if (e.type === 'wavedash') {
       this.slideUntil.set(e.port, t + 14);
       for (let i = 0; i < 5; i++) this._particle('smoke', x + i * 4, y + 4, -1, '#c1e7f7', 6 + i, 12 + i,
         -(e.dir || 1) * (2 + i * 0.9), 1.4, 0.1, t);
+    }
+    if (e.type === 'tech' && e.tech === 'PARRY') {
+      const f = match.fighters?.find((fighter) => fighter.port === e.port);
+      const cy = y + (f?.def.stats.height || 75) * (f?.scale || 1) * 0.48;
+      this._particle('ring', x, cy, 26, '#ffd56a', 18, 14, 0, 0, 0, t, { end: 92, yaw: 0.2 });
+      this._particle('ring', x, cy, 22, '#fff6c8', 12, 10, 0, 0, 0, t, { end: 64, tilt: 0.5 });
+      this._particle('impactStar', x, cy, 40, '#ffe9a0', 48, 8, 0, 0, 0, t, { angle: 0.4, aspect: 0.7, alpha: 0.95 });
+      this._flash('#ffe08a', x, cy, 90000, t, 10);
+      return;
     }
     if (e.type === 'tech' && (e.wall || !e.tech)) {
       const f = match.fighters?.find((fighter) => fighter.port === e.port);
@@ -4203,6 +4409,10 @@ export class GameRenderer3D {
           mesh.quaternion.copy(this.camera.quaternion);
           mesh.rotateZ(p.angle + p.swirl * (.3 + progress * .7));
           mesh.material.opacity = (dust ? .89 : .91) * left ** 1.4;
+        } else if (p.kind === 'flame' || p.kind === 'slash') {
+          const reach = size * (p.kind === 'slash' ? mix(0.72, 1.22, ease(Math.min(1, elapsed / 3))) : 0.8 + progress * 0.45);
+          mesh.scale.set(reach, reach * (p.kind === 'flame' ? 1.35 : 0.55), reach * 0.35);
+          mesh.material.opacity = left ** 1.15;
         } else if (p.kind === 'impactSpark' || p.kind === 'speedStreak') {
           const streak = p.kind === 'speedStreak';
           mesh.scale.set(size * (streak ? .66 : .78) * left ** .5, (streak ? 3.3 : 1.0 + size * .069) * left, 2.0 * left);
@@ -4257,6 +4467,13 @@ export class GameRenderer3D {
       this.hemi.groundColor.copy(palette.ground).lerp(this.tensionPalette[1], p * 0.39);
       this.sun.color.copy(palette.sun).lerp(this.tensionPalette[2], p * 0.47);
       this.rim.color.copy(palette.rim).lerp(this.tensionPalette[3], p * 0.58);
+      if (this.formAccent) {
+        this.formTint ??= new this.T.Color();
+        this.formTint.set(this.formAccent);
+        this.hemi.color.lerp(this.formTint, 0.42);
+        this.rim.color.lerp(this.formTint, 0.5);
+        this.sun.color.lerp(this.formTint, 0.22);
+      }
     }
     this.hemi.intensity = victory ? 1.84 : 2 - p * 0.20;
     this.sun.intensity = victory ? 1.95 : 2.75 + p * 0.18;

@@ -1,8 +1,8 @@
-/** Playable fighters, challenge opponents and their combat profiles. */
+/* Playable fighters, challenge opponents and their combat profiles. */
 
 import { MOVE } from './constants.js';
 
-/**
+/*
  * Helper to build a complete, responsive Melee moveset from an archetype + character overrides.
  * Every move specifies:
  *   startup, active, endlag (frames at 60Hz)
@@ -163,27 +163,348 @@ function warp(style, startup, speed, damage) {
     endlag: 14, speed, damage, offsetX: 0, offsetY: 32, radius: 52 };
 }
 
+// Each row uses [startup, active, endlag, damage, angle, bkb, kbg, offsetX, offsetY, radius, landingLag?].
+const NORMAL_KEYS = [MOVE.JAB, MOVE.FTILT, MOVE.UTILT, MOVE.DTILT, MOVE.DASH_ATTACK, MOVE.FSMASH,
+  MOVE.USMASH, MOVE.DSMASH, MOVE.NAIR, MOVE.FAIR, MOVE.BAIR, MOVE.UAIR, MOVE.DAIR];
+const NORMALS = {
+  'dr-bario': [
+    [2,2,12,4,361,18,26,27,35,22], [5,4,14,9,34,27,78,44,34,24], [5,5,13,9,97,27,77,13,67,29],
+    [5,4,13,8,74,29,66,34,16,26], [6,8,20,10,58,48,69,40,25,27],
+    [12,4,23,19,40,47,104,46,39,31], [9,5,24,16,95,35,112,17,72,32], [5,7,21,16,30,38,99,39,13,30],
+    [3,24,9,6,45,27,72,19,33,29,10], [12,5,19,16,34,44,112,45,37,31,17],
+    [6,10,15,12,141,32,95,-40,31,27,13], [4,7,17,10,79,24,98,8,65,28,12], [7,13,15,12,70,27,77,4,-5,28,15],
+  ],
+  bario: [
+    [2,3,10,3,361,17,25,28,34,22], [5,4,13,8,39,30,73,42,34,25], [4,6,11,8,93,25,75,10,67,30],
+    [5,5,12,7,78,26,65,37,16,23], [6,9,17,9,55,40,68,41,20,29],
+    [12,4,22,17,40,43,104,50,38,32], [8,5,23,15,84,43,103,15,70,31], [5,8,20,14,30,39,97,40,13,30],
+    [3,20,11,10,361,27,84,24,33,29,11], [13,5,19,14,280,32,96,42,30,30,17],
+    [6,9,14,11,143,32,94,-41,33,28,13], [4,8,13,10,78,31,86,14,67,27,12], [5,14,14,10,60,32,74,0,-3,27,15],
+  ],
+  squeegi: [
+    [2,2,9,3,361,16,24,30,36,22], [5,4,12,10,38,25,81,49,35,24], [4,6,13,9,96,32,76,9,72,27],
+    [5,6,14,8,80,25,63,42,14,25], [4,14,18,8,55,31,68,37,37,25],
+    [12,3,24,17,32,42,115,43,40,30], [9,5,24,17,86,41,112,12,76,31], [5,9,23,16,27,39,100,45,14,27],
+    [3,21,10,15,90,37,101,12,34,30,11], [7,4,15,13,52,32,96,46,39,26,14],
+    [6,8,14,12,142,33,95,-47,35,26,13], [5,7,15,12,73,29,92,11,76,28,13], [10,4,18,16,270,38,104,3,-13,30,16],
+  ],
+  sourzer: [
+    [7,4,16,6,361,22,28,44,46,26], [10,5,22,14,34,38,92,56,41,33], [8,7,20,13,87,45,99,15,84,40],
+    [10,7,20,12,48,39,76,54,18,30], [12,8,24,13,55,48,85,58,38,39],
+    [18,4,32,23,34,56,118,68,41,34], [16,7,30,20,90,53,116,5,87,47], [10,13,26,17,45,43,98,39,15,36],
+    [8,14,22,13,75,48,89,0,37,46,18], [9,7,21,17,37,41,105,59,44,36,17],
+    [9,5,23,16,147,44,102,-50,35,37,17], [16,5,23,19,89,52,116,4,96,38,20], [14,18,23,16,72,45,98,3,-4,38,22],
+  ],
+  screech: [
+    [2,2,12,3,361,20,26,30,37,23], [7,5,15,10,82,29,90,42,41,30], [9,6,15,12,88,41,90,15,78,33],
+    [6,4,13,10,82,35,80,44,12,28], [6,8,17,12,63,38,87,45,32,31],
+    [15,4,23,18,36,46,113,58,39,33], [13,4,27,19,88,46,109,13,79,34], [6,14,24,18,30,44,102,40,13,35],
+    [3,19,12,12,361,34,97,15,34,34,10], [12,7,20,15,38,44,110,54,41,33,15],
+    [6,12,13,13,144,37,97,-39,36,33,12], [7,7,17,11,82,36,86,10,76,33,13], [7,14,14,10,68,33,79,5,-4,29,13],
+  ],
+  broshee: [
+    [3,3,10,4,361,19,26,29,39,24], [5,5,14,10,80,34,84,46,37,26], [7,6,16,12,94,39,84,13,76,31],
+    [7,4,11,9,29,26,77,55,16,28], [10,7,17,11,52,41,82,43,33,33],
+    [15,5,24,17,36,45,105,54,42,32], [11,6,22,16,87,43,110,17,80,32], [7,10,25,15,33,46,89,41,14,31],
+    [3,19,12,13,361,32,99,24,32,30,11], [18,5,18,17,280,42,104,52,30,37,17],
+    [10,12,15,12,143,34,90,-47,34,30,14], [5,6,17,13,90,38,100,4,73,31,12], [10,20,19,16,76,38,88,1,-8,32,17],
+  ],
+  'wonky-kong': [
+    [5,4,13,5,361,20,29,42,43,27], [6,5,18,12,39,36,86,60,42,32], [5,8,19,12,101,37,92,16,82,38],
+    [7,5,16,9,65,36,70,61,15,30], [9,10,21,12,52,42,86,47,38,38],
+    [22,5,27,21,38,53,116,70,40,41], [14,7,26,18,86,48,110,12,87,42], [10,7,23,16,36,47,101,48,18,36],
+    [10,18,16,12,49,44,92,14,39,42,14], [18,8,20,17,280,39,103,60,28,36,19],
+    [7,9,14,14,146,38,102,-59,36,38,13], [6,7,14,14,90,35,96,6,86,35,12], [12,7,22,16,270,34,102,9,-9,36,18],
+  ],
+  'captain-pigeon': [
+    [3,2,8,3,361,17,29,31,40,23], [7,4,14,11,37,33,82,53,41,24], [17,5,15,13,275,49,91,26,58,30],
+    [10,5,14,11,27,44,83,51,15,29], [7,8,20,11,61,49,79,43,39,31],
+    [19,5,25,19,35,51,113,53,43,33], [13,9,23,17,87,44,105,18,78,30], [10,10,23,16,30,46,103,46,15,31],
+    [7,11,13,13,52,33,89,25,34,33,12], [11,11,18,19,32,52,124,46,34,28,16],
+    [6,8,15,13,145,38,95,-48,38,30,14], [6,8,11,13,76,34,91,12,77,32,11], [12,5,16,15,270,38,104,7,-9,31,16],
+  ],
+  dadondorf: [
+    [7,3,15,7,361,23,38,41,43,25], [9,5,19,14,32,39,89,56,42,30], [24,5,25,21,75,59,114,33,63,37],
+    [10,6,17,13,69,41,84,53,15,31], [9,8,21,14,52,48,87,49,40,34],
+    [21,5,28,23,35,57,119,57,43,36], [21,10,28,20,87,50,112,19,83,37], [12,11,24,18,34,49,103,51,17,33],
+    [7,13,17,15,46,39,96,26,39,36,15], [12,5,20,19,34,52,118,57,40,35,18],
+    [7,7,16,16,149,46,103,-51,42,32,15], [6,9,16,14,69,42,98,11,83,37,14], [13,5,18,20,270,46,116,6,-10,34,18],
+  ],
+  falcont: [
+    [2,3,9,4,361,16,26,32,38,22], [5,4,13,9,36,29,76,49,34,24], [5,7,11,10,96,34,82,14,71,30],
+    [7,5,16,12,88,39,100,46,14,28], [5,9,18,9,58,37,77,41,35,27],
+    [16,6,23,17,33,46,110,54,38,35], [7,8,21,14,84,43,100,16,74,32], [6,7,21,15,27,42,100,41,13,30],
+    [3,15,13,11,361,34,94,23,36,30,11], [6,23,19,12,63,33,91,46,35,29,16],
+    [4,6,13,14,144,40,106,-45,37,30,11], [7,8,14,12,91,38,92,5,74,29,13], [5,8,14,13,270,34,100,8,-7,29,12],
+  ],
+  faux: [
+    [2,2,10,3,361,17,26,29,35,22], [5,4,12,8,37,26,71,45,34,24], [5,6,11,9,101,32,79,11,67,28],
+    [7,4,13,10,80,34,81,45,14,26], [4,10,16,8,65,31,74,37,32,29],
+    [12,9,20,15,36,42,101,52,34,32], [7,5,18,18,82,52,122,14,74,32], [6,4,21,15,25,42,99,42,14,30],
+    [4,22,11,12,361,29,91,22,33,31,10], [6,14,17,12,56,34,85,44,34,28,15],
+    [4,7,12,14,144,40,106,-45,34,28,10], [6,6,12,15,86,46,112,7,70,31,11], [5,17,12,11,75,27,65,4,-6,26,13],
+  ],
+  mess: [
+    [3,3,10,3,361,17,26,29,32,23], [6,4,14,10,36,29,79,43,30,26], [5,6,16,8,92,32,83,2,64,28],
+    [3,3,12,4,45,20,34,34,12,22], [8,10,22,11,65,32,76,41,34,28],
+    [14,4,25,19,36,54,116,57,35,33], [11,8,23,15,83,38,101,9,65,32], [12,11,22,14,29,38,98,43,12,27],
+    [5,13,13,11,47,33,86,12,29,33,13], [8,12,15,12,44,33,84,41,34,31,14],
+    [10,8,13,16,147,46,111,-38,31,31,13], [8,7,17,13,91,38,96,4,62,33,13], [17,6,18,13,270,34,82,4,-6,26,16],
+  ],
+  'slush-shovelers': [
+    [4,3,12,4,361,18,26,35,35,23], [6,5,14,11,38,29,82,47,35,28], [8,10,15,10,91,32,83,10,67,30],
+    [8,4,14,8,70,30,72,46,14,25], [9,7,18,11,57,42,81,46,34,31],
+    [12,7,22,19,36,48,112,52,37,32], [12,7,23,17,87,46,110,13,71,34], [7,7,23,16,30,45,99,37,14,32],
+    [6,15,11,10,50,31,83,15,32,31,11], [19,6,18,16,270,38,97,47,27,32,17],
+    [8,6,13,12,143,35,95,-45,33,30,13], [7,9,13,12,90,34,91,10,66,29,13], [9,14,18,10,72,35,77,8,-7,29,16],
+  ],
+  flurby: [
+    [3,2,9,3,361,17,24,29,26,23], [5,5,12,10,35,28,77,41,25,27], [4,8,11,9,88,44,86,4,57,29],
+    [4,4,11,7,43,23,67,38,10,24], [8,13,17,10,52,38,75,39,24,31],
+    [12,8,21,16,35,46,108,47,27,31], [12,6,21,15,78,40,101,12,60,32], [10,9,21,14,30,43,97,39,11,31],
+    [10,17,11,12,54,32,90,9,22,34,13], [10,12,15,10,46,34,82,39,25,29,14],
+    [6,10,12,13,149,38,95,-40,26,30,12], [10,8,14,11,77,36,88,7,58,31,13], [8,22,17,12,270,25,60,3,-9,28,15],
+  ],
+  shamus: [
+    [3,3,11,3,361,16,25,31,40,25], [6,5,14,10,42,32,82,51,36,27], [14,5,17,13,77,40,93,24,66,29],
+    [6,6,15,13,85,42,87,49,13,32], [8,8,20,11,56,45,89,43,36,32],
+    [10,5,23,16,36,46,110,57,38,35], [11,16,22,17,90,48,112,12,78,34], [7,8,23,16,28,43,101,44,14,33],
+    [5,21,11,14,361,36,93,23,36,33,12], [6,23,15,13,55,34,89,46,42,30,16],
+    [9,9,15,15,147,44,105,-52,36,31,15], [5,15,13,11,81,33,89,4,77,30,14], [13,7,18,16,270,35,102,10,-8,31,17],
+  ],
+  velda: [
+    [4,3,11,4,361,17,26,27,40,25], [12,5,16,13,40,38,89,45,40,29], [7,8,15,12,88,38,92,12,72,34],
+    [5,5,12,8,75,29,74,42,13,27], [6,8,19,12,55,47,89,46,34,30],
+    [16,8,24,16,42,47,111,56,39,34], [6,20,24,18,88,44,110,11,77,35], [4,8,21,13,30,37,95,41,13,29],
+    [6,18,15,12,57,38,86,16,38,34,14], [8,4,16,20,34,54,122,46,40,28,15],
+    [6,4,16,20,146,54,122,-46,39,28,15], [14,6,17,16,87,48,106,2,85,38,17], [14,10,18,12,270,32,88,4,-9,28,18],
+  ],
+  zink: [
+    [6,3,10,4,361,18,28,44,36,26], [13,6,15,13,40,37,85,55,39,32], [8,8,14,10,93,34,86,19,74,31],
+    [13,5,15,12,275,37,90,53,13,32], [8,7,22,12,63,45,82,52,34,35],
+    [15,7,24,20,38,47,113,60,37,36], [10,15,23,17,87,46,109,17,75,34], [9,12,20,16,32,43,101,46,14,32],
+    [4,19,10,11,42,34,88,23,33,31,11], [14,13,16,14,51,38,94,59,39,35,15],
+    [6,10,15,11,146,34,87,-44,32,30,13], [5,19,11,14,88,39,96,6,82,32,12], [10,14,18,17,82,48,106,2,-12,35,17],
+  ],
+  'tiny-zink': [
+    [4,3,9,3,361,17,25,37,31,24], [10,6,13,11,41,33,79,49,32,28], [7,8,12,9,94,31,79,15,65,28],
+    [10,5,12,10,73,31,77,45,13,28], [7,8,17,10,62,38,78,45,31,30],
+    [13,8,22,17,38,43,105,54,34,32], [9,14,21,15,86,41,101,14,68,32], [7,11,20,14,31,42,95,42,12,30],
+    [4,20,9,10,361,28,84,20,29,29,10], [12,14,14,12,54,35,87,51,34,32,14],
+    [6,10,12,10,147,33,83,-38,31,28,12], [5,18,10,12,86,37,90,8,72,30,11], [11,14,15,16,270,42,99,3,-11,30,16],
+  ],
+  spitzu: [
+    [2,2,9,2,361,15,24,24,25,21], [5,4,12,8,31,29,78,35,23,25], [6,6,12,7,98,31,79,10,49,26],
+    [7,4,12,8,72,30,71,35,9,24], [5,8,16,8,52,34,79,33,23,28],
+    [12,7,22,17,36,44,106,44,24,31], [9,6,20,17,87,49,112,9,54,30], [8,10,22,11,52,40,93,32,10,28],
+    [3,13,9,9,361,29,88,16,24,29,9], [7,16,12,10,49,34,82,34,24,27,13],
+    [5,12,13,11,145,34,86,-38,24,29,13], [4,7,11,8,52,32,79,5,50,26,9], [9,9,16,13,272,35,95,5,-6,31,15],
+  ],
+  chikapu: [
+    [2,3,10,3,361,18,24,29,29,23], [6,5,13,9,34,31,79,39,27,26], [7,7,12,8,99,33,85,9,58,29],
+    [7,5,12,8,77,31,71,40,12,25], [5,9,17,10,56,40,84,38,25,31],
+    [16,8,21,18,40,44,107,48,28,34], [8,5,18,18,86,52,122,9,63,34], [8,13,22,13,52,42,96,35,11,30],
+    [3,16,11,11,361,32,93,20,29,31,10], [10,15,13,11,52,34,82,39,31,29,14],
+    [6,13,14,12,145,37,90,-43,29,31,14], [4,6,11,9,44,38,88,8,58,29,10], [14,10,15,14,60,37,96,5,-9,32,17],
+  ],
+  gigglefluff: [
+    [5,3,11,3,361,17,25,30,25,23], [6,5,12,10,33,30,83,39,27,26], [8,8,12,9,97,32,85,9,53,29],
+    [10,5,14,9,37,32,76,42,9,25], [5,10,20,11,54,38,84,37,27,28],
+    [12,9,22,17,34,46,106,45,28,33], [7,7,23,15,81,43,105,14,54,30], [9,7,24,14,18,41,101,39,10,28],
+    [6,19,11,12,361,33,88,16,26,33,10], [7,15,12,12,44,32,87,40,27,32,12],
+    [7,5,13,13,148,42,102,-54,30,34,12], [8,9,14,12,88,39,91,6,56,33,12], [5,17,14,12,77,32,84,6,-9,29,14],
+  ],
+  mewtooth: [
+    [5,3,11,5,361,18,30,32,42,25], [9,6,15,11,36,35,85,59,38,30], [8,8,14,10,97,39,86,10,89,36],
+    [6,6,12,9,81,33,74,53,15,31], [8,10,19,11,63,40,85,49,37,35],
+    [17,6,25,19,38,52,113,62,38,37], [9,17,23,17,87,48,111,10,88,38], [17,5,23,16,29,47,106,55,13,34],
+    [7,18,16,12,57,34,89,10,38,37,14], [5,5,15,14,43,42,103,47,39,31,13],
+    [8,5,15,13,146,42,96,-62,38,34,14], [8,8,14,13,85,39,96,10,89,36,13], [18,5,17,15,270,39,101,9,-12,34,18],
+  ],
+  'mr-beep-blob': [
+    [4,3,11,3,361,17,25,30,34,25], [10,6,16,11,35,34,87,50,34,30], [10,6,14,10,96,34,85,15,70,29],
+    [6,7,12,11,83,34,84,49,13,27], [6,11,20,10,53,39,82,45,32,32],
+    [12,6,22,18,36,49,112,55,39,33], [24,6,23,18,91,51,114,11,73,37], [15,5,23,16,32,47,108,47,13,31],
+    [20,12,14,15,76,43,97,13,37,37,14], [9,10,15,14,38,44,104,52,35,36,13],
+    [10,11,15,12,147,38,90,-47,31,32,14], [7,12,12,11,89,40,88,5,77,35,12], [12,14,19,14,270,37,94,5,-13,33,17],
+  ],
+  garth: [
+    [4,4,11,4,361,18,27,52,38,28], [7,5,15,11,38,28,88,63,38,30], [6,7,15,11,97,39,86,18,80,35],
+    [7,4,9,9,28,27,68,61,13,27], [12,6,21,12,63,41,84,61,35,35],
+    [10,4,20,20,36,56,124,68,38,36], [13,5,23,17,90,47,114,12,88,34], [6,10,24,15,35,41,97,55,13,30],
+    [6,12,14,11,53,34,86,26,39,37,13], [4,5,13,12,42,38,96,58,38,36,12],
+    [7,6,15,13,145,39,99,-56,42,34,14], [5,7,13,13,83,35,93,17,80,37,12], [6,5,18,14,270,40,108,24,-6,36,16],
+  ],
+  troy: [
+    [4,4,12,5,361,20,26,36,36,26], [7,5,17,11,42,31,85,51,37,31], [7,7,14,11,91,37,87,13,76,33],
+    [7,4,10,10,78,30,77,49,13,29], [13,6,20,12,62,42,82,49,33,33],
+    [11,4,21,22,34,58,126,46,36,34], [12,12,24,17,90,43,106,11,79,33], [7,10,24,15,32,42,97,46,13,31],
+    [7,13,14,11,52,32,84,24,39,34,14], [5,5,15,12,44,36,90,44,39,33,13],
+    [8,6,16,12,146,38,93,-43,38,32,14], [6,7,14,12,79,35,90,10,75,35,13], [12,6,17,15,270,41,102,9,-8,33,17],
+  ],
+  shriek: [
+    [2,3,9,3,361,16,24,31,37,23], [5,4,11,8,78,46,72,48,37,26], [5,10,12,10,94,36,82,12,73,30],
+    [5,5,13,8,78,31,71,46,13,27], [5,9,17,10,66,38,82,42,35,30],
+    [12,11,25,16,38,44,104,53,36,31], [5,7,24,17,83,49,116,12,82,34], [5,12,24,15,29,41,100,42,14,31],
+    [3,21,10,13,361,31,95,17,35,31,10], [5,4,13,14,34,44,112,47,38,28,11],
+    [4,13,14,14,146,37,98,-49,37,30,13], [5,13,14,11,88,38,92,5,76,31,13], [15,8,20,12,62,32,87,6,-10,29,18],
+  ],
+};
+
+const THROW_KEYS = [MOVE.FTHROW, MOVE.BTHROW, MOVE.UTHROW, MOVE.DTHROW];
+// [damage, angle, base knockback, growth, startup, endlag]. Combo throws
+// deliberately trade launch distance for earlier follow-ups in world units.
+const THROWS = {
+  'dr-bario': [[8,42,42,69,8,15], [12,142,64,104,12,18], [7,90,39,65,7,12], [6,83,34,49,7,7]],
+  bario: [[8,39,45,67,8,13], [12,141,60,99,11,18], [7,93,36,68,8,11], [6,82,34,48,8,7]],
+  squeegi: [[9,47,41,69,7,14], [11,140,52,88,10,17], [7,90,38,68,8,10], [7,82,35,57,7,9]],
+  sourzer: [[11,37,52,87,10,18], [11,143,65,93,14,24], [10,86,49,83,11,18], [10,79,51,69,13,17]],
+  screech: [[10,36,51,94,9,18], [10,145,49,85,9,15], [8,89,40,62,8,12], [7,80,36,49,7,6]],
+  broshee: [[8,41,49,73,9,16], [9,137,50,79,11,15], [6,90,46,65,8,13], [6,76,37,58,10,12]],
+  'wonky-kong': [[10,42,51,87,10,15], [12,147,57,92,11,19], [8,88,42,57,7,7], [9,68,45,65,10,13]],
+  'captain-pigeon': [[8,43,45,76,8,12], [9,145,49,82,9,15], [7,90,40,66,8,10], [7,81,40,48,7,5]],
+  dadondorf: [[9,39,60,83,13,23], [9,141,52,86,11,17], [7,89,46,68,9,12], [7,78,45,56,9,10]],
+  falcont: [[8,41,42,74,7,14], [8,136,52,79,10,15], [6,87,43,65,6,10], [6,35,42,55,9,12]],
+  faux: [[7,40,42,71,7,13], [8,139,49,78,9,14], [7,88,40,58,5,7], [6,42,40,53,8,11]],
+  mess: [[9,39,49,91,9,15], [13,138,72,122,12,18], [8,90,45,71,9,12], [8,69,45,64,10,13]],
+  'slush-shovelers': [[8,46,42,60,7,8], [7,140,45,74,9,12], [7,92,37,65,8,10], [6,75,37,46,6,7]],
+  flurby: [[8,65,47,71,14,16], [8,128,48,74,12,16], [9,89,49,85,13,17], [8,78,41,61,12,14]],
+  shamus: [[9,44,49,74,11,16], [9,137,53,82,12,18], [9,88,48,86,12,16], [7,79,43,61,10,12]],
+  velda: [[11,42,50,83,11,16], [11,143,56,91,13,18], [10,91,45,79,11,16], [8,81,42,65,10,13]],
+  zink: [[7,42,43,71,8,14], [7,146,49,78,10,15], [8,89,45,80,10,14], [7,79,40,59,9,11]],
+  'tiny-zink': [[7,39,41,66,7,12], [7,139,47,75,9,14], [7,93,41,74,8,10], [6,76,35,55,8,9]],
+  spitzu: [[8,41,42,72,8,11], [8,136,49,77,9,14], [7,90,35,64,7,10], [6,75,37,59,8,12]],
+  chikapu: [[9,43,44,76,8,13], [9,141,51,80,10,15], [8,92,38,67,7,10], [7,75,39,57,8,10]],
+  gigglefluff: [[8,36,48,78,8,14], [9,145,53,87,10,15], [7,90,31,49,6,3], [7,75,35,54,8,11]],
+  mewtooth: [[10,44,50,89,10,15], [11,139,59,101,12,17], [12,90,58,104,12,17], [8,78,42,61,9,11]],
+  'mr-beep-blob': [[8,41,46,68,8,12], [8,138,52,83,9,14], [8,87,40,66,8,12], [7,76,39,57,8,10]],
+  garth: [[5,57,32,47,7,4], [6,145,48,54,8,11], [5,93,45,53,7,6], [5,74,44,47,8,9]],
+  troy: [[6,38,46,53,8,9], [6,146,50,58,9,12], [6,92,44,61,8,9], [6,76,43,50,9,10]],
+  shriek: [[6,42,46,64,7,11], [7,146,48,74,9,13], [8,89,41,66,8,10], [8,81,42,49,6,5]],
+};
+
+const NORMAL_TRAITS = {
+  'dr-bario': { [MOVE.NAIR]: { late: { from: 7, damage: 14, bkb: 37, kbg: 100, sweetspot: true } },
+    [MOVE.DAIR]: { meteor: false, ...flurry(5, 3, 2, 4, 74, 32, 79) } },
+  bario: { [MOVE.NAIR]: { late: { from: 5, damage: 6, bkb: 24, kbg: 70 } },
+    [MOVE.DAIR]: { meteor: false, ...flurry(5, 3, 1.6, 5, 70, 29, 75) } },
+  squeegi: { [MOVE.UP_B]: { element: 'fire', hitboxes: sweetAndSour(
+      { offsetX: 11, offsetY: 41, radius: 29, through: 1 },
+      { offsetX: 8, offsetY: 42, radius: 26, from: 2, damage: 5, bkb: 31, kbg: 65, angle: 72 }) },
+    [MOVE.DAIR]: { late: { from: 1, damage: 12, angle: 45, meteor: false } } },
+  sourzer: { [MOVE.DAIR]: { meteor: false, ...flurry(8, 2, 2, 4, 74, 35, 80) } },
+  screech: { [MOVE.DTHROW]: { minHitstun: 24 }, [MOVE.DAIR]: { meteor: false, ...flurry(4, 4, 2, 4, 75, 35, 76) } },
+  broshee: { [MOVE.FAIR]: { meteor: true, sweetspot: true }, [MOVE.DAIR]: { meteor: false } },
+  'wonky-kong': { [MOVE.FAIR]: { meteor: true }, [MOVE.UTHROW]: { releaseX: 18 } },
+  'captain-pigeon': { [MOVE.DTHROW]: { minHitstun: 24 }, [MOVE.NAIR]: flurry(2, 7, 5, 8, 59, 36, 89),
+    [MOVE.USMASH]: flurry(2, 6, 6, 13, 89, 48, 107), [MOVE.SIDE_B]: { airMeteor: true } },
+  dadondorf: { [MOVE.USMASH]: flurry(2, 7, 7, 16, 87, 49, 112),
+    [MOVE.DOWN_B]: { airMeteor: true } },
+  falcont: { [MOVE.NAIR]: { late: { from: 4, damage: 7, kbg: 75 } },
+    [MOVE.FAIR]: flurry(5, 4, 2, 5, 63, 32, 84) },
+  faux: { [MOVE.NAIR]: { late: { from: 4, damage: 8, kbg: 77 } },
+    [MOVE.UAIR]: flurry(2, 4, 5, 13, 86, 46, 112), [MOVE.FAIR]: flurry(5, 3, 2, 5, 56, 33, 85),
+    [MOVE.DOWN_B]: { angle: 5 } },
+  mess: { [MOVE.FAIR]: flurry(4, 3, 2, 5, 48, 35, 88), [MOVE.NAIR]: { bothSides: true } },
+  'slush-shovelers': { [MOVE.FSMASH]: flurry(2, 5, 6, 14, 36, 48, 112),
+    [MOVE.USMASH]: flurry(2, 5, 5, 13, 87, 46, 110), [MOVE.DSMASH]: flurry(2, 5, 5, 12, 30, 45, 99) },
+  flurby: { [MOVE.FAIR]: flurry(3, 4, 3, 6, 47, 34, 87), [MOVE.DAIR]: flurry(6, 4, 1.8, 4, 270, 26, 66) },
+  shamus: { [MOVE.NAIR]: { late: { from: 6, damage: 8, bkb: 30, kbg: 77 } },
+    [MOVE.FAIR]: flurry(5, 5, 2, 5, 52, 36, 87), [MOVE.USMASH]: flurry(5, 4, 2, 6, 87, 39, 105),
+    [MOVE.UAIR]: flurry(5, 3, 1.5, 5, 83, 34, 83) },
+  velda: { [MOVE.NAIR]: flurry(4, 4, 1.5, 5, 55, 37, 84),
+    [MOVE.USMASH]: flurry(6, 3, 1.5, 7, 89, 45, 109) },
+  zink: { [MOVE.USMASH]: flurry(3, 5, 3, 10, 87, 46, 109), [MOVE.DAIR]: { pogo: true, meteor: false },
+    [MOVE.FAIR]: flurry(2, 8, 5, 10, 53, 38, 95), [MOVE.BAIR]: flurry(2, 4, 3, 8, 144, 34, 87) },
+  'tiny-zink': { [MOVE.USMASH]: flurry(3, 5, 3, 8, 86, 41, 101), [MOVE.DAIR]: { pogo: true, meteor: true },
+    [MOVE.NAIR]: { late: { from: 6, damage: 6, bkb: 24, kbg: 67 } }, [MOVE.FAIR]: flurry(2, 7, 4, 9, 54, 35, 87) },
+  spitzu: { [MOVE.FAIR]: flurry(4, 4, 2, 4, 49, 34, 82), [MOVE.UAIR]: { meteor: false } },
+  chikapu: { [MOVE.FAIR]: flurry(5, 3, 1.5, 5, 52, 34, 82),
+    [MOVE.BAIR]: flurry(4, 3, 2, 5, 145, 37, 90), [MOVE.DAIR]: { meteor: false } },
+  gigglefluff: { [MOVE.DAIR]: { meteor: false, ...flurry(6, 3, 1.5, 4, 77, 32, 84) },
+    [MOVE.FAIR]: { late: { from: 5, damage: 7, bkb: 29, kbg: 71 } }, [MOVE.UTHROW]: { releaseX: 0 } },
+  mewtooth: { [MOVE.NAIR]: flurry(6, 3, 1.5, 5, 58, 34, 88),
+    [MOVE.USMASH]: flurry(6, 3, 2, 7, 87, 48, 111), [MOVE.FAIR]: { element: 'dark' } },
+  'mr-beep-blob': { [MOVE.BAIR]: flurry(4, 3, 2, 5, 147, 38, 90), [MOVE.UAIR]: flurry(2, 7, 4, 8, 89, 40, 88) },
+  garth: { [MOVE.FTHROW]: { minHitstun: 23, releaseX: 9 }, [MOVE.NAIR]: flurry(2, 6, 4, 8, 53, 34, 86) },
+  troy: { [MOVE.NAIR]: flurry(2, 6, 4, 8, 52, 32, 84),
+    [MOVE.DAIR]: { element: 'fire' }, [MOVE.UTILT]: { element: 'fire' }, [MOVE.DTILT]: { element: 'fire' } },
+  shriek: { [MOVE.DTHROW]: { minHitstun: 22 }, [MOVE.UTILT]: flurry(2, 6, 4, 7, 93, 36, 82),
+    [MOVE.FSMASH]: flurry(2, 7, 5, 11, 38, 44, 104), [MOVE.DAIR]: { meteor: false },
+    [MOVE.DSMASH]: flurry(2, 7, 6, 11, 29, 41, 100), [MOVE.NAIR]: { late: { from: 5, damage: 8, kbg: 79 } } },
+};
+
+const RAPID_JABS = new Set(['faux', 'falcont', 'captain-pigeon', 'flurby', 'zink', 'tiny-zink', 'shriek', 'squeegi']);
+const TETHERS = { shamus: [8, 115], zink: [10, 105], 'tiny-zink': [9, 93] };
+
+function applyProfile(id, moves) {
+  if (!NORMALS[id]) return;
+  for (const [i, row] of NORMALS[id].entries()) {
+    const [startup, active, endlag, damage, angle, bkb, kbg, offsetX, offsetY, radius, landingLag] = row;
+    Object.assign(moves[NORMAL_KEYS[i]], { startup, active, endlag, damage, angle, bkb, kbg, offsetX, offsetY, radius,
+      ...(landingLag != null && { landingLag }), ...(NORMAL_KEYS[i] === MOVE.DAIR && { meteor: angle === 270 }) });
+  }
+  for (const [i, [damage, angle, bkb, kbg, startup, endlag]] of THROWS[id].entries()) {
+    Object.assign(moves[THROW_KEYS[i]], { damage, angle, bkb, kbg, startup, endlag });
+  }
+}
+
+function finishProfile(id, moves) {
+  for (const [key, traits] of Object.entries(NORMAL_TRAITS[id] ?? {})) {
+    Object.assign(moves[key], traits);
+  }
+  if (RAPID_JABS.has(id)) {
+    const jab = moves[MOVE.JAB];
+    const pulse = flurry(4, 3, 1.4, 4, 39, 32, 71);
+    moves[MOVE.JAB3] = { name: 'Rapid Jab', startup: jab.startup, endlag: 10, offsetX: jab.offsetX + 5,
+      offsetY: jab.offsetY, radius: jab.radius, damage: 6, bkb: 32, kbg: 71, angle: 39,
+      ...pulse, ...moves[MOVE.JAB3], rapidJab: true };
+  }
+  if (TETHERS[id]) {
+    const [startup, reach] = TETHERS[id];
+    moves[MOVE.ZAIR] = { name: 'Tether Shot', startup, active: 5, endlag: 19, landingLag: 6, damage: 5,
+      angle: 42, bkb: 24, kbg: 50, kind: 'strike', offsetX: reach, offsetY: 30, radius: 16,
+      hitboxes: [{ offsetX: reach, radius: 19 }, { offsetX: reach * 0.66, radius: 18 }] };
+  }
+}
+
 function makeFighter(cfg) {
   const moves = baseMoveset(cfg.moveScale || {});
+  applyProfile(cfg.id, moves);
   if (cfg.moves) {
     for (const [k, patch] of Object.entries(cfg.moves)) {
       moves[k] = { ...moves[k], ...patch };
       if (patch.projGravity === 0 && patch.projBounce == null) moves[k].projBounce = false;
     }
   }
-  // Build the regions after applying fighter overrides so reach and damage follow the move.
-  for (const key of [MOVE.JAB, MOVE.FTILT, MOVE.FAIR, MOVE.BAIR, MOVE.DAIR]) {
+  finishProfile(cfg.id, moves);
+  // Keep authored hitbox arrays intact, including extra regions and timing.
+  // Generate defaults only when a move has not already defined its geometry.
+  for (const key of [MOVE.JAB, MOVE.FTILT, MOVE.UTILT, MOVE.DTILT, MOVE.FSMASH, MOVE.USMASH, MOVE.DSMASH,
+    MOVE.NAIR, MOVE.FAIR, MOVE.BAIR, MOVE.UAIR, MOVE.DAIR]) {
     const move = moves[key];
+    if (move.hitboxes?.length >= 2) continue;
     const down = key === MOVE.DAIR;
     const hilt = cfg.id === 'troy';
-    const inner = { offsetX: move.offsetX * 0.50, offsetY: move.offsetY + (down ? 14 : 0) };
-    const outer = { offsetX: move.offsetX * 1.25, offsetY: move.offsetY - (down ? 15 : 0) };
+    const inner = { offsetX: move.offsetX * 0.55, offsetY: move.offsetY + (down ? 12 : 0) };
+    const outer = { offsetX: move.offsetX * 1.22, offsetY: move.offsetY - (down ? 12 : 0) };
+    const sourAngle = key === MOVE.BAIR ? 139 : down && move.meteor ? 62 : move.angle;
+    const rangedSweetspot = cfg.id === 'garth' || cfg.id === 'troy' || !!move.sweetspot;
     const [tip = {}, base = {}] = move.hitboxes ?? [];
-    const sourAngle = key === MOVE.BAIR ? 120 : down ? 62 : move.angle === 62 ? 48 : 62;
-    move.hitboxes = sweetAndSour(
-      { ...(hilt ? inner : outer), radius: move.radius * 0.54, ...tip },
-      { ...(hilt ? outer : inner), radius: move.radius * 0.83, damage: Math.floor(move.damage * 0.65),
-        bkb: move.bkb * 0.78, kbg: move.kbg * 0.78, angle: sourAngle, ...base });
+    const sweet = { ...(hilt ? inner : outer), radius: move.radius * 0.64, ...tip };
+    const sour = { ...(hilt ? outer : inner), radius: move.radius * 0.90,
+      damage: Math.max(1, Math.floor(move.damage * (rangedSweetspot ? 0.66 : 0.84))),
+      bkb: move.bkb * 0.84, kbg: move.kbg * 0.84, angle: sourAngle, ...base };
+    // Don't add hit-stop or KO glamour to the clean region of every basic jab.
+    move.hitboxes = sweetAndSour(sweet, sour);
+    if (!rangedSweetspot) move.hitboxes[0].sweetspot = false;
+    if (move.late) {
+      for (const region of move.hitboxes) region.through = move.late.from - 1;
+      const late = { ...move.hitboxes[0], ...move.late, through: move.active - 1 };
+      const lateSour = { ...move.hitboxes[1], ...move.late, through: move.active - 1, sweetspot: false,
+        damage: Math.max(1, Math.floor(move.late.damage * 0.8)) };
+      move.hitboxes.push(late, lateSour);
+    }
   }
   return {
     id: cfg.id,
@@ -226,7 +547,7 @@ function makeFighter(cfg) {
   };
 }
 
-/**
+/*
  * ALL 26 PLAYABLE BIZARRO MELEE FIGHTERS
  * Ordered in authentic Melee CSS layout!
  */
@@ -256,7 +577,6 @@ export const ROSTER = [
       [MOVE.UP_B]: { name: 'Co-Pay Uppercut', kind: 'recovery', damage: 13, recoveryX: 7.5, recoveryY: 18.8 },
       [MOVE.DOWN_B]: { name: 'Tornado Diagnosis', kind: 'spin', damage: 11, liftY: 4.8,
         ...flurry(4, 4, 2, 6, 55, 46, 94) },
-      [MOVE.BTHROW]: { name: 'Malpractice YEET', damage: 12, bkb: 64, kbg: 104, angle: 142 },
     },
   }),
 
@@ -275,7 +595,6 @@ export const ROSTER = [
     ],
     rig: { silhouette: 'stout', hat: 'bowler', stache: 'curl', prop: 'monocle', cape: 'nda', eyes: 'monocle' },
     moves: {
-      [MOVE.DTHROW]: { startup: 10, endlag: 11, bkb: 38, angle: 72 },
       [MOVE.FAIR]: { name: 'Dunk Memo', damage: 14, bkb: 32, kbg: 96, angle: 280, startup: 13, meteor: true,
         hitboxes: sweetAndSour({ offsetX: 49, offsetY: 24, radius: 17, through: 2 },
           { offsetX: 34, radius: 30, damage: 8, angle: 42, kbg: 72 }) },
@@ -327,7 +646,6 @@ export const ROSTER = [
     ],
     rig: { silhouette: 'brute', hat: 'horns', prop: 'shellSpikes', eyes: 'angry' },
     moves: {
-      [MOVE.BTHROW]: { startup: 14, endlag: 24, bkb: 65 },
       [MOVE.FSMASH]: { name: 'HOA Violation Dropkick', damage: 23, bkb: 56, kbg: 118, angle: 34, startup: 18, sweetspot: true,
         hitboxes: sweetAndSour({ offsetX: 74, radius: 14 },
           { offsetX: 37, radius: 27, damage: 14, bkb: 30, kbg: 73 }) },
@@ -360,7 +678,7 @@ export const ROSTER = [
       [MOVE.NEUTRAL_B]: { name: 'Butler Counter', kind: 'counter', startup: 5, active: 18, endlag: 16, damage: 14, bkb: 48, kbg: 96, angle: 45 },
       [MOVE.SIDE_B]: { name: 'Hip-Check Audit', kind: 'dashBurst', damage: 14, bkb: 48, kbg: 98, angle: 40, burstX: 15.5, burstY: 2.5 },
       [MOVE.UP_B]: { name: 'Parasol Float', kind: 'recovery', parasol: true, damage: 11, recoveryX: 9.0, recoveryY: 19.6 },
-      [MOVE.DOWN_B]: { name: 'Ugly Turnip Toss', kind: 'projectile', damage: 11, projSpeed: 12.5, projLife: 70, projGravity: 0.36, projStyle: 'turnip' },
+      [MOVE.DOWN_B]: { name: 'Ugly Turnip Toss', kind: 'turnipPull', startup: 9, active: 1, endlag: 12, damage: 0 },
     },
   }),
 
@@ -381,7 +699,7 @@ export const ROSTER = [
     rig: { silhouette: 'dino', hat: 'snapback', prop: 'shades', eyes: 'shades' },
     moves: {
       [MOVE.DAIR]: { name: 'Flutter Tax Stomp', damage: 16, bkb: 38, kbg: 88, angle: 76, startup: 10, meteor: false,
-        ...flurry(5, 3, 3, 4, 76, 38, 88) },
+        ...flurry(12, 2, 4, 6, 76, 38, 88) },
       [MOVE.NEUTRAL_B]: { name: 'Shell-Company Gulp', kind: 'commandGrab', damage: 10, bkb: 42, kbg: 72, angle: 65 },
       [MOVE.SIDE_B]: { name: 'Egg Rollout', kind: 'dashBurst', damage: 11, burstX: 15, burstY: 1 },
       [MOVE.UP_B]: { name: 'Offshore Egg Lob', kind: 'projectile', damage: 9, projSpeed: 12.5, projLife: 70, projGravity: 0.35, projAngle: 52, projStyle: 'egg', selfLiftY: 7 },
@@ -459,7 +777,6 @@ export const ROSTER = [
     ],
     rig: { silhouette: 'tallBrute', hat: 'grillCap', prop: 'spatula', cape: 'apron', eyes: 'angry' },
     moves: {
-      [MOVE.FTHROW]: { startup: 13, endlag: 23, bkb: 60 },
       [MOVE.FAIR]: { name: 'Spatula Flip of Doom', startup: 12, active: 5, endlag: 20, damage: 19, bkb: 52, kbg: 118, angle: 34, sweetspot: true },
       [MOVE.DAIR]: { name: 'Sandal Stomp', startup: 13, active: 5, endlag: 18, damage: 20, bkb: 46, kbg: 116, angle: 270, meteor: true,
         hitboxes: sweetAndSour({ offsetX: 10, offsetY: -15, radius: 21, through: 2 },
@@ -514,7 +831,6 @@ export const ROSTER = [
     ],
     rig: { silhouette: 'fox', hat: 'foxEars', prop: 'aviators', tail: 'bushy', eyes: 'shades' },
     moves: {
-      [MOVE.UTHROW]: { startup: 5, endlag: 8 },
       [MOVE.DAIR]: { name: 'Espresso Drill', startup: 5, meteor: false, ...flurry(6, 3, 2, 4, 275, 24, 66) },
       [MOVE.USMASH]: { name: '20XX Up-Smash', startup: 7, active: 5, endlag: 18, damage: 18, bkb: 52, kbg: 122, angle: 82, sweetspot: true, chargeable: true },
       [MOVE.BAIR]: { name: 'Coyote Back-Air', startup: 4, active: 7, endlag: 12, landingLag: 10, damage: 14, bkb: 40, kbg: 106, angle: 144 },
@@ -545,7 +861,6 @@ export const ROSTER = [
       [MOVE.FSMASH]: { name: 'Broomstick Home-Run', damage: 19, bkb: 54, kbg: 116, angle: 36, startup: 14, sweetspot: true, reflects: true,
         hitboxes: sweetAndSour({ offsetX: 71, radius: 14 },
           { offsetX: 36, radius: 27, damage: 11, bkb: 30, kbg: 73 }) },
-      [MOVE.BTHROW]: { name: 'Telekinetic Yeet', damage: 13, bkb: 72, kbg: 122, angle: 138 },
       [MOVE.NEUTRAL_B]: { name: 'PK-WiFi Pulse', kind: 'projectile', damage: 15, bkb: 52, kbg: 102, projSpeed: 9.5, projLife: 65, projGravity: 0.14, projStyle: 'orb' },
       [MOVE.SIDE_B]: { name: 'PK-Microwave', kind: 'projectile', damage: 10, bkb: 24, kbg: 40, projSpeed: 13.0, projLife: 45, projGravity: 0.08, projStyle: 'fireball' },
       [MOVE.UP_B]: { name: 'PK-Rocket Self-Launch', ...rocketRecovery('psychic', 26, 22, 26, 23), bkb: 68, kbg: 120 },
@@ -622,7 +937,7 @@ export const ROSTER = [
     rig: { silhouette: 'armor', hat: 'visorHelm', prop: 'armCannon', eyes: 'visor' },
     moves: {
       [MOVE.NEUTRAL_B]: { name: 'HVAC Charge Blast', kind: 'chargeShot', storableCharge: true, projBounce: false, startup: 9, active: 4, endlag: 16, damage: 21, bkb: 54, kbg: 106, projSpeed: 17.5, projLife: 62, projGravity: 0, projAngle: 0, projStyle: 'chargeOrb', sweetspot: true },
-      [MOVE.SIDE_B]: { name: 'Duct Missile', kind: 'projectile', startup: 12, active: 3, endlag: 18, damage: 11, bkb: 38, kbg: 76, projSpeed: 14.0, projLife: 65, projGravity: 0, projAngle: 0, projStyle: 'missile' },
+      [MOVE.SIDE_B]: { name: 'Duct Missile', kind: 'projectile', missile: true, startup: 12, active: 3, endlag: 18, damage: 8, bkb: 35, kbg: 68, projSpeed: 13, projLife: 65, projGravity: 0, projAngle: 0, projStyle: 'missile' },
       [MOVE.UP_B]: { name: 'Duct-Tape Screw Attack', kind: 'recovery', startup: 4, endlag: 16, damage: 13, recoveryX: 7.5, recoveryY: 19.2,
         ...flurry(5, 3, 2, 5, 80, 52, 98) },
       [MOVE.DOWN_B]: { name: 'Roomba Bomb', kind: 'projectile', startup: 8, active: 4, endlag: 14, damage: 9, bkb: 38, kbg: 66, projSpeed: 2.0, projLife: 55, projGravity: 0.3, projBounce: true, projStyle: 'bomb', selfLiftY: 7.5 },
@@ -729,8 +1044,7 @@ export const ROSTER = [
       [MOVE.NEUTRAL_B]: { name: '9-Volt Jolt', kind: 'projectile', damage: 7, selfDamage: 1, projSpeed: 13.5, projLife: 56, projGravity: 0.22, projBounce: true, projStyle: 'bolt' },
       [MOVE.SIDE_B]: { name: 'AAA Torpedo', kind: 'dashBurst', technique: 'chargeMissile', style: 'electric', startup: 1, active: 13, endlag: 18, damage: 20, selfDamage: 2, speed: 23 },
       [MOVE.UP_B]: { name: 'Double-Zip', ...quickAttack(6), selfDamage: 2 },
-      [MOVE.DOWN_B]: { name: 'Overclocked Thunder', kind: 'spin', damage: 17, selfDamage: 3, bkb: 54, kbg: 108, angle: 76, radius: 52, sweetspot: true,
-        ...flurry(3, 3, 3, 12, 76, 54, 108) },
+      [MOVE.DOWN_B]: { name: 'Overclocked Thunder', kind: 'thunderCall', startup: 8, active: 1, endlag: 24, selfDamage: 3, damage: 17, bkb: 54, kbg: 110 },
     },
   }),
 
@@ -755,8 +1069,7 @@ export const ROSTER = [
       [MOVE.NEUTRAL_B]: { name: 'Dryer-Sheet Jolt', kind: 'projectile', damage: 7, projSpeed: 13.0, projLife: 60, projGravity: 0.24, projBounce: true, projStyle: 'bolt' },
       [MOVE.SIDE_B]: { name: 'Hamster Rocket', kind: 'dashBurst', technique: 'chargeMissile', style: 'electric', startup: 1, active: 14, endlag: 18, damage: 19, speed: 24 },
       [MOVE.UP_B]: { name: 'Quick-Zip', ...quickAttack(8) },
-      [MOVE.DOWN_B]: { name: 'Static Storm', kind: 'spin', damage: 17, bkb: 54, kbg: 110, angle: 78, radius: 54, sweetspot: true,
-        ...flurry(4, 3, 2, 11, 78, 54, 110) },
+      [MOVE.DOWN_B]: { name: 'Static Storm', kind: 'thunderCall', startup: 8, active: 1, endlag: 24, damage: 17, bkb: 54, kbg: 110 },
     },
   }),
 
@@ -831,7 +1144,7 @@ export const ROSTER = [
       [MOVE.NEUTRAL_B]: { name: 'Pixel Pancake Flip', kind: 'projectile', damage: 8, projSpeed: 9.5, projLife: 62, projGravity: 0.38, projAngle: 56, projStyle: 'pancake' },
       [MOVE.SIDE_B]: { name: 'JUDGE 1-9 GAMBLE', kind: 'judge', rolls: judgeRolls, startup: 10, active: 5, endlag: 18, damage: 14, bkb: 48, kbg: 104, angle: 40, offsetX: 46, offsetY: 36, radius: 34 },
       [MOVE.UP_B]: { name: 'Trampoline Launch', kind: 'recovery', damage: 9, recoveryX: 8.5, recoveryY: 21.5 },
-      [MOVE.DOWN_B]: { name: 'Grease Bucket', kind: 'reflector', startup: 4, active: 14, endlag: 10, damage: 18, bkb: 56, kbg: 112, radius: 46, healOnAbsorb: true },
+      [MOVE.DOWN_B]: { name: 'Grease Bucket', kind: 'bucket', startup: 3, active: 22, endlag: 8, damage: 0, radius: 46 },
     },
   }),
 
@@ -851,7 +1164,6 @@ export const ROSTER = [
     ],
     rig: { silhouette: 'tallHero', hat: 'tiaraHair', prop: 'yardstick', cape: 'noble', eyes: 'smug' },
     moves: {
-      [MOVE.FTHROW]: { startup: 7, endlag: 11, bkb: 48, angle: 31 },
       [MOVE.FSMASH]: { name: 'Tipper Yardstick', startup: 10, active: 4, endlag: 20, damage: 20, bkb: 56, kbg: 124, angle: 36, offsetX: 68, offsetY: 38, radius: 36, sweetspot: true, chargeable: true,
         hitboxes: sweetAndSour({ offsetX: 94, radius: 14 },
           { offsetX: 48, radius: 34, damage: 12, bkb: 30, kbg: 78 }) },
@@ -860,7 +1172,7 @@ export const ROSTER = [
           { offsetX: 40, radius: 27, damage: 8, bkb: 30, kbg: 73 }) },
       [MOVE.DAIR]: { name: 'Ken-Combo Spike', startup: 6, active: 5, endlag: 18, landingLag: 16, damage: 14, bkb: 40, kbg: 108, angle: 270, offsetX: 24, offsetY: -6, radius: 36, meteor: true, sweetspot: true },
       [MOVE.NEUTRAL_B]: { name: 'Shield-Breaker Poke', startup: 14, active: 4, endlag: 18, damage: 16, bkb: 48, kbg: 102, angle: 38, offsetX: 70, radius: 32, shieldDamageMult: 2.5 },
-      [MOVE.SIDE_B]: { name: 'Dancing Yardstick', kind: 'dashBurst', damage: 11, bkb: 40, kbg: 82, burstX: 11, burstY: 2.5 },
+      [MOVE.SIDE_B]: { name: 'Dancing Yardstick', kind: 'dancingBlade', bladeStage: 1, startup: 6, active: 5, endlag: 19, damage: 5, bkb: 25, kbg: 34, angle: 55, offsetX: 51, radius: 34 },
       [MOVE.UP_B]: { name: 'Dolphin Uppercut', kind: 'recovery', startup: 5, active: 10, endlag: 18, damage: 14, bkb: 52, kbg: 100, recoveryX: 7.5, recoveryY: 20.5, sweetspot: true },
       [MOVE.DOWN_B]: { name: 'Smug Counter', kind: 'counter', startup: 5, active: 20, endlag: 18, damage: 15, bkb: 50, kbg: 102, angle: 42 },
     },
@@ -886,7 +1198,7 @@ export const ROSTER = [
         hitboxes: sweetAndSour({ offsetX: 23, radius: 18, element: 'fire' },
           { offsetX: 67, radius: 28, damage: 9, bkb: 24, kbg: 68 }) },
       [MOVE.NEUTRAL_B]: { name: 'Flare Broom Nuke', startup: 20, active: 5, endlag: 24, damage: 26, bkb: 72, kbg: 132, angle: 38, offsetX: 52, radius: 42, sweetspot: true },
-      [MOVE.SIDE_B]: { name: 'Double-Edge Sweep', kind: 'dashBurst', damage: 13, burstX: 12, burstY: 2 },
+      [MOVE.SIDE_B]: { name: 'Double-Edge Sweep', kind: 'dancingBlade', bladeStage: 1, startup: 7, active: 5, endlag: 20, damage: 6, bkb: 24, kbg: 35, angle: 50, offsetX: 40, radius: 34, element: 'fire' },
       [MOVE.UP_B]: { name: 'Blazer Broom', kind: 'recovery', damage: 15, recoveryX: 9.0, recoveryY: 18.0 },
       [MOVE.DOWN_B]: { name: 'Fiery Counter', kind: 'counter', startup: 6, active: 20, endlag: 18, damage: 18, bkb: 56, kbg: 112, angle: 38 },
     },
@@ -912,8 +1224,7 @@ export const ROSTER = [
         hitboxes: sweetAndSour({ offsetX: 48, radius: 14 },
           { offsetX: 24, radius: 27, damage: 9, bkb: 30, kbg: 73 }) },
       [MOVE.FTILT]: { name: 'Combo Kick', startup: 5, active: 4, endlag: 11, damage: 8, bkb: 46, kbg: 72, angle: 78 },
-      [MOVE.DTHROW]: { name: 'Tech-Chase Throw', startup: 6, endlag: 8, damage: 8, bkb: 52, kbg: 50, angle: 80 },
-      [MOVE.NEUTRAL_B]: { name: 'Thumbtack Needles', kind: 'projectile', startup: 6, active: 3, endlag: 10, damage: 6, bkb: 18, kbg: 30, projSpeed: 22, projLife: 45, projGravity: 0, projAngle: 0, projStyle: 'needle' },
+      [MOVE.NEUTRAL_B]: { name: 'Thumbtack Needles', kind: 'needles', startup: 5, active: 1, endlag: 10, damage: 3, bkb: 15, kbg: 28, projSpeed: 25, hitstunOnly: true, projLife: 45, projGravity: 0, projAngle: 0, projStyle: 'needle' },
       [MOVE.SIDE_B]: { name: 'Duct-Tape Whip', startup: 10, active: 6, endlag: 16, damage: 10, offsetX: 74, radius: 26 },
       [MOVE.UP_B]: { name: 'Smoke-Bomb Vanish', ...warp('dark', 10, 32, 14), sweetspot: true },
       [MOVE.DOWN_B]: { name: 'Shadow Dropkick', kind: 'dashBurst', damage: 11, burstX: 15, burstY: -2 },
@@ -921,7 +1232,7 @@ export const ROSTER = [
   }),
 ];
 
-/** Special NPC fighter for Home-Run Derby */
+/* Special NPC fighter for Home-Run Derby */
 export const SAGGING_BAG = makeFighter({
   id: 'sagging-bag', name: 'Sagging Bag', parodyOf: 'Sandbag',
   voiceType: 'heavy', voicePitch: 0.83,
@@ -933,7 +1244,7 @@ export const SAGGING_BAG = makeFighter({
   rig: { silhouette: 'sandbag', hat: 'stickyNote', eyes: 'sad' },
 });
 
-/** Special Classic Mode Final Boss */
+/* Special Classic Mode Final Boss */
 export const MASTER_MITT = makeFighter({
   id: 'master-mitt', name: 'Master Mitt', parodyOf: 'Master Hand',
   voiceType: 'heavy', voicePitch: 0.6,
@@ -957,7 +1268,7 @@ export const MASTER_MITT = makeFighter({
   },
 });
 
-/** Lightweight Wireframe Minion for Multi-Man Bizarro Brawl */
+/* Lightweight Wireframe Minion for Multi-Man Bizarro Brawl */
 export const BIZARRO_INTERN = makeFighter({
   id: 'bizarro-intern', name: 'Unpaid Intern', parodyOf: 'Fighting Wireframe',
   voiceType: 'robot', voicePitch: 1.19,

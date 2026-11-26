@@ -555,10 +555,126 @@ async function runUnitTests() {
     mockPads[1].buttons = mkButtons(16, { 0: 1 });
     const realPoll = imMenu.poll(2, true, [0, 1]);
     assert.equal(realPoll[1].attackPressed, true, 'After releasing wake-up button, real attack press must fire');
-    console.log('PASS: 8BitDo HID, DualSense 054c, 4P mixed controllers, sparse slots, menu isolation & hot-plug validated');
+    // 5) Mayflash GameCube Adapter HID mapping (A=1, B=2, X=0, Y=3, Z=7, L=4, R=5, Start=9)
+    const imGc = new InputManager();
+    mockPads = [{
+      index: 0, connected: true, mapping: '',
+      id: 'Mayflash GameCube Controller Adapter (Vendor: 0079 Product: 1844)',
+      axes: [0.85, 0, 0, 0, -1, -1],
+      buttons: mkButtons(16, { 1: 1, 7: 1, 4: 1 }),
+    }];
+    const gcPoll = imGc.poll(1, false, [0])[0];
+    assert.ok(gcPoll.moveX > 0.7 && gcPoll.attackPressed && gcPoll.grabPressed && gcPoll.shield,
+      `Mayflash GameCube HID mapping failed: ${JSON.stringify(gcPoll)}`);
+
+    console.log('PASS: 8BitDo HID, DualSense 054c, Mayflash GC, 4P mixed controllers, sparse slots, menu isolation & hot-plug validated');
   } finally {
     if (origNav) Object.defineProperty(globalThis, 'navigator', origNav);
     else delete globalThis.navigator;
+  }
+
+  // SSBM core mechanics & character-specific tech probes (Crouch Cancel, Jab Reset, Parry, Float Cancel, Needles, Dancing Blade)
+  {
+    const mkDuel = (f0, f1) => {
+      const m = createMatch({
+        mode: MODE.VS_STOCK, stageId: 'final-obligation', stocks: 4, seed: 2026,
+        players: [
+          { port: 0, fighterId: f0, paletteIndex: 0, isCpu: false, name: 'P1' },
+          { port: 1, fighterId: f1, paletteIndex: 0, isCpu: false, name: 'P2' },
+        ],
+      });
+      m.status = 'playing'; m.introTimer = 0;
+      m.fighters[0].x = -26; m.fighters[0].y = 0; m.fighters[0].grounded = true; m.fighters[0].facing = 1;
+      m.fighters[1].x = 26; m.fighters[1].y = 0; m.fighters[1].grounded = true; m.fighters[1].facing = -1;
+      return m;
+    };
+
+    // Crouch Cancel reduces knockback compared to standing
+    const runHit = (crouch) => {
+      const m = mkDuel('garth', 'faux');
+      m.fighters[1].percent = 25;
+      if (crouch) m.fighters[1].state = STATE.CROUCH;
+      for (let t = 0; t < 20; t++) {
+        const i0 = createEmptyInput();
+        const i1 = createEmptyInput();
+        if (t === 0) { i0.moveX = 0.5; i0.attack = i0.attackPressed = true; }
+        if (crouch) i1.moveY = -0.9;
+        stepMatch(m, [i0, i1]);
+        const hitEv = m.events.find((e) => e.type === 'hit');
+        if (hitEv) return hitEv.kb;
+      }
+      return 0;
+    };
+    const kbStand = runHit(false);
+    const kbCrouch = runHit(true);
+    assert.ok(kbStand > 0 && kbCrouch > 0 && kbCrouch < kbStand * 0.85,
+      `Crouch Cancel should reduce knockback (stand=${kbStand.toFixed(2)}, crouch=${kbCrouch.toFixed(2)})`);
+
+    // Knockdown -> Jab Reset pops opponent up
+    const mJr = mkDuel('faux', 'garth');
+    mJr.fighters[1].state = STATE.KNOCKDOWN;
+    mJr.fighters[1].stateFrame = 12;
+    let sawJabReset = false;
+    for (let t = 0; t < 16; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.attack = i0.attackPressed = true; }
+      stepMatch(mJr, [i0, createEmptyInput()]);
+      if (mJr.events.some((e) => e.type === 'tech' && e.tech === 'JAB RESET')) sawJabReset = true;
+    }
+    assert.ok(sawJabReset, 'Weak jab on knocked-down opponent must trigger JAB RESET');
+
+    // Broshee Egg Shield frame 1-6 Parry negates damage & grants armor/parry event
+    const mParry = mkDuel('garth', 'broshee');
+    mParry.fighters[0].x = -24; mParry.fighters[1].x = 24;
+    let sawParry = false;
+    for (let t = 0; t < 16; t++) {
+      const i0 = createEmptyInput();
+      const i1 = createEmptyInput();
+      if (t === 0) { i0.attack = i0.attackPressed = true; }
+      if (t === 2) { i1.shield = i1.shieldPressed = true; }
+      else if (t > 2) { i1.shield = true; }
+      stepMatch(mParry, [i0, i1]);
+      if (mParry.events.some((e) => e.type === 'tech' && e.tech === 'PARRY')) sawParry = true;
+    }
+    assert.ok(sawParry, 'Broshee early shield activation must trigger PARRY');
+
+    // Screech Float Cancel lands with low lag and emits FLOAT CANCEL tech
+    const mFc = mkDuel('screech', 'faux');
+    mFc.fighters[0].x = -80; mFc.fighters[0].y = 16; mFc.fighters[0].grounded = false;
+    mFc.fighters[0].floating = true; mFc.fighters[0].floatFrames = 40;
+    let sawFloatCancel = false;
+    for (let t = 0; t < 25; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.cStickX = 1; i0.jump = true; }
+      stepMatch(mFc, [i0, createEmptyInput()]);
+      if (mFc.events.some((e) => e.type === 'tech' && e.tech === 'FLOAT CANCEL')) sawFloatCancel = true;
+    }
+    assert.ok(sawFloatCancel, 'Screech landing during float aerial must trigger FLOAT CANCEL');
+
+    // Shriek chargeable Needles store up to 6
+    const mShriek = mkDuel('shriek', 'faux');
+    mShriek.fighters[0].x = -120;
+    for (let t = 0; t < 65; t++) {
+      const i0 = createEmptyInput();
+      i0.special = true;
+      if (t === 0) i0.specialPressed = true;
+      stepMatch(mShriek, [i0, createEmptyInput()]);
+    }
+    assert.ok((mShriek.fighters[0].needleCount || 0) >= 4,
+      `Shriek holding Neutral-B should charge needles (got ${mShriek.fighters[0].needleCount})`);
+
+    // Garth Dancing Blade multi-hit side-B chain
+    const mDb = mkDuel('garth', 'faux');
+    let maxDbStage = 0;
+    for (let t = 0; t < 55; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0 || t === 9 || t === 18) { i0.moveX = 0.85; i0.special = i0.specialPressed = true; }
+      stepMatch(mDb, [i0, createEmptyInput()]);
+      const st = mDb.fighters[0].moveData?.bladeStage || 0;
+      if (st > maxDbStage) maxDbStage = st;
+    }
+    assert.ok(maxDbStage >= 2, `Garth Side-B should advance Dancing Blade chain (maxStage=${maxDbStage})`);
+    console.log('PASS: SSBM mechanics validated (Crouch Cancel, Jab Reset, Broshee Parry, Screech Float Cancel, Shriek Needles, Garth Dancing Blade)');
   }
 
   // Master Mitt 380 HP, Phase 2 transition, and multi-attack tells
@@ -1317,6 +1433,81 @@ async function runBrowserProof() {
     assert.deepEqual(css4p.portCards.map((c) => c.tag), ['P1', 'P2', 'P3', 'P4'], `All 4 ports should auto-enable as Human: ${JSON.stringify(css4p)}`);
     assert.deepEqual(css4p.portCards.map((c) => c.padBadge), ['PAD 1', 'PAD 2', 'PAD 3', 'PAD 4'], `Expected PAD 1..4 badges: ${JSON.stringify(css4p)}`);
     assert.ok(css4p.hintText.includes('4 Pads'), `Hint bar should show 4 Pads, got "${css4p.hintText}"`);
+
+    // Simultaneous independent 4-controller CSS selection (NO manual port switching!):
+    // Each pad moves its own P1-P4 cursor token at the same time, locks in with Confirm, Pad 2 cancels & re-picks, Pad 3 cycles costume, then Start -> Stage Select!
+    const cssTokensInit = await mpPage.evaluate(() =>
+      Array.from(document.querySelectorAll('#css-grid .cursor-token')).map((el) => el.textContent).sort()
+    );
+    assert.deepEqual(cssTokensInit, ['P1', 'P2', 'P3', 'P4'], `All 4 independent CSS cursor tokens must render: ${JSON.stringify(cssTokensInit)}`);
+    const beforePickIds = await mpPage.evaluate(() =>
+      Array.from(document.querySelectorAll('#css-ports .port-card .port-fighter')).map((el) => el.textContent)
+    );
+    // Simultaneously move all 4 controllers' sticks in different directions
+    await mpPage.evaluate(() => {
+      window.__mockGamepads[0].axes[0] = 0.95;  // P1 right
+      window.__mockGamepads[1].axes[1] = 0.95;  // P2 down
+      window.__mockGamepads[2].axes[0] = 0.95;  // P3 right
+      window.__mockGamepads[3].axes[0] = -0.95; // P4 left
+    });
+    await mpPage.waitForTimeout(140);
+    await mpPage.evaluate(() => {
+      for (const p of window.__mockGamepads) { p.axes[0] = 0; p.axes[1] = 0; }
+    });
+    await mpPage.waitForTimeout(80);
+    const afterPickIds = await mpPage.evaluate(() =>
+      Array.from(document.querySelectorAll('#css-ports .port-card .port-fighter')).map((el) => el.textContent)
+    );
+    for (let i = 0; i < 4; i++) {
+      assert.notEqual(afterPickIds[i], beforePickIds[i], `Pad ${i + 1} independent CSS stick move should change P${i + 1} fighter (${beforePickIds[i]} -> ${afterPickIds[i]})`);
+    }
+    // All 4 controllers lock in simultaneously (Xbox A=0, DualSense HID Cross=1, Switch Pro A=1, 8BitDo HID A=0)
+    await mpPage.evaluate(() => {
+      window.__mockGamepads[0].buttons[0] = { pressed: true, value: 1 };
+      window.__mockGamepads[1].buttons[1] = { pressed: true, value: 1 };
+      window.__mockGamepads[2].buttons[1] = { pressed: true, value: 1 };
+      window.__mockGamepads[3].buttons[0] = { pressed: true, value: 1 };
+    });
+    await mpPage.waitForTimeout(120);
+    await mpPage.evaluate(() => {
+      window.__mockGamepads[0].buttons[0] = { pressed: false, value: 0 };
+      window.__mockGamepads[1].buttons[1] = { pressed: false, value: 0 };
+      window.__mockGamepads[2].buttons[1] = { pressed: false, value: 0 };
+      window.__mockGamepads[3].buttons[0] = { pressed: false, value: 0 };
+    });
+    await mpPage.waitForTimeout(80);
+    const lockedState = await mpPage.evaluate(() => ({
+      lockedCount: document.querySelectorAll('#css-ports .port-card.locked').length,
+      readyVisible: !document.getElementById('css-ready-banner')?.hidden,
+      screen: window.__BIZARRO_MELEE__.getState().screen,
+    }));
+    assert.equal(lockedState.lockedCount, 4, `All 4 port cards should lock in independently: ${JSON.stringify(lockedState)}`);
+    assert.equal(lockedState.readyVisible, true, 'READY TO FIGHT banner must appear once all 4 controllers lock in');
+    assert.equal(lockedState.screen, 'css', 'Locking in stays on CSS until Start is pressed');
+    // Pad 2 presses Cancel (DualSense HID Circle = button 2) -> ONLY P2 unlocks, stays on CSS!
+    await mpPage.evaluate(() => { window.__mockGamepads[1].buttons[2] = { pressed: true, value: 1 }; });
+    await mpPage.waitForTimeout(110);
+    await mpPage.evaluate(() => { window.__mockGamepads[1].buttons[2] = { pressed: false, value: 0 }; });
+    await mpPage.waitForTimeout(80);
+    const afterP2Cancel = await mpPage.evaluate(() => ({
+      lockedPorts: Array.from(document.querySelectorAll('#css-ports .port-card.locked')).map((el) => Number(el.dataset.port)),
+      readyVisible: !document.getElementById('css-ready-banner')?.hidden,
+      screen: window.__BIZARRO_MELEE__.getState().screen,
+    }));
+    assert.deepEqual(afterP2Cancel.lockedPorts, [0, 2, 3], `Pad 2 cancel must unlock only P2: ${JSON.stringify(afterP2Cancel)}`);
+    assert.equal(afterP2Cancel.readyVisible, false, 'READY banner hides when P2 unlocks');
+    assert.equal(afterP2Cancel.screen, 'css', 'Pad 2 cancel must NOT exit CSS to Title');
+    // Pad 2 re-locks, then Pad 1 presses Start (button 9) -> advances directly to Stage Select
+    await mpPage.evaluate(() => { window.__mockGamepads[1].buttons[1] = { pressed: true, value: 1 }; });
+    await mpPage.waitForTimeout(110);
+    await mpPage.evaluate(() => {
+      window.__mockGamepads[1].buttons[1] = { pressed: false, value: 0 };
+      window.__mockGamepads[0].buttons[9] = { pressed: true, value: 1 };
+    });
+    await mpPage.waitForTimeout(130);
+    await mpPage.evaluate(() => { window.__mockGamepads[0].buttons[9] = { pressed: false, value: 0 }; });
+    const stageAfterStart = await mpPage.evaluate(() => window.__BIZARRO_MELEE__.getState().screen);
+    assert.equal(stageAfterStart, 'stage', `Pressing Start with all 4 pads ready must advance to Stage Select, got "${stageAfterStart}"`);
 
     // Launch 4P match on Final Obligation and drive all 4 heterogeneous controllers simultaneously
     await mpPage.evaluate(() => {

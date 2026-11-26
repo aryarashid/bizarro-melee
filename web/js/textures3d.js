@@ -314,7 +314,12 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
     const intense = !victory && !sulk && !impact && (eye === 'intense' || eye === 'angry' || attack);
     const big = ['giant', 'wide', 'starry', 'bright'].includes(eye);
     const ey = 99, spacing = 46;
-    if (eye === 'none') return texture(T, c);
+    if (eye === 'none') {
+      c.fillStyle = '#f7fbff';
+      c.beginPath(); c.moveTo(128, 58); c.lineTo(176, 148); c.lineTo(80, 148); c.closePath(); c.fill();
+      stroke(c, (p) => { p.moveTo(72, 176); p.quadraticCurveTo(128, 214, 184, 176); }, '#f4f7ff', 8);
+      return texture(T, c);
+    }
     if (tech) {
       const glass = c.createLinearGradient(64, 62, 165, 143);
       glass.addColorStop(0, '#294760');
@@ -450,6 +455,60 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
       c.beginPath(); c.moveTo(0, 155); c.quadraticCurveTo(128, 131, 256, 154); c.lineTo(256, 232); c.lineTo(0, 232); c.closePath(); c.fill();
       for (let t = 0; t < 3; t++) stroke(c, (p) => { p.moveTo(0, 176 + t * 21); p.quadraticCurveTo(110, 190 + t * 15, 256, 168 + t * 18); }, '#61648b', 3);
     }
+    const id = def.id;
+    if (id === 'screech' && !blink && !hurt) {
+      for (const side of [-1, 1]) {
+        const x = 128 + side * spacing;
+        stroke(c, (p) => { p.moveTo(x - 16, ey - 30); p.quadraticCurveTo(x - 4, ey - 42, x + 14, ey - 28); }, ink, 3);
+      }
+    }
+    if (id === 'broshee' && !hurt && !blink && !impact) {
+      c.fillStyle = '#fffaf2';
+      for (let i = -2; i <= 2; i++) c.fillRect(116 + i * 9, 166, 5, 11);
+    }
+    if (id === 'wonky-kong') {
+      ellipse(c, 90, 126, 4, 9, '#7ee7f2');
+      ellipse(c, 170, 132, 3.5, 8, '#7ee7f2');
+    }
+    if (id === 'dadondorf') {
+      stroke(c, (p) => { p.moveTo(68, 58); p.lineTo(116, 78); p.moveTo(188, 58); p.lineTo(140, 78); }, ink, 8);
+    }
+    if (id === 'flurby') {
+      c.fillStyle = '#ff9ec4cc';
+      c.fillRect(68, 76, 52, 16);
+      c.fillRect(136, 76, 52, 16);
+    }
+    if (id === 'velda') {
+      for (const side of [-1, 1]) {
+        const x = 128 + side * spacing;
+        stroke(c, (p) => { p.moveTo(x, ey - 18); p.lineTo(x, ey + 8); p.moveTo(x - 10, ey - 4); p.lineTo(x + 10, ey - 4); }, '#ffe36a', 3);
+      }
+    }
+    if (id === 'gigglefluff') {
+      for (const side of [-1, 1]) {
+        const x = 128 + side * spacing;
+        ellipse(c, x + 4, ey + 2, 22, 20, '#7a3dffcc');
+        ellipse(c, x - 2, ey - 8, 5, 5, '#ffffff');
+        ellipse(c, x + 12, ey + 8, 3, 3, '#ffe9ff');
+      }
+    }
+    if (id === 'mewtooth' && !hurt && !blink) {
+      for (const side of [-1, 1]) {
+        const x = 128 + side * spacing;
+        ellipse(c, x + 5, ey + 3, 14, 7, '#7eefff');
+        c.fillStyle = '#1a2438cc';
+        c.fillRect(x - 20, ey - 8, 40, 7);
+      }
+    }
+    if (id === 'spitzu' && !hurt && !blink) {
+      c.fillStyle = '#fffaf2';
+      for (let i = -3; i <= 3; i++) c.fillRect(108 + i * 8, 164, 4, 10);
+    }
+    if (id === 'chikapu') {
+      ellipse(c, 76, 142, 16, 11, '#ff8aa8aa');
+      ellipse(c, 182, 142, 16, 11, '#ff8aa8aa');
+    }
+    if (id === 'bario') stroke(c, (p) => { p.moveTo(198, 118); p.quadraticCurveTo(236, 164, 196, 206); }, '#e3aa5b', 4);
     return texture(T, c);
   });
 }
@@ -509,6 +568,11 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
           ellipse(b, x + side * 18, 113, 5, 6, '#dedede');
         }
         stroke(c, (p) => { p.moveTo(x - 13, 132); p.lineTo(x - 12, 157); p.lineTo(x + 12, 157); p.lineTo(x + 13, 132); p.closePath(); }, '#f5e4b9aa', 1.8);
+        if (def.id === 'squeegi') {
+          c.fillStyle = '#7c3aed';
+          c.fillRect(x - 52, 34, 24, 30);
+          c.fillRect(x + 28, 34, 24, 30);
+        }
       } else if (rig.prop === 'tie' || rig.cape === 'labcoat' || rig.cape === 'apron' || rig.cape === 'nda') {
         panels(c, x, pal.outfit, '#19182945');
         for (const side of [-1, 1]) {
@@ -516,14 +580,26 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
           c.moveTo(x + side * 10, 29); c.lineTo(x + side * 34, 43); c.lineTo(x + side * 17, 83); c.closePath();
           c.fillStyle = '#f9f1dc9c'; c.fill();
         }
-        if (rig.prop === 'tie') {
+        if (rig.prop === 'tie' || def.id === 'dr-bario') {
           c.beginPath(); c.moveTo(x - 7, 57); c.lineTo(x + 7, 57); c.lineTo(x + 11, 121);
           c.lineTo(x, 136); c.lineTo(x - 11, 121); c.closePath();
-          c.fillStyle = pal.accent; c.fill();
-          ellipse(c, x, 51, 9, 7, pal.accent);
+          c.fillStyle = def.id === 'dr-bario' ? '#6d28d9' : pal.accent; c.fill();
+          ellipse(c, x, 51, 9, 7, def.id === 'dr-bario' ? '#6d28d9' : pal.accent);
           stroke(c, (p) => { p.moveTo(x - 4, 65); p.lineTo(x - 6, 117); }, '#ffffff64', 2);
         }
+        if (def.id === 'dadondorf') {
+          c.fillStyle = '#ff7a1a';
+          c.beginPath(); c.moveTo(x - 20, 96); c.lineTo(x - 8, 58); c.lineTo(x + 4, 88); c.lineTo(x + 18, 48); c.lineTo(x + 22, 108); c.closePath(); c.fill();
+        }
       } else {
+        if (def.id === 'squeegi') {
+          c.fillStyle = '#7c3aed';
+          c.fillRect(x - 52, 34, 24, 30);
+          c.fillRect(x + 28, 34, 24, 30);
+        }
+        if (def.id === 'broshee') ellipse(c, x, 118, 18, 30, '#f6edd8');
+        if (def.id === 'chikapu') ellipse(c, x, 128, 20, 28, '#fffaf2');
+        if (def.id === 'shriek') { c.fillStyle = '#c5c8d4'; c.fillRect(x - 8, 36, 18, 96); }
         stroke(c, (p) => { p.moveTo(x - 22, 21); p.lineTo(x - 15, 68); p.lineTo(x + 15, 68); p.lineTo(x + 22, 21); }, '#17152975', 3);
         ellipse(c, x, 103, 9, 13, pal.outfit);
         ellipse(c, x, 102, 4, 7, pal.accent);

@@ -473,6 +473,10 @@ export class FxSystem {
             x: e.x, y: e.y, r: heavy ? 26 : 13, maxR: heavy ? 154 : 81,
             life: heavy ? 18 : 12, maxLife: heavy ? 18 : 12, color, lineWidth: heavy ? 9 : 5,
           });
+          if (e.electric) this._cue({ type: 'bolt', x: e.x, cy: e.y, angle: baseAngle, rim: '#d9ffff', core: '#ffe694', reach: 72 }, 8);
+          if (e.slash) this._cue({ type: 'slash', x: e.x, cy: e.y, angle: baseAngle, rim: color, core: '#ffffff', reach: 64 }, 8);
+          if (e.element === 'fire') this._cue({ type: 'flame', x: e.x, cy: e.y, angle: baseAngle, rim: '#ff6a1a', core: '#ffd36a', reach: 50 }, 10);
+          if (e.meteor) this._cue({ type: 'meteor', x: e.x, cy: e.y, angle: -Math.PI / 2, rim: '#ff4864', core: '#ffffff', reach: 62 }, 12);
           if (e.sweetspot || e.meteor || (e.electric && heavy)) {
             this.callouts.push({
               x: e.x, y: e.y + 44,
@@ -511,7 +515,11 @@ export class FxSystem {
           break;
         case 'lCancel':
           this.rings.push({
-            x: e.x, y: e.y + 18, r: 10, maxR: 46,
+            x: e.x, y: e.y + 18, r: 8, maxR: 54,
+            life: 12, maxLife: 12, color: '#b6ffd0', lineWidth: 5,
+          });
+          this.rings.push({
+            x: e.x, y: e.y + 18, r: 10, maxR: 36,
             life: 10, maxLife: 10, color: '#ffffff', lineWidth: 3,
           });
           break;
@@ -566,6 +574,7 @@ export class FxSystem {
           break;
         case 'powershield':
           this.rings.push({ x: e.x, y: e.y + 34, r: 18, maxR: 85, life: 14, maxLife: 14, color: '#38f5ff', lineWidth: 5 });
+          this.rings.push({ x: e.x, y: e.y + 34, r: 10, maxR: 58, life: 10, maxLife: 10, color: '#ffffff', lineWidth: 3 });
           this.callouts.push({ x: e.x, y: e.y + 82, text: 'POWER SHIELD!', color: '#38f5ff', bg: 'rgba(10,18,40,0.9)', life: 34, maxLife: 34, scale: 1.05 });
           break;
         case 'explosion':
@@ -597,6 +606,11 @@ export class FxSystem {
           });
           break;
         case 'tech':
+          if (e.tech === 'PARRY') {
+            this.rings.push({ x: e.x, y: e.y + 28, r: 12, maxR: 78, life: 14, maxLife: 14, color: '#ffd56a', lineWidth: 5 });
+            this.callouts.push({ x: e.x, y: e.y + 70, text: 'PARRY!', color: '#ffd56a', bg: 'rgba(40,28,8,0.9)', life: 28, maxLife: 28, scale: 1.15 });
+            break;
+          }
           if (e.tech === 'SHIELD DROP' || e.tech === 'EDGE CANCEL' || e.tech === 'SHFFL' || e.tech === 'JC GRAB' || e.tech === 'JC UPSMASH' || e.tech === 'B-REVERSE') {
             this.rings.push({ x: e.x, y: e.y + 24, r: 8, maxR: 48, life: 12, maxLife: 12, color: '#38f5ff', lineWidth: 3.5 });
           }
@@ -868,6 +882,17 @@ export class FxSystem {
           }, ink, (s === 1 ? 6 : 2.7) * left);
           if (gold) line((c) => { c.rect(-w*.32, -w*.32, w*.64, w*.64); }, p.core, 3 * left);
         }
+      } else if (p.type === 'bolt' || p.type === 'slash' || p.type === 'flame' || p.type === 'meteor') {
+        ctx.translate(p.x, -p.cy);
+        ctx.rotate(-(p.angle || 0));
+        ctx.strokeStyle = p.rim; ctx.fillStyle = p.core; ctx.lineWidth = 4 * left; ctx.lineCap = 'round';
+        ctx.beginPath();
+        if (p.type === 'meteor') ctx.ellipse(0, 0, p.reach * (0.28 + t * 0.7), p.reach * 0.2, 0, 0, TAU);
+        else if (p.type === 'flame') {
+          ctx.moveTo(0, 8); ctx.quadraticCurveTo(12, -p.reach * 0.35, 0, -p.reach * left); ctx.quadraticCurveTo(-12, -p.reach * 0.3, 0, 8);
+        } else if (p.type === 'slash') ctx.arc(0, 0, p.reach * (0.42 + t * 0.45), -0.9, 0.9);
+        else { ctx.moveTo(-8, 4); ctx.lineTo(10, -p.reach * 0.45); ctx.lineTo(0, -6); ctx.lineTo(18, -p.reach); }
+        if (p.type === 'flame') ctx.fill(); else ctx.stroke();
       } else if (p.type === 'quickZip') {
         ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.beginPath(); p.points.forEach(([x, y], i) => i ? ctx.lineTo(x, -y) : ctx.moveTo(x, -y));

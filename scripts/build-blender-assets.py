@@ -108,6 +108,12 @@ def build_characters_pack():
     m_white = make_mat("CharWhite", (0.96, 0.97, 1.0, 1), roughness=0.45)
     m_brown = make_mat("CharBrown", (0.24, 0.14, 0.08, 1), roughness=0.55)
     m_burlap = make_mat("Burlap", (0.82, 0.72, 0.56, 1), roughness=0.85)
+    m_cream = make_mat("CharCream", (0.98, 0.94, 0.84, 1), roughness=0.48)
+    m_teal = make_mat("CharTeal", (0.12, 0.74, 0.82, 1), metallic=0.42, roughness=0.22)
+    m_blue = make_mat("CharBlue", (0.18, 0.36, 0.92, 1), roughness=0.38)
+    m_amber = make_mat("CharAmber", (0.72, 0.36, 0.12, 1), roughness=0.46)
+    m_pink = make_mat("CharPink", (1.0, 0.45, 0.72, 1), roughness=0.4)
+    m_lime = make_mat("CharLime", (0.55, 0.95, 0.28, 1), roughness=0.4)
 
     # 1. Sculpted Boot (cuffed hero boot with sole & toe cap)
     join_parts([
@@ -128,7 +134,7 @@ def build_characters_pack():
     join_parts([
         add_part("sphere", "bh1", loc=(0, 0, 0.18), scale=(0.88, 0.88, 0.65), mat=m_gold),
         add_part("torus", "bh2", loc=(0, 0, -0.02), scale=(0.96, 0.96, 0.22), mat=m_gold),
-        add_part("cyl", "bh3", loc=(0, 0, 0.06), scale=(0.88, 0.88, 0.12), mat=m_red),
+        add_part("cyl", "bh3", loc=(0, 0, 0.06), scale=(0.88, 0.88, 0.12), mat=m_amber),
     ], "Hat_Bowler")
 
     # 4. Sculpted Doctor Head-Mirror (Dr. Bario)
@@ -148,9 +154,11 @@ def build_characters_pack():
     # 6. Sculpted Bird Racer Helmet (Captain Pigeon)
     join_parts([
         add_part("sphere", "ph1", loc=(0, 0, 0), scale=(1.04, 1.02, 1.02), mat=m_gold),
-        add_part("sphere", "ph2", loc=(0.56, 0, 0.06), scale=(0.62, 0.88, 0.36), mat=m_cyan),
-        add_part("cone", "ph3", loc=(-0.15, 0, 1.05), rot=(0, -0.45, 0), scale=(0.26, 0.16, 0.65), mat=m_red),
-        add_part("cone", "ph4", loc=(-0.48, 0, 0.88), rot=(0, -0.75, 0), scale=(0.22, 0.14, 0.55), mat=m_red),
+        add_part("sphere", "ph2", loc=(0.62, 0, -0.02), scale=(0.55, 0.92, 0.28), mat=m_cyan),
+        add_part("cone", "ph3", loc=(-0.05, 0.72, 0.55), rot=(0.7, -0.35, 0.4), scale=(0.18, 0.10, 0.72), mat=m_white),
+        add_part("cone", "ph4", loc=(-0.05, -0.72, 0.55), rot=(-0.7, -0.35, -0.4), scale=(0.18, 0.10, 0.72), mat=m_white),
+        add_part("cone", "ph5", loc=(0.95, 0, -0.42), rot=(0, math.pi / 2 + 0.35, 0), scale=(0.22, 0.28, 0.42), mat=m_gold),
+        add_part("cube", "ph6", loc=(-0.55, 0, -0.15), rot=(0.2, 0.4, 0), scale=(0.55, 0.10, 0.16), mat=m_red, bevel=0.02),
     ], "Hat_BirdHelmet")
 
     # 7. Sculpted Fox / Coyote Ears + Snout + Aviator Shades (Faux)
@@ -159,17 +167,17 @@ def build_characters_pack():
         add_part("sphere", "fx2", loc=(1.32, 0, -0.12), scale=(0.16, 0.16, 0.14), mat=m_dark),
         add_part("cone", "fx3", loc=(-0.1, 0.52, 1.02), rot=(0.25, -0.15, 0), scale=(0.30, 0.22, 0.72), mat=m_orange),
         add_part("cone", "fx4", loc=(-0.1, -0.52, 1.02), rot=(-0.25, -0.15, 0), scale=(0.30, 0.22, 0.72), mat=m_orange),
-        add_part("cube", "fx5", loc=(0.76, 0.32, 0.20), scale=(0.16, 0.30, 0.22), mat=m_dark, bevel=0.04),
-        add_part("cube", "fx6", loc=(0.76, -0.32, 0.20), scale=(0.16, 0.30, 0.22), mat=m_dark, bevel=0.04),
-        add_part("cube", "fx7", loc=(0.78, 0, 0.24), scale=(0.10, 0.22, 0.05), mat=m_gold),
+        add_part("cone", "fx5", loc=(-0.02, 0.52, 0.92), rot=(0.25, -0.15, 0), scale=(0.14, 0.10, 0.42), mat=m_cream),
+        add_part("cone", "fx6", loc=(-0.02, -0.52, 0.92), rot=(-0.25, -0.15, 0), scale=(0.14, 0.10, 0.42), mat=m_cream),
     ], "Hat_FoxHead")
 
     # 8. Sculpted Toucan Beak + Aviator Shades (Falcon't)
     join_parts([
-        add_part("cone", "tc1", loc=(1.15, 0, -0.05), rot=(0, math.pi / 2 + 0.12, 0), scale=(0.44, 0.34, 1.15), mat=m_orange),
-        add_part("cone", "tc2", loc=(1.75, 0, -0.12), rot=(0, math.pi / 2 + 0.15, 0), scale=(0.22, 0.18, 0.35), mat=m_dark),
-        add_part("cube", "tc3", loc=(0.68, 0.34, 0.26), scale=(0.16, 0.30, 0.22), mat=m_dark, bevel=0.04),
-        add_part("cube", "tc4", loc=(0.68, -0.34, 0.26), scale=(0.16, 0.30, 0.22), mat=m_dark, bevel=0.04),
+        add_part("cone", "tc1", loc=(1.25, 0, -0.38), rot=(0, math.pi / 2 + 0.22, 0), scale=(0.48, 0.36, 1.25), mat=m_orange),
+        add_part("cone", "tc2", loc=(1.95, 0, -0.48), rot=(0, math.pi / 2 + 0.25, 0), scale=(0.22, 0.16, 0.38), mat=m_dark),
+        add_part("cone", "tc3", loc=(-0.15, 0, 0.95), rot=(0.15, -0.2, 0), scale=(0.16, 0.10, 0.55), mat=m_blue),
+        add_part("cone", "tc4", loc=(-0.35, 0.16, 0.72), rot=(0.2, -0.5, 0.3), scale=(0.12, 0.08, 0.38), mat=m_blue),
+        add_part("cone", "tc5", loc=(-0.35, -0.16, 0.72), rot=(-0.2, -0.5, -0.3), scale=(0.12, 0.08, 0.38), mat=m_blue),
     ], "Hat_ToucanHead")
 
     # 9. Sculpted Spiked Turtle Shell + Horns (Sourzer)
@@ -181,13 +189,18 @@ def build_characters_pack():
         add_part("cone", "sh5", loc=(-0.82, 0, -0.55), rot=(0, -2.0, 0), scale=(0.24, 0.24, 0.55), mat=m_white),
         add_part("cone", "sh6", loc=(-0.55, 0.65, 0.15), rot=(-0.6, -1.2, 0), scale=(0.22, 0.22, 0.48), mat=m_white),
         add_part("cone", "sh7", loc=(-0.55, -0.65, 0.15), rot=(0.6, -1.2, 0), scale=(0.22, 0.22, 0.48), mat=m_white),
+        add_part("cyl", "sh8", loc=(-1.25, 0.42, 0.42), rot=(0.85, 0.15, 0), scale=(0.055, 0.055, 0.72), mat=m_chrome),
+        add_part("cyl", "sh9", loc=(-1.25, -0.42, 0.42), rot=(-0.85, 0.15, 0), scale=(0.055, 0.055, 0.72), mat=m_chrome),
+        add_part("cyl", "sh10", loc=(-1.42, 0, 0.95), rot=(math.pi / 2, 0, 0), scale=(0.06, 0.06, 0.55), mat=m_dark),
     ], "Part_SpikedShell")
 
     # 10. Sculpted Space HVAC Helmet + Visor + Pauldrons (Shamus)
     join_parts([
-        add_part("sphere", "sm1", loc=(0, 0, 0), scale=(1.06, 1.04, 1.04), mat=m_red),
-        add_part("cube", "sm2", loc=(0.62, 0, 0.08), scale=(0.45, 0.72, 0.28), mat=m_cyan, bevel=0.05),
-        add_part("cube", "sm3", loc=(0.1, 0, 0.82), scale=(0.65, 0.28, 0.32), mat=m_chrome, bevel=0.05),
+        add_part("sphere", "sm1", loc=(-0.28, 0, 0.05), scale=(0.82, 1.02, 1.02), mat=m_red),
+        add_part("torus", "sm1b", loc=(0.15, 0, 0.02), rot=(0, math.pi / 2, 0), scale=(0.92, 0.92, 0.22), mat=m_red),
+        add_part("cube", "sm2", loc=(0.55, 0.22, 0.28), rot=(0.55, 0.2, 0.4), scale=(0.10, 0.28, 0.08), mat=m_cyan, bevel=0.02),
+        add_part("cube", "sm2b", loc=(0.55, -0.22, 0.28), rot=(-0.55, 0.2, -0.4), scale=(0.10, 0.28, 0.08), mat=m_cyan, bevel=0.02),
+        add_part("cube", "sm3", loc=(0.05, 0, 0.88), scale=(0.55, 0.22, 0.22), mat=m_chrome, bevel=0.04),
         add_part("cyl", "sm4", loc=(-0.2, 0.92, -0.15), rot=(math.pi / 2, 0, 0), scale=(0.24, 0.24, 0.2), mat=m_gold),
         add_part("cyl", "sm5", loc=(-0.2, -0.92, -0.15), rot=(math.pi / 2, 0, 0), scale=(0.24, 0.24, 0.2), mat=m_gold),
     ], "Hat_SpaceHelm")
@@ -217,9 +230,9 @@ def build_characters_pack():
 
     # 14. Sculpted Giant Reading Glasses + Tie (Wonky Kong)
     join_parts([
-        add_part("torus", "glg1", loc=(0.86, 0.34, 0.14), rot=(0, math.pi / 2, 0), scale=(0.30, 0.30, 0.12), mat=m_dark),
-        add_part("torus", "glg2", loc=(0.86, -0.34, 0.14), rot=(0, math.pi / 2, 0), scale=(0.30, 0.30, 0.12), mat=m_dark),
-        add_part("cube", "glg3", loc=(0.88, 0, 0.16), scale=(0.08, 0.16, 0.06), mat=m_dark),
+        add_part("torus", "glg1", loc=(0.86, 0.34, 0.14), rot=(0, math.pi / 2, 0), scale=(0.34, 0.34, 0.10), mat=m_teal),
+        add_part("torus", "glg2", loc=(0.86, -0.34, 0.14), rot=(0, math.pi / 2, 0), scale=(0.34, 0.34, 0.10), mat=m_teal),
+        add_part("cube", "glg3", loc=(0.88, 0, 0.18), scale=(0.06, 0.18, 0.05), mat=m_teal),
     ], "Hat_Glasses")
 
     # 15. Sculpted Flowing Cape (Garth, Troy, Bario, Dadondorf)
@@ -245,6 +258,10 @@ def build_characters_pack():
         add_part("sphere", "mm6", loc=(-0.18, 0, 1.66), scale=(0.24, 0.24, 0.42), mat=m_white),
         add_part("sphere", "mm7", loc=(0.20, 0, 1.64), scale=(0.24, 0.24, 0.40), mat=m_white),
         add_part("sphere", "mm8", loc=(0.56, 0, 1.48), scale=(0.22, 0.22, 0.34), mat=m_white),
+        add_part("torus", "mm9", loc=(-0.15, 0, 1.72), rot=(math.pi / 2, 0, 0), scale=(0.16, 0.10, 0.06), mat=m_red),
+        add_part("cube", "mm10", loc=(0.05, 0.02, 0.35), rot=(0.4, 0.2, 0.7), scale=(0.85, 0.015, 0.03), mat=m_red),
+        add_part("cube", "mm11", loc=(0.05, -0.02, 0.35), rot=(-0.4, -0.2, -0.7), scale=(0.85, 0.015, 0.03), mat=m_red),
+        add_part("cube", "mm12", loc=(-0.1, 0, 0.9), rot=(0, 0.3, 0.8), scale=(0.55, 0.015, 0.03), mat=m_gold),
     ], "Boss_MasterMitt")
 
     # 18. Sculpted Tied Burlap Sagging Bag (Home-Run Derby)
@@ -281,6 +298,100 @@ def build_characters_pack():
         add_part("torus", "slm3", loc=(0, 0, 0.45), scale=(0.86, 0.86, 0.08), mat=m_cyan),
     ], "Hat_SleepMask")
 
+    # 23. Flaming grill beard (Dadondorf)
+    join_parts([
+        add_part("sphere", "bd1", loc=(0.72, 0, -0.28), scale=(0.28, 0.55, 0.42), mat=m_orange),
+        add_part("sphere", "bd2", loc=(0.55, 0.28, -0.55), scale=(0.22, 0.28, 0.38), mat=m_orange),
+        add_part("sphere", "bd3", loc=(0.55, -0.28, -0.55), scale=(0.22, 0.28, 0.38), mat=m_orange),
+        add_part("cone", "bd4", loc=(0.85, 0.18, -0.15), rot=(0.4, 0.6, 0), scale=(0.10, 0.08, 0.28), mat=m_red),
+        add_part("cone", "bd5", loc=(0.85, -0.18, -0.15), rot=(-0.4, 0.6, 0), scale=(0.10, 0.08, 0.28), mat=m_gold),
+    ], "Part_Beard")
+
+    # 24. Layered hair bun (Screech) and spiky crest (Wonky / Troy / Mess)
+    join_parts([
+        add_part("sphere", "hb1", loc=(0, 0, 0.55), scale=(0.55, 0.48, 0.42), mat=m_amber),
+        add_part("sphere", "hb2", loc=(0.05, 0, 0.95), scale=(0.38, 0.34, 0.32), mat=m_amber),
+        add_part("sphere", "hb3", loc=(-0.15, 0.22, 0.35), scale=(0.28, 0.22, 0.28), mat=m_brown),
+        add_part("sphere", "hb4", loc=(-0.15, -0.22, 0.35), scale=(0.28, 0.22, 0.28), mat=m_brown),
+    ], "Part_HairBun")
+    join_parts([
+        add_part("cone", "hc1", loc=(0.05, 0, 0.85), scale=(0.22, 0.16, 0.55), mat=m_dark),
+        add_part("cone", "hc2", loc=(-0.05, 0.28, 0.62), rot=(0.35, 0, 0), scale=(0.16, 0.12, 0.42), mat=m_dark),
+        add_part("cone", "hc3", loc=(-0.05, -0.28, 0.62), rot=(-0.35, 0, 0), scale=(0.16, 0.12, 0.42), mat=m_dark),
+        add_part("cone", "hc4", loc=(0.35, 0, 0.48), rot=(0, 0.8, 0), scale=(0.12, 0.10, 0.32), mat=m_brown),
+    ], "Part_HairCrest")
+
+    # 25. Gold monocle and chain (Bario)
+    join_parts([
+        add_part("torus", "mo1", loc=(0.9, 0.32, 0.08), rot=(0, math.pi / 2, 0), scale=(0.28, 0.28, 0.08), mat=m_gold),
+        add_part("cyl", "mo2", loc=(0.55, 0.55, -0.15), rot=(0.6, 0, 0.4), scale=(0.025, 0.025, 0.35), mat=m_gold),
+        add_part("sphere", "mo3", loc=(0.35, 0.62, -0.42), scale=(0.06, 0.06, 0.06), mat=m_gold),
+    ], "Part_Monocle")
+
+    # 26. Long toothy dino snout (Broshee) and dorsal bumps
+    join_parts([
+        add_part("sphere", "sn1", loc=(0.85, 0, -0.15), scale=(0.72, 0.38, 0.32), mat=m_lime),
+        add_part("sphere", "sn2", loc=(1.35, 0, -0.22), scale=(0.28, 0.22, 0.16), mat=m_cream),
+        add_part("cube", "sn3", loc=(1.05, 0, -0.38), scale=(0.28, 0.22, 0.05), mat=m_white, bevel=0.02),
+    ], "Part_DinoSnout")
+    join_parts([
+        add_part("cone", "ds1", loc=(0, 0, 0.35), scale=(0.16, 0.12, 0.28), mat=m_lime),
+        add_part("cone", "ds2", loc=(-0.28, 0, 0.22), rot=(0, -0.4, 0), scale=(0.14, 0.10, 0.24), mat=m_lime),
+        add_part("cone", "ds3", loc=(0.22, 0, 0.18), rot=(0, 0.3, 0), scale=(0.12, 0.09, 0.20), mat=m_green),
+    ], "Part_Spines")
+
+    # 27. Ribbed dryer-duct coil (Shamus)
+    duct = []
+    for i in range(6):
+        duct.append(add_part("torus", f"dc{i}", loc=(0, 0, -0.4 + i * 0.16), scale=(0.26, 0.26, 0.07), mat=m_chrome))
+    join_parts(duct, "Part_DuctCoil")
+
+    # 28. Boxy cardboard Nana-Bot
+    join_parts([
+        add_part("cube", "nb1", loc=(0, 0, 0.15), scale=(0.42, 0.36, 0.48), mat=m_pink, bevel=0.04),
+        add_part("cube", "nb2", loc=(0, 0, 0.78), scale=(0.36, 0.32, 0.32), mat=m_red, bevel=0.03),
+        add_part("cyl", "nb3", loc=(0, 0, 1.18), scale=(0.04, 0.04, 0.22), mat=m_chrome),
+        add_part("sphere", "nb4", loc=(0, 0, 1.42), scale=(0.08, 0.08, 0.08), mat=m_cyan),
+        add_part("cube", "nb5", loc=(0.28, 0.12, 0.82), scale=(0.06, 0.08, 0.08), mat=m_cyan),
+        add_part("cube", "nb6", loc=(0.28, -0.12, 0.82), scale=(0.06, 0.08, 0.08), mat=m_cyan),
+        add_part("cube", "nb7", loc=(0.15, 0.48, 0.28), rot=(0, 0, 0.4), scale=(0.10, 0.28, 0.10), mat=m_dark, bevel=0.02),
+        add_part("cube", "nb8", loc=(0.15, -0.48, 0.28), rot=(0, 0, -0.4), scale=(0.10, 0.28, 0.10), mat=m_dark, bevel=0.02),
+    ], "Buddy_NanaBot")
+
+    # 29. Round mouse ears, bolt ears, cat ears, forehead swirl
+    join_parts([
+        add_part("sphere", "me1", loc=(0, 0.62, 0.55), scale=(0.38, 0.38, 0.12), mat=m_gold),
+        add_part("sphere", "me2", loc=(0, -0.62, 0.55), scale=(0.38, 0.38, 0.12), mat=m_gold),
+        add_part("sphere", "me3", loc=(0.02, 0.62, 0.62), scale=(0.16, 0.16, 0.06), mat=m_dark),
+        add_part("sphere", "me4", loc=(0.02, -0.62, 0.62), scale=(0.16, 0.16, 0.06), mat=m_dark),
+    ], "Part_MouseEars")
+    join_parts([
+        add_part("cone", "be1", loc=(0, 0.48, 0.85), rot=(0.45, 0.2, 0.2), scale=(0.16, 0.10, 0.55), mat=m_gold),
+        add_part("cone", "be2", loc=(0, -0.48, 0.85), rot=(-0.45, 0.2, -0.2), scale=(0.16, 0.10, 0.55), mat=m_gold),
+        add_part("cone", "be3", loc=(0.05, 0.42, 0.55), rot=(0.5, 0, 0), scale=(0.08, 0.06, 0.22), mat=m_dark),
+        add_part("cone", "be4", loc=(0.05, -0.42, 0.55), rot=(-0.5, 0, 0), scale=(0.08, 0.06, 0.22), mat=m_dark),
+    ], "Part_BoltEars")
+    join_parts([
+        add_part("cone", "ce1", loc=(0, 0.42, 0.72), rot=(0.25, 0, 0), scale=(0.22, 0.16, 0.42), mat=m_pink),
+        add_part("cone", "ce2", loc=(0, -0.42, 0.72), rot=(-0.25, 0, 0), scale=(0.22, 0.16, 0.42), mat=m_pink),
+        add_part("cone", "ce3", loc=(0.04, 0.42, 0.62), rot=(0.25, 0, 0), scale=(0.10, 0.08, 0.22), mat=m_cream),
+        add_part("cone", "ce4", loc=(0.04, -0.42, 0.62), rot=(-0.25, 0, 0), scale=(0.10, 0.08, 0.22), mat=m_cream),
+    ], "Part_CatEars")
+    join_parts([
+        add_part("torus", "sw1", loc=(0.15, 0, 0.85), rot=(1.2, 0.4, 0), scale=(0.28, 0.28, 0.12), mat=m_pink),
+        add_part("sphere", "sw2", loc=(0.28, 0.12, 0.95), scale=(0.10, 0.10, 0.10), mat=m_pink),
+    ], "Part_HairSwirl")
+
+    # 30. Pointed elf ears and a pointed astrologer hood
+    join_parts([
+        add_part("cone", "ee1", loc=(0.15, 0.78, 0.15), rot=(0, 0, -1.15), scale=(0.16, 0.12, 0.42), mat=m_cream),
+        add_part("cone", "ee2", loc=(0.15, -0.78, 0.15), rot=(0, 0, 1.15), scale=(0.16, 0.12, 0.42), mat=m_cream),
+    ], "Part_ElfEars")
+    join_parts([
+        add_part("cone", "hd1", loc=(-0.15, 0, 0.45), rot=(0, -0.7, 0), scale=(0.95, 0.95, 1.15), mat=m_neutral),
+        add_part("torus", "hd2", loc=(0.35, 0, 0.05), rot=(0, math.pi / 2, 0.2), scale=(0.78, 0.72, 0.12), mat=m_gold),
+    ], "Hat_Hood")
+
     export_glb("characters.glb")
 
 
@@ -296,6 +407,11 @@ def build_weapons_pack():
     m_red = make_mat("Red", (0.95, 0.20, 0.30, 1), roughness=0.32)
     m_cyan = make_mat("Cyan", (0.22, 0.92, 1.0, 1), emission=(0.22, 0.92, 1.0, 1), emission_strength=1.4)
     m_purple = make_mat("Purple", (0.68, 0.24, 0.98, 1), emission=(0.68, 0.24, 0.98, 1), emission_strength=1.2)
+    m_magenta = make_mat("Magenta", (1.0, 0.12, 0.62, 1), emission=(1.0, 0.08, 0.55, 1), emission_strength=2.2)
+    m_yellow = make_mat("Yellow", (1.0, 0.86, 0.16, 1), roughness=0.32)
+    m_rubber = make_mat("Rubber", (0.16, 0.16, 0.18, 1), roughness=0.7)
+    m_chrome = make_mat("Chrome", (0.84, 0.88, 0.94, 1), metallic=0.9, roughness=0.16)
+    m_white = make_mat("White", (0.96, 0.97, 1.0, 1), roughness=0.28)
 
     # 1. Garth's Engraved Brass Yardstick-Rapier
     join_parts([
@@ -334,11 +450,12 @@ def build_weapons_pack():
         add_part("sphere", "ac3", loc=(1.12, 0, 0), scale=(0.28, 0.28, 0.28), mat=m_cyan),
     ], "Weapon_ArmCannon")
 
-    # 6. Mr. Beep & Blob's Judge Hammer
+    # 6. Mr. Beep & Blob's neon "9" Judge Hammer
     join_parts([
-        add_part("cyl", "jh1", loc=(0.55, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.07, 0.07, 0.68), mat=m_dark),
-        add_part("cyl", "jh2", loc=(1.15, 0, 0), scale=(0.28, 0.28, 0.55), mat=m_dark),
-        add_part("torus", "jh3", loc=(1.15, 0, 0), scale=(0.30, 0.30, 0.10), mat=m_cyan),
+        add_part("cyl", "jh1", loc=(0.48, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.06, 0.06, 0.62), mat=m_dark),
+        add_part("torus", "jh2", loc=(1.22, 0, 0.16), rot=(0, math.pi / 2, 0), scale=(0.32, 0.32, 0.10), mat=m_magenta),
+        add_part("cyl", "jh3", loc=(1.22, 0, -0.28), scale=(0.07, 0.07, 0.38), mat=m_magenta),
+        add_part("torus", "jh4", loc=(1.22, 0, 0.16), rot=(0, math.pi / 2, 0), scale=(0.16, 0.16, 0.06), mat=m_cyan),
     ], "Weapon_JudgeHammer")
 
     # 7. Screech's Cast-Iron Frying Pan
@@ -357,7 +474,41 @@ def build_weapons_pack():
     join_parts([
         add_part("cone", "vc1", loc=(0.95, 0, 0.25), scale=(0.24, 0.24, 0.45), mat=m_purple, verts=6),
         add_part("cone", "vc2", loc=(0.95, 0, -0.25), rot=(math.pi, 0, 0), scale=(0.24, 0.24, 0.45), mat=m_purple, verts=6),
+        add_part("torus", "vc3", loc=(0.95, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.36, 0.36, 0.06), mat=m_cyan),
     ], "Weapon_Crystal")
+
+    # 10. Squeegi's soapy window squeegee
+    join_parts([
+        add_part("cyl", "sq1", loc=(0.55, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.06, 0.06, 0.7), mat=m_purple),
+        add_part("cube", "sq2", loc=(1.35, 0, 0.16), scale=(0.08, 0.08, 0.42), mat=m_chrome, bevel=0.02),
+        add_part("cube", "sq3", loc=(1.42, 0, 0.02), scale=(0.05, 0.06, 0.40), mat=m_rubber),
+        add_part("sphere", "sq4", loc=(1.28, 0.12, 0.28), scale=(0.08, 0.08, 0.08), mat=m_cyan),
+        add_part("sphere", "sq5", loc=(1.48, -0.1, 0.22), scale=(0.06, 0.06, 0.06), mat=m_cyan),
+    ], "Weapon_Squeegee")
+
+    # 11. Tiny Zink's giant silver spork
+    join_parts([
+        add_part("cyl", "sk1", loc=(0.48, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.07, 0.07, 0.62), mat=m_steel),
+        add_part("cube", "sk2", loc=(1.15, 0, 0), scale=(0.22, 0.05, 0.20), mat=m_steel, bevel=0.02),
+        add_part("cone", "sk3", loc=(1.42, 0, 0.10), rot=(0, math.pi / 2, 0), scale=(0.05, 0.05, 0.22), mat=m_steel),
+        add_part("cone", "sk4", loc=(1.42, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.05, 0.05, 0.24), mat=m_steel),
+        add_part("cone", "sk5", loc=(1.42, 0, -0.10), rot=(0, math.pi / 2, 0), scale=(0.05, 0.05, 0.22), mat=m_steel),
+    ], "Weapon_Spork")
+
+    # 12. Dr. Bario's two-tone giant pill
+    join_parts([
+        add_part("sphere", "pl1", loc=(0.55, 0, 0), scale=(0.32, 0.22, 0.22), mat=m_red),
+        add_part("sphere", "pl2", loc=(0.95, 0, 0), scale=(0.32, 0.22, 0.22), mat=m_yellow),
+        add_part("torus", "pl3", loc=(0.75, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.23, 0.23, 0.06), mat=m_white),
+    ], "Weapon_Pill")
+
+    # 13. Mess's wooden baseball bat
+    join_parts([
+        add_part("cyl", "bt1", loc=(0.35, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.07, 0.07, 0.42), mat=m_wood),
+        add_part("cyl", "bt2", loc=(1.05, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.13, 0.13, 0.55), mat=m_wood),
+        add_part("sphere", "bt3", loc=(0.05, 0, 0), scale=(0.10, 0.10, 0.10), mat=m_dark),
+        add_part("torus", "bt4", loc=(0.55, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.10, 0.10, 0.05), mat=m_brass),
+    ], "Weapon_Bat")
 
     export_glb("weapons.glb")
 
@@ -699,6 +850,38 @@ def build_stage_props_pack():
         add_part("cone", "fr2", loc=(1.55, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.52, 0.52, 0.65), mat=m_roof, verts=14),
         add_part("cone", "fr3", loc=(-1.45, 0, 0), rot=(0, -math.pi / 2, 0), scale=(0.42, 0.42, 0.55), mat=m_gold, verts=10),
     ], "Hazard_FineRocket")
+
+    # 17. Floating rune ring (Arguefield / Final Obligation)
+    join_parts([
+        add_part("torus", "rr1", loc=(0, 0, 0), rot=(math.pi / 2, 0, 0), scale=(1.35, 1.35, 0.12), mat=m_crystal),
+        add_part("torus", "rr2", loc=(0, 0, 0), rot=(math.pi / 2, 0.4, 0), scale=(0.85, 0.85, 0.08), mat=m_gold),
+        add_part("cone", "rr3", loc=(0, 1.15, 0), scale=(0.16, 0.16, 0.28), mat=m_crystal),
+        add_part("cone", "rr4", loc=(0, -1.15, 0), rot=(math.pi, 0, 0), scale=(0.16, 0.16, 0.28), mat=m_crystal),
+    ], "Prop_RuneRing")
+
+    # 18. Patchwork craft cloud (Scandall's Tax Shelter)
+    join_parts([
+        add_part("sphere", "cc_a", loc=(0, 0, 0.15), scale=(0.85, 0.55, 0.42), mat=m_balloon),
+        add_part("sphere", "cc_b", loc=(0.7, 0.15, 0.05), scale=(0.55, 0.42, 0.36), mat=m_balloon),
+        add_part("sphere", "cc_c", loc=(-0.65, -0.1, 0.02), scale=(0.48, 0.38, 0.32), mat=m_balloon),
+        add_part("cube", "cc_d", loc=(0, 0, 0.15), scale=(0.9, 0.04, 0.08), mat=m_gold),
+    ], "Prop_CraftCloud")
+
+    # 19. Cave torch
+    join_parts([
+        add_part("cyl", "to1", loc=(0, 0, -0.4), scale=(0.08, 0.08, 0.7), mat=m_bark),
+        add_part("cone", "to2", loc=(0, 0, 0.45), scale=(0.22, 0.22, 0.45), mat=m_gold),
+        add_part("cone", "to3", loc=(0, 0, 0.62), scale=(0.12, 0.12, 0.32), mat=m_crystal),
+    ], "Prop_Torch")
+
+    # 20. Arwing-style starfighter
+    join_parts([
+        add_part("cone", "aw1", loc=(0.85, 0, 0), rot=(0, math.pi / 2, 0), scale=(0.28, 0.18, 0.7), mat=m_steel),
+        add_part("cube", "aw2", loc=(0, 0, 0), scale=(0.55, 0.22, 0.16), mat=m_steel, bevel=0.03),
+        add_part("cone", "aw3", loc=(0.1, 0.85, 0), rot=(0, 0, math.pi / 2), scale=(0.10, 0.28, 0.7), mat=m_glass),
+        add_part("cone", "aw4", loc=(0.1, -0.85, 0), rot=(0, 0, -math.pi / 2), scale=(0.10, 0.28, 0.7), mat=m_glass),
+        add_part("cone", "aw5", loc=(-0.7, 0, 0), rot=(0, -math.pi / 2, 0), scale=(0.18, 0.16, 0.35), mat=m_crystal),
+    ], "Prop_Arwing")
 
     export_glb("stage-props.glb")
 

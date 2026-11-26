@@ -83,6 +83,12 @@ const app = {
   lastObservedPadKey: '',
   manualPlayerCount: false,
   cssPortManualByP1: false,
+  cssCursors: [
+    { index: 0, locked: false },
+    { index: 1, locked: false },
+    { index: 2, locked: false },
+    { index: 3, locked: false },
+  ],
   use3D: renderer3d.ready,
   ports: [
     { port: 0, fighterId: 'faux', paletteIndex: 0, isCpu: false, manualCpu: false, cpuLevel: 5, name: 'P1', team: 'red' },
@@ -241,11 +247,17 @@ function buildCssGrid() {
   const grid = $('css-grid');
   grid.textContent = '';
 
-  for (const def of ROSTER) {
+  for (let tileIdx = 0; tileIdx < ROSTER.length; tileIdx++) {
+    const def = ROSTER[tileIdx];
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'css-tile';
     btn.dataset.fighterId = def.id;
+    btn.dataset.tileIdx = String(tileIdx);
+
+    const cursors = document.createElement('div');
+    cursors.className = 'tile-cursors';
+    btn.appendChild(cursors);
 
     const badges = document.createElement('div');
     badges.className = 'tile-badges';
@@ -275,6 +287,10 @@ function buildCssGrid() {
       const port = app.ports[app.activeCssPort];
       port.fighterId = def.id;
       port.paletteIndex = 0;
+      if (app.cssCursors[app.activeCssPort]) {
+        app.cssCursors[app.activeCssPort].index = tileIdx;
+        app.cssCursors[app.activeCssPort].locked = true;
+      }
       if (app.activeCssPort === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
         app.onlineSession.sendGuestPick(port.fighterId, port.paletteIndex);
       }
@@ -355,6 +371,25 @@ function syncConnectedControllersToCss(autoExpand = true) {
   }
 }
 
+function resetCssCursors() {
+  for (let i = 0; i < 4; i++) {
+    const idx = Math.max(0, ROSTER.findIndex((f) => f.id === app.ports[i]?.fighterId));
+    app.cssCursors[i] = { index: idx, locked: false };
+  }
+}
+
+function getCssGridColumns() {
+  const tiles = $('css-grid')?.querySelectorAll('.css-tile');
+  if (!tiles || !tiles.length) return 6;
+  const firstTop = tiles[0].offsetTop;
+  let cols = 0;
+  for (const t of tiles) {
+    if (Math.abs(t.offsetTop - firstTop) <= 4) cols++;
+    else break;
+  }
+  return Math.max(1, cols || 6);
+}
+
 function syncCssSelection() {
   const count = visibleCssPortCount();
   if (app.activeCssPort >= count) app.activeCssPort = 0;
@@ -369,10 +404,28 @@ function syncCssSelection() {
   const tiles = $('css-grid').querySelectorAll('.css-tile');
   const activePorts = app.ports.slice(0, count);
   const padPorts = input.getPadPorts ? input.getPadPorts() : [null, null, null, null];
+  const connectedPadCount = padPorts.filter((idx) => idx != null).length;
   const humanPorts = activePorts.filter((p) => !p.isCpu).map((p) => p.port);
   const resolvedPads = input.resolvePadIndexByPort ? input.resolvePadIndexByPort(count, humanPorts) : padPorts;
+  const isVs = app.selectedMode === MODE.VS_STOCK || app.selectedMode === MODE.VS_TIME;
 
-  for (const tile of tiles) {
+  const pickLabel = $('css-pick-label');
+  if (pickLabel) {
+    pickLabel.textContent = (isVs && connectedPadCount >= 2)
+      ? 'Each pad picks its own fighter • Manual:'
+      : 'Picking for:';
+  }
+
+  const activeCursorPorts = [];
+  for (const p of activePorts) {
+    const hasPad = !p.isCpu && resolvedPads[p.port] != null;
+    if (hasPad || (connectedPadCount === 1 && p.port === app.activeCssPort)) {
+      activeCursorPorts.push(p.port);
+    }
+  }
+
+  for (let tileIdx = 0; tileIdx < tiles.length; tileIdx++) {
+    const tile = tiles[tileIdx];
     const id = tile.dataset.fighterId;
     const matched = activePorts.filter((p) => p.fighterId === id);
     tile.classList.toggle('sel-p0', matched.length === 1 && matched[0].port === 0);
@@ -387,6 +440,26 @@ function syncCssSelection() {
       b.textContent = mp.isCpu ? `C${mp.port + 1}` : `P${mp.port + 1}`;
       badges.appendChild(b);
     }
+
+    const cursorsEl = tile.querySelector('.tile-cursors');
+    const here = activeCursorPorts.filter((port) => app.cssCursors[port]?.index === tileIdx);
+    tile.classList.toggle('has-cursor-p0', here.length === 1 && here[0] === 0);
+    tile.classList.toggle('has-cursor-p1', here.length === 1 && here[0] === 1);
+    tile.classList.toggle('has-cursor-p2', here.length === 1 && here[0] === 2);
+    tile.classList.toggle('has-cursor-p3', here.length === 1 && here[0] === 3);
+    tile.classList.toggle('has-cursor-multi', here.length > 1);
+    if (cursorsEl) {
+      cursorsEl.textContent = '';
+      for (const port of here) {
+        const tok = document.createElement('span');
+        const locked = Boolean(app.cssCursors[port]?.locked);
+        tok.className = locked ? 'cursor-token locked' : 'cursor-token hovering';
+        tok.style.background = PLAYER_COLORS[port];
+        tok.dataset.cursorPort = String(port);
+        tok.textContent = `P${port + 1}`;
+        cursorsEl.appendChild(tok);
+      }
+    }
   }
 
   const focusedPortCard = app.padFocusEl?.closest?.('.port-card');
@@ -400,7 +473,8 @@ function syncCssSelection() {
   for (const p of activePorts) {
     const def = getFighterById(p.fighterId);
     const card = document.createElement('div');
-    card.className = 'port-card';
+    const isLocked = Boolean(!p.isCpu && app.cssCursors[p.port]?.locked);
+    card.className = isLocked ? 'port-card locked' : 'port-card';
     card.dataset.port = String(p.port);
 
     const c = document.createElement('canvas');
@@ -421,6 +495,12 @@ function syncCssSelection() {
     fname.textContent = def.name;
     top.append(tag, fname);
     if (!p.isCpu) {
+      if (isLocked) {
+        const readyBadge = document.createElement('span');
+        readyBadge.className = 'port-ready-badge';
+        readyBadge.textContent = 'READY';
+        top.appendChild(readyBadge);
+      }
       const padIdx = resolvedPads[p.port];
       const padSlotNum = padIdx != null ? (padPorts.indexOf(padIdx) + 1) : 0;
       const padBadge = document.createElement('span');
@@ -516,7 +596,6 @@ function syncCssSelection() {
   // [S3] In Team Battle, require at least 2 distinct teams before allowing Stage Select
   const startBtn = $('btn-css-start');
   if (startBtn) {
-    const isVs = app.selectedMode === MODE.VS_STOCK || app.selectedMode === MODE.VS_TIME;
     if (isVs && app.teamBattle) {
       const distinctTeams = new Set(activePorts.map((p) => p.team || (p.port % 2 === 0 ? 'red' : 'blue')));
       const valid = distinctTeams.size >= 2;
@@ -526,6 +605,15 @@ function syncCssSelection() {
       startBtn.disabled = false;
       if (isVs) startBtn.textContent = 'Stage Select →';
     }
+  }
+
+  const readyBanner = $('css-ready-banner');
+  if (readyBanner) {
+    const padHumanPorts = activePorts.filter((p) => !p.isCpu && resolvedPads[p.port] != null);
+    const allReady = padHumanPorts.length >= 1
+      && padHumanPorts.every((p) => app.cssCursors[p.port]?.locked)
+      && !(startBtn && startBtn.disabled);
+    readyBanner.hidden = !allReady;
   }
 }
 
@@ -1592,7 +1680,9 @@ function updatePadHintBar(connected, padName = '', padCount = 0) {
   if (!show) return;
   const hints = {
     title: 'Stick / D-Pad: Move  •  A: Select  •  Start: Quick Fight',
-    css: 'Stick / D-Pad: Browse  •  A: Pick  •  B: Back  •  X/Y: Alt Costume  •  LB/RB: Switch Port  •  Start: Stage Select',
+    css: padCount > 1
+      ? 'Each Pad Picks Own Fighter!  •  Stick / D-Pad: Move Token  •  A: Lock In  •  B: Cancel  •  X/Y: Costume  •  Start: Fight'
+      : 'Stick / D-Pad: Move Token  •  A: Lock In  •  B: Cancel / Back  •  X/Y: Costume  •  LB/RB: Switch Port  •  Start: Stage Select',
     stage: 'Stick / D-Pad: Browse  •  A: Fight  •  B: Fighters  •  X/Y: Random  •  LB/RB: Filter',
     events: 'Stick / D-Pad: Browse  •  A: Launch Event  •  B: Title',
     controller: padCount > 1
@@ -1660,6 +1750,144 @@ function handleGamepadMenus() {
       drawControllerTester();
       return;
     }
+  }
+
+  if (app.screen === 'css' && nav.connected && !nav.keyboardActive && Array.isArray(nav.perPort)) {
+    const isVs = app.selectedMode === MODE.VS_STOCK || app.selectedMode === MODE.VS_TIME;
+    const cols = getCssGridColumns();
+    const totalTiles = ROSTER.length;
+    const multiPad = (nav.padCount || 0) >= 2 && isVs;
+    let changed = false;
+    let lastBioDef = null;
+    let lastBioPal = 0;
+
+    // Map each physical pad slot (0..3) directly to its corresponding CSS player port (P1..P4).
+    for (let padSlot = 0; padSlot < 4; padSlot++) {
+      const act = nav.perPort[padSlot];
+      if (!act) continue;
+      const anyAct = act.up || act.down || act.left || act.right || act.confirm || act.back || act.alt || act.start || act.lb || act.rb;
+      if (!anyAct) continue;
+
+      sound.unlock();
+      if (act.start) {
+        const btn = $('btn-css-start');
+        if (btn && !btn.disabled) btn.click();
+        return;
+      }
+
+      // In non-VS 1P modes or Online, only Pad 1 controls CSS.
+      if (!isVs && padSlot > 0) continue;
+
+      // In VS Mode, pressing any action on Pad 2/3/4 auto-joins that port as Human without manual switching!
+      if (isVs && padSlot > 0) {
+        if (app.playerCount <= padSlot) {
+          app.playerCount = padSlot + 1;
+          app.manualPlayerCount = false;
+          if ($('sel-player-count')) $('sel-player-count').value = String(app.playerCount);
+          changed = true;
+        }
+        if (app.ports[padSlot]?.isCpu) {
+          app.ports[padSlot].isCpu = false;
+          app.ports[padSlot].manualCpu = false;
+          app.ports[padSlot].name = `P${padSlot + 1}`;
+          changed = true;
+        }
+      }
+
+      const count = visibleCssPortCount();
+      // Solo 1-pad user can still use LB/RB to pick for CPU ports; multi-pad users each control their own port 0..3!
+      const targetPort = multiPad ? padSlot : (padSlot === 0 ? app.activeCssPort : padSlot);
+      if (targetPort >= count) continue;
+
+      const p = app.ports[targetPort];
+      const cur = app.cssCursors[targetPort] || (app.cssCursors[targetPort] = { index: 0, locked: false });
+
+      if (act.lb || act.rb) {
+        if (isVs && app.teamBattle) {
+          p.team = TEAM_ORDER[(TEAM_ORDER.indexOf(p.team || 'red') + (act.rb ? 1 : TEAM_ORDER.length - 1)) % TEAM_ORDER.length];
+          sound.playUi('move');
+          changed = true;
+        } else if (!multiPad && padSlot === 0) {
+          app.activeCssPort = (app.activeCssPort + (act.rb ? 1 : count - 1)) % count;
+          app.cssPortManualByP1 = true;
+          sound.playUi('move');
+          changed = true;
+        }
+        continue;
+      }
+
+      if (act.alt) {
+        const def = getFighterById(p.fighterId);
+        if (def?.palettes?.length) {
+          p.paletteIndex = (p.paletteIndex + 1) % def.palettes.length;
+          if (targetPort === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+            app.onlineSession.sendGuestPick(p.fighterId, p.paletteIndex);
+          }
+          sound.playUi('move');
+          lastBioDef = def;
+          lastBioPal = p.paletteIndex;
+          changed = true;
+        }
+        continue;
+      }
+
+      if (act.back) {
+        if (cur.locked) {
+          cur.locked = false;
+          sound.playUi('back');
+          changed = true;
+        } else if (padSlot === 0) {
+          $('btn-css-back')?.click();
+          return;
+        }
+        continue;
+      }
+
+      if (act.confirm) {
+        if (!cur.locked) {
+          const def = ROSTER[cur.index % totalTiles];
+          if (def) {
+            p.fighterId = def.id;
+            if (targetPort === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+              app.onlineSession.sendGuestPick(p.fighterId, p.paletteIndex);
+            }
+            lastBioDef = def;
+            lastBioPal = p.paletteIndex;
+          }
+          cur.locked = true;
+          sound.playUi('select');
+          changed = true;
+        }
+        continue;
+      }
+
+      if (!cur.locked && (act.up || act.down || act.left || act.right)) {
+        let next = cur.index;
+        if (act.left) next = (cur.index - 1 + totalTiles) % totalTiles;
+        else if (act.right) next = (cur.index + 1) % totalTiles;
+        else if (act.up) next = (cur.index - cols + totalTiles) % totalTiles;
+        else if (act.down) next = (cur.index + cols) % totalTiles;
+        cur.index = next;
+        const def = ROSTER[next];
+        if (def) {
+          p.fighterId = def.id;
+          p.paletteIndex = p.paletteIndex % (def.palettes?.length || 4);
+          if (targetPort === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+            app.onlineSession.sendGuestPick(p.fighterId, p.paletteIndex);
+          }
+          lastBioDef = def;
+          lastBioPal = p.paletteIndex;
+        }
+        sound.playUi('move');
+        changed = true;
+        const tileEl = $('css-grid')?.children?.[next];
+        try { tileEl?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch {}
+      }
+    }
+
+    if (lastBioDef) renderBioPanel(lastBioDef, lastBioPal);
+    if (changed) syncCssSelection();
+    return;
   }
 
   // Context-sensitive shoulder / shortcut buttons
@@ -2041,6 +2269,7 @@ function wireUi() {
     $('css-rules-bar').hidden = !rulesVisible;
     $('btn-css-start').textContent = startLabel;
     syncConnectedControllersToCss(true);
+    resetCssCursors();
     syncCssSelection();
     showScreen('css');
   };
@@ -2296,6 +2525,10 @@ function wireUi() {
       showScreen('stage');
     }
   });
+  $('css-ready-banner')?.addEventListener('click', () => {
+    const btn = $('btn-css-start');
+    if (btn && !btn.disabled) btn.click();
+  });
 
   // Stage Select
   $('btn-stage-back').addEventListener('click', () => { sound.playUi('back'); showScreen('css'); });
@@ -2393,6 +2626,8 @@ function wireUi() {
       buildEventsGrid();
       showScreen('events');
     } else {
+      resetCssCursors();
+      syncCssSelection();
       showScreen('css');
     }
   };
