@@ -16,8 +16,26 @@ function hasObservedNegRest(pad, idx) {
   const key = `${pad.index}:${pad.id}`;
   let set = padRestNegAxes.get(key);
   if (!set) { set = new Set(); padRestNegAxes.set(key, set); }
-  if (v <= -0.82) set.add(idx);
+  if (v <= -0.74) set.add(idx);
   return set.has(idx);
+}
+
+function hasAxisPairNegRest(pad, idxA, idxB) {
+  const a = hasObservedNegRest(pad, idxA);
+  const b = hasObservedNegRest(pad, idxB);
+  return a || b;
+}
+
+function prunePadCaches(padsMap) {
+  const activeKeys = new Set();
+  for (const [idx, pad] of padsMap.entries()) {
+    activeKeys.add(`${idx}:${pad.id}`);
+  }
+  for (const map of [padSplitRightY, padHatAxis, padRestNegAxes]) {
+    for (const key of map.keys()) {
+      if (!activeKeys.has(key)) map.delete(key);
+    }
+  }
 }
 
 function usesSplitRightY(pad, raw) {
@@ -96,12 +114,13 @@ const pressure = (n) => Math.max(0, unit(n));
 const triggerNoise = (v) => (v < 0.08 ? 0 : Math.min(1, (v - 0.08) / 0.92));
 const copyBinds = (bindings) => Object.fromEntries(Object.entries(bindings).map(([action, codes]) => [action, codes && [...codes]]));
 
-function radialStick(rawX, rawY, deadzone, curve = 1.0) {
+function radialStick(rawX, rawY, deadzone, curve = 1.0, maxRange = 1.0) {
   const x = unit(rawX);
   const y = unit(rawY);
   const mag = Math.hypot(x, y);
   if (mag < deadzone) return [0, 0];
-  const linear = Math.min(1, (mag - deadzone) / Math.max(0.05, 1 - deadzone));
+  const span = Math.max(0.05, maxRange - deadzone);
+  const linear = Math.min(1, (mag - deadzone) / span);
   const scaled = curve !== 1.0 ? Math.pow(linear, curve) : linear;
   return [(x / mag) * scaled, (y / mag) * scaled];
 }
@@ -235,19 +254,20 @@ function samplePad(pad, config, padSlot = 0) {
   const analogAxes = (raw || is8BitDoHid || isSonyHid) && pad.axes?.length >= 6;
   const rawTrigger = (left) => {
     if (!analogAxes) return 0;
-    if (mayflash) return triggerAxis(left ? 3 : 4);
-    if (wup) return triggerAxis(left ? 2 : 5);
+    // Only decode -1..+1 analog trigger axes once either trigger in the pair rests near -1.0
+    // (prevents empty Mayflash 4-port slots or dead 0.0 HID axes from holding permanent light shield).
+    if (mayflash) return hasAxisPairNegRest(pad, 3, 4) ? triggerAxis(left ? 3 : 4) : 0;
+    if (wup) return hasAxisPairNegRest(pad, 2, 5) ? triggerAxis(left ? 2 : 5) : 0;
     if (isSonyHid) {
       const idx = left ? 3 : 4;
-      if (idx !== cYIdx && hasObservedNegRest(pad, idx)) return triggerAxis(idx);
+      if (idx !== cYIdx && hasAxisPairNegRest(pad, 3, 4)) return triggerAxis(idx);
       return 0;
     }
     if (is8BitDoHid) {
-      // Only decode -1..+1 analog trigger axes once observed resting near -1.0 (never treat dead 0.0 axes as half-held shield!).
       const idx7 = left ? 7 : 6;
-      if (pad.axes.length >= 8 && hasObservedNegRest(pad, idx7)) return triggerAxis(idx7);
+      if (pad.axes.length >= 8 && hasAxisPairNegRest(pad, 6, 7)) return triggerAxis(idx7);
       const idx4 = left ? 4 : 5;
-      if (idx4 !== cYIdx && hasObservedNegRest(pad, idx4)) return triggerAxis(idx4);
+      if (idx4 !== cYIdx && hasAxisPairNegRest(pad, 4, 5)) return triggerAxis(idx4);
       return 0;
     }
     return triggerNoise(pressure(pad.axes[left ? 4 : 5]));
@@ -262,11 +282,14 @@ function samplePad(pad, config, padSlot = 0) {
 
   const rawAxisX = unit(pad.axes?.[0] ?? 0);
   const rawAxisY = unit(-(pad.axes?.[1] ?? 0));
+  // Real GameCube sticks through Mayflash/WUP adapters top out near +/-0.78..0.82 at the octagonal gate.
+  const mainMax = (mayflash || wup) ? 0.80 : 1.0;
+  const cMax = (mayflash || wup) ? 0.76 : 1.0;
   // Near-linear Melee octagonal-gate response (1.08 curve) for crisp dash-dance, tilts, shield drops & smash flicks.
-  const [moveX, rawMoveY] = radialStick(rawAxisX, rawAxisY, config.deadzone, 1.08);
-  const [linMoveX, linMoveY] = radialStick(rawAxisX, rawAxisY, config.deadzone, 1.0);
-  const cDeadzone = Math.min(config.deadzone, 0.16);
-  const [cStickX, cStickY] = radialStick(pad.axes?.[cXIdx] ?? 0, -(pad.axes?.[cYIdx] ?? 0), cDeadzone, 1.0);
+  const [moveX, rawMoveY] = radialStick(rawAxisX, rawAxisY, config.deadzone, 1.08, mainMax);
+  const [linMoveX, linMoveY] = radialStick(rawAxisX, rawAxisY, config.deadzone, 1.0, mainMax);
+  const cDeadzone = Math.max(0.14, Math.min(config.deadzone, 0.30));
+  const [cStickX, cStickY] = radialStick(pad.axes?.[cXIdx] ?? 0, -(pad.axes?.[cYIdx] ?? 0), cDeadzone, 1.0, cMax);
 
   const dpad = sampleDpad(pad);
   const grabs = binds('grab');
@@ -301,6 +324,7 @@ function samplePad(pad, config, padSlot = 0) {
     start: menuStartIndices.some(pressed),
     lb: raw ? (lAnalog > 0.45 || pressed(layout.shield[0])) : pressed(layout.grab[0] ?? 4),
     rb: raw ? (rAnalog > 0.45 || pressed(layout.shield[1])) : pressed(layout.grab[1] ?? 5),
+    select: is8BitDoHid ? pressed(10) : raw ? layout.grab.some(pressed) : pressed(8),
   };
 
   return { profile, layout, values, menuButtons, dpad, lAnalog, rAnalog };
@@ -324,6 +348,7 @@ export class InputManager {
     this.touchTaps = new Set();
     this.previous = [];
     this.padPorts = [null, null, null, null];
+    this.lastResolvedPadPorts = [null, null, null, null];
     this.padBlocked = new Map();
     this.priorPads = new Map();
     this.menuPrevByPad = new Map();
@@ -367,9 +392,11 @@ export class InputManager {
       const padsMap = new Map(padsList.map((pad) => [pad.index, pad]));
       this._syncPadPorts(padsMap);
       if (padsList.length > 0) this.activeMode = 'gamepad';
+      else if (this.activeMode === 'gamepad') this.activeMode = 'keyboard';
       const evPad = event?.type === 'gamepadconnected' ? (padsMap.get(event.gamepad?.index) || event.gamepad) : null;
       if (evPad) {
-        const slot = Math.max(0, this.padPorts.indexOf(evPad.index));
+        const assignedSlot = this.padPorts.indexOf(evPad.index);
+        const slot = assignedSlot >= 0 ? assignedSlot : 0;
         if (this.menuMode) {
           this.menuPrevByPad.set(evPad.index, this._sampleSinglePadMenu(evPad, slot));
           this.menuHoldByPad.set(evPad.index, { up: 0, down: 0, left: 0, right: 0 });
@@ -378,6 +405,10 @@ export class InputManager {
           const blocked = {};
           for (const k of BLOCKABLE_BUTTONS) blocked[k] = !!vals[k];
           this.padBlocked.set(evPad.index, blocked);
+          if (assignedSlot >= 0) {
+            this.previous[assignedSlot] = { shield: !!vals.shield, stickJump: !!vals.stickJump, dedicatedJump: !!vals.jump };
+          }
+          this.priorPads.set(evPad.index, vals);
         }
       }
       this.onPadChange?.(this.getControllerDiagnostics());
@@ -543,8 +574,10 @@ export class InputManager {
       if (free !== -1) this.padPorts[free] = index;
     }
     for (const index of this.padBlocked.keys()) if (!padsMap.has(index)) this.padBlocked.delete(index);
+    for (const index of this.priorPads.keys()) if (!padsMap.has(index)) this.priorPads.delete(index);
     for (const index of this.menuPrevByPad.keys()) if (!padsMap.has(index)) this.menuPrevByPad.delete(index);
     for (const index of this.menuHoldByPad.keys()) if (!padsMap.has(index)) this.menuHoldByPad.delete(index);
+    prunePadCaches(padsMap);
   }
 
   getPadPorts() {
@@ -600,7 +633,7 @@ export class InputManager {
       start: s.menuButtons.start,
       lb: s.menuButtons.lb,
       rb: s.menuButtons.rb,
-      select: rawButtons.has(8),
+      select: s.menuButtons.select,
       rawButtons,
     };
   }
@@ -706,7 +739,7 @@ export class InputManager {
       this.menuPrevByPad.set(pad.index, cur);
     }
 
-    if (out.rawPressed.length || (padsList.length && !out.keyboardActive && (out.up || out.down || out.left || out.right || out.confirm || out.back || out.alt || out.start || out.lb || out.rb))) {
+    if (out.rawPressed.length || (padsList.length && !out.keyboardActive && (out.up || out.down || out.left || out.right || out.confirm || out.back || out.alt || out.start || out.lb || out.rb || out.select))) {
       this.activeMode = 'gamepad';
     }
     return out;
@@ -743,6 +776,7 @@ export class InputManager {
     const pads = new Map(readPads().map((pad) => [pad.index, pad]));
     this._syncPadPorts(pads);
     const padIndexByPort = this.resolvePadIndexByPort(count, activeHumanPorts);
+    this.lastResolvedPadPorts = Array.from({ length: 4 }, (_, i) => padIndexByPort[i] ?? this.padPorts[i] ?? null);
     const frames = [];
     let padUsed = false;
     const observedPads = new Map();
@@ -859,18 +893,30 @@ export class InputManager {
       if (!pads.length) return false;
       const padsMap = new Map(pads.map((p) => [p.index, p]));
       this._syncPadPorts(padsMap);
-      const padIdx = this.padPorts[port];
+      const resolvedIdx = this.lastResolvedPadPorts?.[port];
+      const padIdx = (resolvedIdx != null && padsMap.has(resolvedIdx)) ? resolvedIdx : this.padPorts[port];
       const pad = padIdx != null ? padsMap.get(padIdx) : null;
       const act = pad?.vibrationActuator;
-      if (!act || typeof act.playEffect !== 'function') return false;
-      const p = act.playEffect(act.type || 'dual-rumble', {
-        startDelay: 0,
-        duration: Math.max(25, Math.min(600, Math.round(durationMs))),
-        weakMagnitude: Math.max(0, Math.min(1, weak)),
-        strongMagnitude: Math.max(0, Math.min(1, strong)),
-      });
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-      return true;
+      if (!act) return false;
+      const duration = Math.max(25, Math.min(600, Math.round(durationMs)));
+      const weakMag = Math.max(0, Math.min(1, weak));
+      const strongMag = Math.max(0, Math.min(1, strong));
+      if (typeof act.playEffect === 'function') {
+        const p = act.playEffect(act.type || 'dual-rumble', {
+          startDelay: 0,
+          duration,
+          weakMagnitude: weakMag,
+          strongMagnitude: strongMag,
+        });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+        return true;
+      }
+      if (typeof act.pulse === 'function') {
+        const p = act.pulse(Math.max(weakMag, strongMag), duration);
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }

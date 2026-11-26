@@ -12,6 +12,12 @@ const GROUND_APPROACH = new Set([S.IDLE, S.WALK, S.DASH, S.RUN, S.CROUCH, S.TURN
 const THINK_FRAMES = [0, 24, 19, 14, 11, 9, 6, 4, 3, 1];
 const PAUSE_CHANCE = [0, 0.52, 0.38, 0.27, 0.18, 0.14, 0.08, 0.055, 0.035, 0];
 const DIRECT_SIDE = new Set(['wonky-kong', 'flurby', 'shriek']);
+const COMBO_UTHROW = new Set(['faux', 'garth', 'captain-pigeon', 'mewtooth', 'falcont',
+  'wonky-kong', 'chikapu', 'spitzu', 'gigglefluff', 'troy', 'mr-beep-blob']);
+const KILL_BTHROW = new Set(['bario', 'dr-bario', 'mess', 'gigglefluff', 'mewtooth', 'velda', 'squeegi']);
+const KILL_FTHROW = new Set(['sourzer', 'wonky-kong', 'shamus', 'screech']);
+const TECH_DTHROW = new Set(['shriek', 'dadondorf', 'captain-pigeon', 'dr-bario', 'bario',
+  'squeegi', 'screech', 'slush-shovelers', 'shamus', 'zink', 'tiny-zink', 'troy']);
 const DESIRABLE = new Set(['plunger_bat', 'glow_saber', 'critter_capsule', 'mallet_chaos',
   'paper_fan', 'star_wand', 'freezie_cube', 'mr_saturn_plush']);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -652,8 +658,36 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     const victim = match.fighters.find((o) => o.port === f.grabbing) ?? target;
     if (level >= 4 && f.stateFrame === 3) return tap(input, 'attack');
     if (f.pummelTimer > 4) return input;
-    if (f.x - deck.x < 140 || deck.x + deck.w - f.x < 140) {
-      input.moveX = f.x < deck.x + deck.w / 2 ? -1 : 1;
+    const nearEdge = f.x - deck.x < 145 || deck.x + deck.w - f.x < 145;
+    const offstageDir = f.x < deck.x + deck.w / 2 ? -1 : 1;
+    if (level >= 7) {
+      if (nearEdge && victim.percent >= 80 &&
+          ((KILL_BTHROW.has(f.fighterId) && offstageDir === -f.facing) ||
+           (KILL_FTHROW.has(f.fighterId) && offstageDir === f.facing))) {
+        input.moveX = offstageDir;
+      } else if (f.fighterId === 'faux' && victim.percent < 130) {
+        input.moveY = 1;
+      } else if (f.fighterId === 'gigglefluff' && victim.percent < 75) {
+        input.moveY = 1;
+      } else if (f.fighterId === 'garth' && victim.percent < 42 && !nearEdge) {
+        input.moveX = f.facing;
+      } else if (nearEdge && (!COMBO_UTHROW.has(f.fighterId) || victim.percent >= 70)) {
+        input.moveX = offstageDir;
+      } else if (f.fighterId === 'captain-pigeon') {
+        input.moveY = victim.percent < 72 ? -1 : 1;
+      } else if (COMBO_UTHROW.has(f.fighterId) && victim.percent < 115) {
+        input.moveY = 1;
+      } else if (TECH_DTHROW.has(f.fighterId) && victim.percent < 95) {
+        input.moveY = -1;
+      } else if (KILL_BTHROW.has(f.fighterId) && victim.percent >= 95) {
+        input.moveX = -f.facing;
+      } else if (KILL_FTHROW.has(f.fighterId) && victim.percent >= 95) {
+        input.moveX = f.facing;
+      } else {
+        input.moveY = victim.percent < 55 ? -1 : 1;
+      }
+    } else if (nearEdge) {
+      input.moveX = offstageDir;
     } else {
       input.moveY = victim.percent < 55 ? -1 : 1;
     }
@@ -680,12 +714,13 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
         input.moveY = -1;
       }
     }
-    if (!f.hitlag && level >= 6 && f.meteorHitFrame !== -999 && f.kbVy < 0 &&
+    if (!f.hitlag && level >= 6 && f.meteorHitFrame !== -999 && !f.meteorTrueSpike && f.kbVy < 0 &&
         match.frame + 1 - f.meteorHitFrame >= MELEE.METEOR_CANCEL_MIN_FRAMES) {
       if (f.jumpsUsed < stats.maxJumps) return tap(input, 'jump', dir * 0.65);
       return tap(input, 'special', dir * 0.45, 1);
     }
-    if (level >= 5 && !f.hitlag && f.state === S.TUMBLE && f.y - getSurfaceY(deck, f.x) < 35 &&
+    const techLead = level >= 7 ? Math.max(35, Math.min(72, Math.abs(f.kbVy + f.vy) * 3)) : 35;
+    if (level >= 5 && !f.hitlag && f.state === S.TUMBLE && f.y - getSurfaceY(deck, f.x) < techLead &&
         f.kbVy + f.vy < -2 && f.techLock <= 0) {
       const escape = f.x - dir * 95 > deck.x && f.x - dir * 95 < deck.x + deck.w ? -dir : dir;
       return tap(input, 'shield', level >= 7 ? escape : input.moveX, input.moveY);
@@ -712,6 +747,63 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
     if (f.state === S.JUMPSQUAT || f.state === S.AIRBORNE && dy > -95 && dy < 36) {
       input.cStickY = -1;
       input.jump = true;
+      return input;
+    }
+  }
+  const throwLast = level >= 7 && !offstage && target.hitstun > 0 &&
+    target.receivedCombo?.port === f.port ? target.receivedCombo.moves.at(-1) : null;
+  if (throwLast === M.UTHROW && d < 135 && dy > -12 && dy < 190 &&
+      (f.grounded && GROUND_APPROACH.has(f.state) || f.state === S.JUMPSQUAT || f.state === S.AIRBORNE)) {
+    const leadX = target.x + (target.vx + target.kbVx) * (level === 9 ? 5 : 4);
+    const chaseDir = Math.abs(leadX - f.x) > 10 ? sign(leadX - f.x, dir) : 0;
+    if (f.fighterId === 'gigglefluff' && d < 38 && dy < 72) {
+      if (f.grounded) return tap(input, 'jump', chaseDir * 0.5);
+      if (f.state === S.AIRBORNE) return tap(input, 'special', 0, -1);
+    }
+    if (f.grounded) {
+      if (level === 9 && (f.def.moves[M.USMASH]?.startup ?? 12) <= 9 && d < 52 && dy < 82 && target.percent >= 72) {
+        input.cStickY = 1;
+        return input;
+      }
+      input.moveX = chaseDir * 0.88;
+      input.jump = input.jumpPressed = true;
+      if (dy < 58) input.shortHopPressed = true;
+      return input;
+    }
+    if (f.state === S.JUMPSQUAT) {
+      input.moveX = chaseDir * 0.85;
+      input.jump = dy >= 58;
+      return input;
+    }
+    if (f.state === S.AIRBORNE && !f.didAerial && d < 92 && dy > -10 && dy < 95) {
+      input.moveX = clamp((leadX - f.x) / 28, -1, 1);
+      input.cStickY = 1;
+      return input;
+    }
+  } else if ((throwLast === M.DTHROW || (throwLast === M.FTHROW && f.fighterId === 'garth')) &&
+      d < 140 && dy > -24 && dy < 125 &&
+      (f.grounded && GROUND_APPROACH.has(f.state) || f.state === S.JUMPSQUAT || f.state === S.AIRBORNE)) {
+    const leadX = target.x + (target.vx + target.kbVx) * 4;
+    const chaseDir = Math.abs(leadX - f.x) > 10 ? sign(leadX - f.x, dir) : dir;
+    if (f.grounded) {
+      if (f.fighterId === 'shriek' && d < 62 && dy < 48 && target.percent < 45) {
+        return tap(input, 'attack', dir * 0.55);
+      }
+      input.moveX = chaseDir;
+      if (Math.abs(leadX - f.x) < 115) {
+        input.jump = input.jumpPressed = true;
+        if (dy < 56) input.shortHopPressed = true;
+      }
+      return input;
+    }
+    if (f.state === S.JUMPSQUAT) {
+      input.moveX = chaseDir * 0.9;
+      input.jump = dy >= 56;
+      return input;
+    }
+    if (f.state === S.AIRBORNE && !f.didAerial && d < 94 && dy > -45 && dy < 68) {
+      input.moveX = chaseDir;
+      input.cStickX = dir;
       return input;
     }
   }
@@ -882,10 +974,16 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
   if (level >= 7 && outsideSide && f.grounded && !target.grounded && dy < 42) {
     const edge = outsideSide < 0 ? deck.x : deck.x + deck.w;
     const step = edge - outsideSide * 28 - f.x;
+    const fastFSmash = (f.def.moves[M.FSMASH]?.startup ?? 14) <= 13;
     if (Math.abs(step) > 20) input.moveX = sign(step) * (Math.abs(step) > 75 ? 1 : 0.53);
-    else if (f.fighterId === 'garth' && d < 60 && target.vy > 0 && dy > -62) {
+    else if (level === 9 && fastFSmash && target.invulnFrames <= 0 && d < 82 && dy >= -14 && dy < 36 && target.percent >= 55) {
+      input.cStickX = outsideSide;
+      return input;
+    }
+    else if (match.stage.id !== 'lowrule-temple' && (f.fighterId === 'garth' || (level === 9 && f.fighterId === 'falcont')) &&
+        d < 64 && target.vy + target.kbVy > -2 && dy < -4 && dy > -64) {
       input.shortHopPressed = true;
-      input.moveX = outsideSide;
+      input.moveX = outsideSide * 0.65;
       return input;
     }
     else if (target.vy > 0 && d < 95 && dy < -10) return tap(input, 'attack', outsideSide * 0.4, -0.62);

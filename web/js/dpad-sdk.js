@@ -673,6 +673,7 @@ export function createOnlineSession({
   let pendingConfig = null;
   let synPhase = false;
   let synSeq = 0;
+  let handshakeSeq = 0;
   let synSentTick = 0;
   let synSentMs = 0;
   let measuredRttTicks = 0;
@@ -696,13 +697,18 @@ export function createOnlineSession({
     return Math.abs(Number(inp.cStickX) || 0) >= 0.25 || Math.abs(Number(inp.cStickY) || 0) >= 0.25;
   }
 
+  function tupleHasCStick(tuple) {
+    if (!Array.isArray(tuple) || tuple.length < WIRE_AXES.length + 1) return false;
+    return Math.abs(Number(tuple[4]) || 0) >= 250 || Math.abs(Number(tuple[5]) || 0) >= 250;
+  }
+
   function tupleHasActionEdge(tuple) {
     if (!Array.isArray(tuple) || tuple.length < WIRE_AXES.length + 1) return false;
     const b = Number(tuple[WIRE_AXES.length]) | 0;
     for (let i = 0; i < WIRE_FLAGS.length; i++) {
       if (WIRE_FLAGS[i].endsWith('Pressed') && (b & (1 << i))) return true;
     }
-    return Math.abs(Number(tuple[4]) || 0) >= 250 || Math.abs(Number(tuple[5]) || 0) >= 250;
+    return tupleHasCStick(tuple);
   }
 
   function tupleEquals(a, b) {
@@ -711,25 +717,38 @@ export function createOnlineSession({
     return true;
   }
 
-  function enqueueStalledInput(inp) {
+  function isCStickRearmAt(idx, prevSent, incoming) {
+    if (tupleHasCStick(pendingQueue[idx])) return false;
+    const before = idx > 0 ? pendingQueue[idx - 1] : prevSent;
+    const after = idx + 1 < pendingQueue.length ? pendingQueue[idx + 1] : incoming;
+    return Boolean(before && after && tupleHasCStick(before) && tupleHasCStick(after));
+  }
+
+  function enqueueStalledInput(inp, prevSent = null) {
     const packed = packCompactTuple(inp);
     const hasEdge = hasActionEdge(inp);
-    // Preserve every distinct press, C-stick flick, release, and direction change in exact FIFO order without queueing duplicate idle frames.
-    if (!hasEdge && tupleEquals(packed, NEUTRAL_WIRE) && (!pendingQueue.length || tupleEquals(pendingQueue[pendingQueue.length - 1], NEUTRAL_WIRE))) {
+    const refPrev = pendingQueue.length ? pendingQueue[pendingQueue.length - 1] : prevSent;
+    // Preserve every distinct press, C-stick flick, neutral re-arm release, and direction change in exact FIFO order without queueing duplicate idle frames.
+    if (!hasEdge && tupleEquals(packed, NEUTRAL_WIRE) && (!refPrev || tupleEquals(refPrev, NEUTRAL_WIRE))) {
       return;
     }
-    if (!hasEdge && pendingQueue.length && tupleEquals(pendingQueue[pendingQueue.length - 1], packed)) {
+    if (!hasEdge && refPrev && tupleEquals(refPrev, packed)) {
       return;
     }
     if (pendingQueue.length < 32) {
       pendingQueue.push(packed);
     } else {
-      const nonEdgeIdx = pendingQueue.findIndex((t) => !tupleHasActionEdge(t));
-      if (nonEdgeIdx >= 0) {
-        pendingQueue.splice(nonEdgeIdx, 1);
+      const safeNonEdgeIdx = pendingQueue.findIndex((t, idx) => !tupleHasActionEdge(t) && !isCStickRearmAt(idx, prevSent, packed));
+      if (safeNonEdgeIdx >= 0) {
+        pendingQueue.splice(safeNonEdgeIdx, 1);
         pendingQueue.push(packed);
       } else if (hasEdge) {
-        pendingQueue.shift();
+        const nonEdgeIdx = pendingQueue.findIndex((t) => !tupleHasActionEdge(t));
+        if (nonEdgeIdx >= 0) {
+          pendingQueue.splice(nonEdgeIdx, 1);
+        } else {
+          pendingQueue.shift();
+        }
         pendingQueue.push(packed);
       }
     }
@@ -763,8 +782,16 @@ export function createOnlineSession({
     if (!isHost) return false;
     active = false;
     pendingQueue = [];
+    localInputs.clear();
+    remoteInputs.clear();
+    localChecksums.clear();
+    remoteChecksums.clear();
+    let seed = (Number(matchCfg.seed) >>> 0) || (((Date.now() ^ 0x9e3779b9) + Math.imul(++handshakeSeq, 2654435761)) >>> 0);
+    if (matchCfg.seed == null && config && seed === (config.seed >>> 0)) {
+      seed = ((seed + 1) >>> 0) || 1;
+    }
     pendingConfig = {
-      seed: (Number(matchCfg.seed) >>> 0) || ((Date.now() ^ 0x9e3779b9) >>> 0),
+      seed,
       stageId: sanitizeStage(matchCfg.stageId, 'arguefield'),
       stocks: Math.max(1, Math.min(9, Number(matchCfg.stocks) || 4)),
       timeSeconds: parseTimeSeconds(matchCfg.timeSeconds),
@@ -934,7 +961,7 @@ export function createOnlineSession({
       const maxLen = Math.min(10, data.r.length);
       for (let i = 0; i < maxLen; i++) {
         const f = data.f - i;
-        if (f >= simFrame && !remoteInputs.has(f)) {
+        if (f >= simFrame && f <= simFrame + 64 && !remoteInputs.has(f)) {
           const raw = data.r[i];
           if (Array.isArray(raw) && raw.length >= WIRE_AXES.length + 1) {
             remoteInputs.set(f, raw);
@@ -943,18 +970,19 @@ export function createOnlineSession({
       }
       return;
     }
-    if (data.t === 'req' && active && Number.isInteger(data.f)) {
+    if (data.t === 'req' && active && Number.isInteger(data.f) && data.f >= 0) {
       if (data.m != null && (Number(data.m) >>> 0) !== (config?.seed >>> 0)) return;
-      const maxAhead = Math.max(4, (config?.delayFrames || 3) + 2);
+      const maxAhead = Math.min(7, Math.max(4, (config?.delayFrames || 3) + 2));
       let top = -1;
       for (let f = data.f + maxAhead; f >= data.f; f--) {
         if (localInputs.has(f)) { top = f; break; }
       }
-      if (top >= data.f) sendWindow(top, Math.min(8, top - data.f + 1));
+      if (top >= data.f) sendWindow(top, top - data.f + 1);
       return;
     }
-    if (data.t === 'chk' && active && Number.isInteger(data.f)) {
+    if (data.t === 'chk' && active && Number.isInteger(data.f) && data.f >= 0 && Number.isFinite(Number(data.h))) {
       if (data.m != null && (Number(data.m) >>> 0) !== (config?.seed >>> 0)) return;
+      if (data.f < simFrame - 300) return;
       remoteChecksums.set(data.f | 0, Number(data.h) >>> 0);
       checkFrameHash(data.f | 0);
     }
@@ -971,7 +999,7 @@ export function createOnlineSession({
         const tail = pendingQueue.length ? pendingQueue[pendingQueue.length - 1] : packed;
         const freshPacked = packCompactTuple(localRawInput);
         if (hasActionEdge(localRawInput) || !tupleEquals(freshPacked, tail)) {
-          enqueueStalledInput(localRawInput);
+          enqueueStalledInput(localRawInput, packed);
         }
       } else {
         packed = packCompactTuple(localRawInput);
@@ -980,7 +1008,7 @@ export function createOnlineSession({
       sendWindow(targetFrame);
     } else {
       // Preserve every distinct press, release, and direction vector sampled while stalled in FIFO order.
-      enqueueStalledInput(localRawInput);
+      enqueueStalledInput(localRawInput, localInputs.get(targetFrame));
     }
     if (!remoteInputs.has(simFrame)) {
       stallFrames++;
@@ -988,6 +1016,8 @@ export function createOnlineSession({
       if (stallFrames % 2 === 1) {
         packetsSent++;
         send(1, { t: 'req', m: config?.seed ?? 0, f: simFrame }, false);
+      } else if (stallFrames % 6 === 2) {
+        sendWindow(targetFrame);
       }
       return { ready: false, stallFrames, simFrame };
     }
@@ -1001,6 +1031,11 @@ export function createOnlineSession({
     if (pruneBefore > 0 && simFrame % 30 === 0) {
       for (const k of localInputs.keys()) if (k < pruneBefore) localInputs.delete(k);
       for (const k of remoteInputs.keys()) if (k < pruneBefore) remoteInputs.delete(k);
+      const chkPrune = simFrame - 300;
+      if (chkPrune > 0) {
+        for (const k of localChecksums.keys()) if (k < chkPrune) localChecksums.delete(k);
+        for (const k of remoteChecksums.keys()) if (k < chkPrune) remoteChecksums.delete(k);
+      }
     }
     return { ready: true, inputs, simFrame: steppedFrame };
   }
@@ -1010,6 +1045,10 @@ export function createOnlineSession({
     pendingConfig = null;
     synPhase = false;
     pendingQueue = [];
+    localInputs.clear();
+    remoteInputs.clear();
+    localChecksums.clear();
+    remoteChecksums.clear();
     syncState = 'idle';
   }
 

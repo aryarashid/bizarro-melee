@@ -31,7 +31,7 @@ async function runUnitTests() {
   console.log('\n--- 1. Unit & Simulation Tests ---');
   const { computeMeleeKnockback, STATE, MOVE, MODE } = await import('../web/js/constants.js');
   const { ROSTER, SAGGING_BAG, MASTER_MITT, getFighterById } = await import('../web/js/roster.js');
-  const { STAGES, HOMERUN_STAGE, resolveStagePlatforms } = await import('../web/js/stages.js');
+  const { STAGES, HOMERUN_STAGE, resolveStagePlatforms, resolveStageSolids, getSurfaceY } = await import('../web/js/stages.js');
   const { createMatch, stepMatch, spawnItemNow } = await import('../web/js/physics.js');
   const { computeCpuInput } = await import('../web/js/ai.js');
   const { createEmptyInput } = await import('../web/js/input.js');
@@ -54,23 +54,99 @@ async function runUnitTests() {
   }
   console.log('PASS: All 26 Bizarro fighters + 130 sweet/sour normal frame-data snapshots validated');
 
-  const { ITEM_LIST, CRITTER_SUMMONS } = await import('../web/js/items.js');
+  const { ITEM_DEF, ITEM_LIST, CRITTER_SUMMONS } = await import('../web/js/items.js');
   const { EVENTS } = await import('../web/js/events.js');
   const { BIZARRO_INTERN } = await import('../web/js/roster.js');
   assert.equal(ITEM_LIST.length, 24, 'Expected all 24 Bizarro Melee items');
   assert.equal(CRITTER_SUMMONS.length, 8, 'Expected all 8 Critter Capsule summons');
   assert.equal(STAGES.length, 29, 'Expected all 29 Bizarro Melee VS stages');
   assert.equal(EVENTS.length, 8, 'Expected all 8 Bizarro Event Matches');
+
+  // Verify 100% GLB mesh-name parity for all 24 items & 8 summons in web/assets/models/items.glb
+  const itemsGlbBuf = fs.readFileSync(path.join(ROOT, 'web', 'assets', 'models', 'items.glb'));
+  assert.equal(itemsGlbBuf.subarray(0, 4).toString('ascii'), 'glTF', 'items.glb must have valid glTF magic header');
+  const itemsGlbJsonLen = itemsGlbBuf.readUInt32LE(12);
+  const itemsGlbJson = JSON.parse(itemsGlbBuf.subarray(20, 20 + itemsGlbJsonLen).toString('utf8'));
+  const itemsGlbRootIndices = itemsGlbJson.scenes?.[itemsGlbJson.scene ?? 0]?.nodes || [];
+  const itemsGlbMeshKeys = new Set(
+    (itemsGlbRootIndices.length ? itemsGlbRootIndices.map((idx) => itemsGlbJson.nodes?.[idx]?.name) : (itemsGlbJson.nodes || []).map((n) => n.name))
+      .filter(Boolean)
+  );
+  for (const item of ITEM_LIST) {
+    assert.ok(item.mesh && itemsGlbMeshKeys.has(item.mesh), `Item ${item.id} mesh "${item.mesh}" missing from web/assets/models/items.glb`);
+    assert.ok(Number.isFinite(item.weight) && item.weight > 0, `Item ${item.id} has invalid spawn weight`);
+    assert.ok(Number.isFinite(item.despawnFrames) && item.despawnFrames >= 300, `Item ${item.id} has invalid despawnFrames`);
+  }
+  for (const summon of CRITTER_SUMMONS) {
+    assert.ok(summon.mesh && itemsGlbMeshKeys.has(summon.mesh), `Summon ${summon.id} mesh "${summon.mesh}" missing from web/assets/models/items.glb`);
+    assert.ok(Number.isFinite(summon.duration) && summon.duration > 0, `Summon ${summon.id} has invalid duration`);
+  }
+
+  // Verify all 29 stages: spawns sit over solid surfaces (unclipped), blastzones & cameraBounds enclose stage geometry
+  for (const st of STAGES) {
+    const bz = st.blastzones;
+    const cb = st.cameraBounds;
+    assert.ok(bz && cb && bz.left < cb.left && cb.right < bz.right && bz.bottom < cb.bottom && cb.top < bz.top,
+      `Stage ${st.id} has invalid blastzones/cameraBounds`);
+    const solids = resolveStageSolids(st, 0);
+    const plats = resolveStagePlatforms(st, 0);
+    assert.ok(solids.length > 0, `Stage ${st.id} must have at least one solid surface`);
+    for (const s of solids) {
+      const topL = getSurfaceY(s, s.x);
+      const topR = getSurfaceY(s, s.x + s.w);
+      const bot = s.y - s.h;
+      if (s.walkOff) {
+        assert.ok(s.x >= bz.left && s.x + s.w <= bz.right && Math.max(topL, topR) < bz.top && bot > bz.bottom,
+          `Walk-off solid on ${st.id} exceeds blastzones`);
+      } else {
+        assert.ok(s.x > bz.left + 120 && s.x + s.w < bz.right - 120 && Math.max(topL, topR) < bz.top - 120 && bot > bz.bottom + 80,
+          `Solid on ${st.id} lacks recovery margin inside blastzones`);
+      }
+    }
+    for (const p of plats) {
+      const pTopL = getSurfaceY(p, p.x);
+      const pTopR = getSurfaceY(p, p.x + p.w);
+      assert.ok(p.x > bz.left && p.x + p.w < bz.right && Math.max(pTopL, pTopR) < bz.top && Math.min(pTopL, pTopR) > bz.bottom,
+        `Platform ${p.id} on ${st.id} exceeds blastzones`);
+    }
+    assert.ok(st.respawnPoint && st.respawnPoint.x > bz.left && st.respawnPoint.x < bz.right &&
+      st.respawnPoint.y > bz.bottom && st.respawnPoint.y < bz.top, `Stage ${st.id} respawnPoint outside blastzones`);
+    assert.ok(Array.isArray(st.spawns) && st.spawns.length >= 4, `Stage ${st.id} needs at least 4 spawn points`);
+    for (const [si, sp] of st.spawns.entries()) {
+      assert.ok(sp.x > bz.left && sp.x < bz.right && sp.y > bz.bottom && sp.y < bz.top,
+        `Stage ${st.id} spawn[${si}] outside blastzones`);
+      const supporting = solids.filter((s) => sp.x >= s.x && sp.x <= s.x + s.w && getSurfaceY(s, sp.x) <= sp.y);
+      assert.ok(supporting.length > 0, `Stage ${st.id} spawn[${si}] (${sp.x},${sp.y}) is not over a solid surface`);
+      const clipped = solids.some((s) => sp.x >= s.x && sp.x <= s.x + s.w && sp.y < getSurfaceY(s, sp.x) && sp.y > s.y - s.h);
+      assert.equal(clipped, false, `Stage ${st.id} spawn[${si}] (${sp.x},${sp.y}) is clipped inside solid geometry`);
+      const landFloor = [...plats, ...solids]
+        .filter((s) => sp.x >= s.x && sp.x <= s.x + s.w && getSurfaceY(s, sp.x) <= sp.y)
+        .sort((a, b) => getSurfaceY(b, sp.x) - getSurfaceY(a, sp.x))[0];
+      const landY = getSurfaceY(landFloor, sp.x);
+      const headBlocked = solids.some((s) => s !== landFloor && sp.x >= s.x && sp.x <= s.x + s.w &&
+        landY < getSurfaceY(s, sp.x) - 1 && landY + 72 > s.y - s.h);
+      assert.equal(headBlocked, false, `Stage ${st.id} spawn[${si}] (${sp.x},${sp.y}) lacks vertical head clearance`);
+    }
+  }
+
   const validFighterIds = new Set([...ids, SAGGING_BAG.id, MASTER_MITT.id, BIZARRO_INTERN.id]);
   for (const ev of EVENTS) {
+    assert.ok(ev.title && ev.subtitle, `Event ${ev.id} must have title and subtitle`);
+    assert.ok(Number.isFinite(ev.stocks) && ev.stocks >= 1 && ev.stocks <= 9, `Event ${ev.id} has invalid stocks`);
+    assert.ok(Number.isFinite(ev.timeSeconds) && ev.timeSeconds >= 60, `Event ${ev.id} has invalid timeSeconds`);
     assert.ok(STAGES.some((s) => s.id === ev.stageId), `Event ${ev.id} has unknown stage ${ev.stageId}`);
+    if (ev.itemPool) {
+      for (const itemId of ev.itemPool) {
+        assert.ok(Object.hasOwn(ITEM_DEF, itemId), `Event ${ev.id} references unknown itemId: ${itemId}`);
+      }
+    }
     for (const pl of ev.players) {
       assert.ok(validFighterIds.has(pl.fighterId), `Event ${ev.id} references unknown fighterId: ${pl.fighterId}`);
     }
   }
   const movedPlats = resolveStagePlatforms(STAGES.find((s) => s.id === 'randalls-tax-shelter'), 300);
   assert.ok(movedPlats.some((p) => p.id === 'scandall'), 'Scandall cloud platform resolves');
-  console.log('PASS: All 29 stages, 8 Event Matches (strict fighter IDs), dynamic platforms, 24 Bizarro items & 8 Critter summons validated');
+  console.log('PASS: All 29 stages (spawns/solid/blastzones/cameraBounds), 8 Event Matches, 24 items + 8 summons (items.glb parity) validated');
 
   // Melee knockback formula sanity
   const kbLight = computeMeleeKnockback(100, 14, 76, 40, 100);
@@ -416,7 +492,44 @@ async function runUnitTests() {
     if (gr.ready && gr.inputs[0].attackPressed) capAttacks++;
   }
   assert.equal(capAttacks, 1, `Release at 32-entry capacity must not overwrite queued attack (got ${capAttacks})`);
-  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + rematch isolation + FIFO/C-stick/32-cap + 0 desyncs) validated`);
+  // Stall recovery preserving neutral 0 re-arm frame between two C-stick flicks (1, 0, 1 -> guest receives 1, 0, 1, NOT 1, 1)
+  const rh5 = createOnlineSession({ isHost: true, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'g', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const rg5 = createOnlineSession({ isHost: false, delayFrames: 2, send: (ch, p) => { rPkts.push({ to: 'h', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const flush5 = () => { while (rPkts.length) { const x = rPkts.shift(); (x.to === 'h' ? rh5 : rg5).handlePacket(x.p); } };
+  rh5.startHandshake({ seed: 666, stageId: 'arguefield', hostFighter: 'faux', guestFighter: 'garth' }); flush5();
+  rh5.step(createEmptyInput()); rh5.step(createEmptyInput());
+  const cFlick = createEmptyInput(); cFlick.cStickX = 1;
+  rh5.step(cFlick);             // commits cStick=1 to targetFrame=4, then stalls on remote frame 2
+  rh5.step(createEmptyInput()); // neutral 0 re-arm sampled while stalled
+  rh5.step(cFlick);             // second cStick=1 flick sampled while stalled
+  const guestCStickSeq = [];
+  for (let i = 0; i < 16; i++) {
+    flush5();
+    rh5.step(createEmptyInput());
+    const gr = rg5.step(createEmptyInput());
+    if (gr.ready) guestCStickSeq.push(gr.inputs[0].cStickX);
+  }
+  const firstFlickIdx = guestCStickSeq.findIndex((v) => v >= 0.9);
+  assert.ok(firstFlickIdx >= 0 && firstFlickIdx + 2 < guestCStickSeq.length,
+    `Guest must receive C-stick flick sequence after stall (got ${JSON.stringify(guestCStickSeq)})`);
+  assert.ok(
+    guestCStickSeq[firstFlickIdx] >= 0.9 &&
+    Math.abs(guestCStickSeq[firstFlickIdx + 1]) < 0.1 &&
+    guestCStickSeq[firstFlickIdx + 2] >= 0.9,
+    `Stall recovery must preserve neutral 0 re-arm between C-stick flicks (1,0,1), got ${JSON.stringify(guestCStickSeq.slice(firstFlickIdx, firstFlickIdx + 4))}`
+  );
+  // High-delay (10f) req recovery must always include requested frame data.f in 8-frame retransmission window
+  const rh6 = createOnlineSession({ isHost: true, delayFrames: 10, send: (ch, p) => { rPkts.push({ to: 'g', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const rg6 = createOnlineSession({ isHost: false, delayFrames: 10, send: (ch, p) => { rPkts.push({ to: 'h', p: JSON.parse(JSON.stringify(p)) }); return true; } });
+  const flush6 = () => { while (rPkts.length) { const x = rPkts.shift(); (x.to === 'h' ? rh6 : rg6).handlePacket(x.p); } };
+  rh6.startHandshake({ seed: 777, stageId: 'arguefield', hostFighter: 'faux', guestFighter: 'garth' }); flush6();
+  for (let i = 0; i < 10; i++) rh6.step(createEmptyInput());
+  rPkts.length = 0; // drop host frames 10..19 while host is 10f ahead
+  for (let i = 0; i < 11; i++) rg6.step(createEmptyInput()); // guest advances 0..9, stalls at f=10 & sends req(10)
+  flush6();
+  const recoveredHighDelay = rg6.step(createEmptyInput());
+  assert.equal(recoveredHighDelay.ready, true, 'High-delay (10f) req(10) must deliver frame 10 and unblock guest');
+  console.log(`PASS: Deterministic Online Lockstep (adaptive ${hostSess.getStats().delayFrames}f RTT + 10% loss + ${guestObservedHostTaps}/${hostAttackTaps} presses + rematch isolation + FIFO/C-stick 1,0,1/32-cap/10f-req + 0 desyncs) validated`);
 
   // Controller mapping regression test (8BitDo HID button 9 != Start, DualSense 054c raw HID mapping + analog triggers)
   const { InputManager } = await import('../web/js/input.js');
@@ -876,6 +989,33 @@ async function runUnitTests() {
     }
     assert.ok(sawClank && mClank.fighters[0].percent === 0 && mClank.fighters[1].percent === 0,
       `Equal grounded melee attacks must clank cleanly with 0 damage (sawClank=${sawClank}, p0=${mClank.fighters[0].percent}, p1=${mClank.fighters[1].percent})`);
+
+    // Master Mitt cannot clank with regular fighter attacks (grounded Garth ftilt vs grounded Master Mitt dsmash)
+    const mMittClank = createMatch({
+      mode: MODE.CLASSIC, stageId: 'final-obligation', stocks: 3, seed: 2029,
+      players: [
+        { port: 0, fighterId: 'garth', paletteIndex: 0, isCpu: false, name: 'Garth' },
+        { port: 1, fighterId: MASTER_MITT.id, paletteIndex: 0, isCpu: false, name: 'Master Mitt' },
+      ],
+    });
+    mMittClank.status = 'playing'; mMittClank.introTimer = 0;
+    mMittClank.fighters[0].x = -35; mMittClank.fighters[0].y = 0; mMittClank.fighters[0].grounded = true;
+    mMittClank.fighters[0].onPlatformId = 'main'; mMittClank.fighters[0].state = STATE.IDLE; mMittClank.fighters[0].facing = 1;
+    mMittClank.fighters[1].x = 35; mMittClank.fighters[1].y = 0; mMittClank.fighters[1].grounded = true;
+    mMittClank.fighters[1].onPlatformId = 'main'; mMittClank.fighters[1].state = STATE.IDLE; mMittClank.fighters[1].facing = -1;
+    let sawMittClank = false;
+    let sawMittHit = false;
+    for (let t = 0; t < 32; t++) {
+      const i0 = createEmptyInput();
+      const i1 = createEmptyInput();
+      if (t === 0) { i1.cStickY = -1; } // Master Mitt dsmash (startup 25 -> active on t=24, damage 12)
+      if (t === 18) { i0.moveX = 0.6; i0.attack = i0.attackPressed = true; } // Garth ftilt (startup 7 -> active on t=24, damage 11)
+      stepMatch(mMittClank, [i0, i1]);
+      if (mMittClank.events.some((e) => e.type === 'clank')) sawMittClank = true;
+      if (mMittClank.events.some((e) => e.type === 'hit')) sawMittHit = true;
+    }
+    assert.equal(sawMittClank, false, 'Master Mitt must never clank with regular fighter attacks');
+    assert.ok(sawMittHit, 'Overlapping Garth ftilt vs Master Mitt dsmash must trade/land hits instead of clanking');
 
     // Move weight tiers: light jab vs heavy/colossal fsmash emit distinct weightTier & hitlag
     const mLight = mkDuel('faux', 'bario');

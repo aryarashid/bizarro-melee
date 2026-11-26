@@ -3,7 +3,7 @@
  * Simulation coordinates are Y-up (y=0 deck, y>0 up); canvas draws at (wx, -wy).
  */
 
-import { MODE, MOVE as M, STATE, PLAYER_COLORS } from './constants.js';
+import { MELEE, MODE, MOVE as M, STATE, PLAYER_COLORS } from './constants.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -137,14 +137,18 @@ export const combatPaint = {
   unarmed: ['#748cff', '#ffffff', '#dce6ff'],
 };
 
+const bladeProps = new Set(['yardstick', 'fireBroom', 'wrench', 'spatula', 'spork']);
+
 function moveStyle(f) {
-  const d = f.moveData, name = `${f.fighterId || f.def?.id || ''} ${d?.name || ''}`;
+  const d = f.moveData, id = f.fighterId || f.def?.id || '', name = `${id} ${d?.name || ''}`;
   const element = f.activeHitboxes?.[0]?.data?.element || d?.element;
   if (['electric', 'lightning'].includes(element) || /knee of bread|peak-a-chew|chikapu|spitzu|quick-zip|double-zip/i.test(name) || d?.style === 'electric' || d?.kind === 'reflector') return 'electric';
   if (element === 'fire' || d?.style === 'fire' || f.def?.rig?.prop === 'fireBroom' || /fire|pigeon|spite|propane|charcoal|blazer/i.test(name)) return 'fire';
+  if (element === 'dark' || d?.style === 'dark' || /grill punch|gerudo|shadow|smoke-bomb|warlock/i.test(name) || (id === 'dadondorf' && (d?.sweetspot || wideStrikes.has(f.moveKey)))) return 'dark';
+  if (element === 'psychic' || d?.style === 'psychic' || d?.kind === 'teleport' || /PK-|mercury kick|retrograde|crystal aura|astral|root-canal|x-ray/i.test(name)) return 'psychic';
   if (Object.hasOwn(combatPaint, d?.style)) return d.style;
-  if (d?.kind === 'teleport' || /PK-Rocket/i.test(name)) return 'psychic';
-  if (f.moveKey === M.ITEM_SWING || ['yardstick', 'wrench', 'spatula'].includes(f.def?.rig?.prop)) return 'blade';
+  if (f.moveKey === M.ITEM_SWING || bladeProps.has(f.def?.rig?.prop)) return 'blade';
+  if (fighterArchetype(f) === 'heavy' && (wideStrikes.has(f.moveKey) || d?.sweetspot || d?.kind === 'chargePunch' || d?.kind === 'stone')) return 'kinetic';
   return 'unarmed';
 }
 
@@ -173,10 +177,13 @@ export function attackVisual(f) {
   const radial = key === M.NAIR || key === M.DSMASH || d.bothSides || ['spin', 'reflector', 'stone', 'rest'].includes(d.kind);
   const height = (f.def?.stats?.height || 70) * (f.scale || 1);
   const box = f.activeHitboxes?.[0], weight = wideStrikes.has(key) || f.state === STATE.THROW;
-  const reach = Math.min(95, Math.max(48, (box?.r || d.radius || 23) * .72 + (weight ? 57 : 38)));
+  const archetype = fighterArchetype(f);
+  const blade = bladeProps.has(f.def?.rig?.prop) || key === M.ITEM_SWING;
+  const sweetspot = Boolean(d.sweetspot || f.activeHitboxes?.some((b) => b.sweetspot));
+  const reach = Math.min(104, Math.max(50, (box?.r || d.radius || 23) * .74 + (weight ? 58 : 40) + (blade ? 9 : archetype === 'heavy' ? 6 : 0)));
   const x = radial ? f.x : box?.x ?? f.x + Math.cos(angle) * height * .55;
   const y = radial ? f.y + height * .52 : box?.y ?? f.y + height * .53 + Math.sin(angle) * height * .39;
-  return { x, y, angle, radial, reach, age, duration, melee: !nonMelee.has(d.kind), style: moveStyle(f), limb: attackLimb(f) };
+  return { x, y, angle, radial, reach, age, duration, melee: !nonMelee.has(d.kind), style: moveStyle(f), limb: attackLimb(f), archetype, blade, sweetspot };
 }
 
 export function specialVisual(f) {
@@ -366,6 +373,7 @@ export class FxSystem {
     this.specialSamples = new Map();
     this.hitColors = new Map();
     this.chargeSamples = new Map();
+    this.killBurst = null;
   }
 
   clear() {
@@ -379,6 +387,7 @@ export class FxSystem {
     this.hitColors.clear();
     this.chargeSamples.clear();
     this.sampleFrame = null;
+    this.killBurst = null;
   }
 
   attachClassic(renderer) {
@@ -503,6 +512,13 @@ export class FxSystem {
           if (e.slash) this._cue({ type: 'slash', x: e.x, cy: e.y, angle: baseAngle, rim: color, core: '#ffffff', reach: colossal ? 88 : 64 }, 8);
           if (e.element === 'fire') this._cue({ type: 'flame', x: e.x, cy: e.y, angle: baseAngle, rim: '#ff6a1a', core: '#ffd36a', reach: heavy ? 68 : 48 }, 10);
           if (e.meteor) this._cue({ type: 'meteor', x: e.x, cy: e.y, angle: -Math.PI / 2, rim: e.trueSpike ? '#ff2454' : '#ff4864', core: '#ffffff', reach: e.trueSpike ? 82 : 62 }, 13);
+          if (colossal || (e.sweetspot && (e.kb || 0) >= 120) || (e.trueSpike && (e.kb || 0) >= 100)) {
+            const burstLife = colossal ? 16 : 12;
+            this.killBurst = {
+              x: e.x, y: e.y, life: burstLife, maxLife: burstLife,
+              color, crimson: colossal || e.trueSpike, angle: baseAngle,
+            };
+          }
           if (colossal || e.sweetspot || e.meteor || (e.electric && heavy)) {
             this.callouts.push({
               x: e.x, y: e.y + 44,
@@ -513,12 +529,54 @@ export class FxSystem {
           }
           break;
         }
-        case 'shieldHit':
+        case 'shieldHit': {
+          const defender = match?.fighters?.find((f) => f.port === e.port);
+          const ratio = clamp01((defender?.shieldHp ?? MELEE.SHIELD_MAX) / MELEE.SHIELD_MAX);
+          const cy = e.y + (defender ? defender.def.stats.height * (defender.scale || 1) * 0.48 : 28);
+          const sCol = ratio < 0.25 ? '#ff2a48' : ratio < 0.5 ? '#ffaa22' : '#4ce8ff';
           this.rings.push({
-            x: e.x, y: e.y, r: 16, maxR: 58,
-            life: 10, maxLife: 10, color: '#7ce8ff', lineWidth: 3,
+            x: e.x, y: cy, r: 18, maxR: e.heavy ? 76 : 62,
+            life: 12, maxLife: 12, color: sCol, lineWidth: e.heavy ? 5 : 3.5, hex: true,
           });
+          this.rings.push({
+            x: e.x, y: cy, r: 10, maxR: e.heavy ? 50 : 40,
+            life: 9, maxLife: 9, color: '#ffffff', lineWidth: 2.5, hex: true,
+          });
+          for (let i = 0; i < (e.heavy ? 8 : 5); i++) {
+            const a = (i / (e.heavy ? 8 : 5)) * TAU + 0.2;
+            const sp = 3.5 + (e.heavy ? 4 : 2.5) * Math.random();
+            this.particles.push({
+              x: e.x + Math.cos(a) * 14, y: cy + Math.sin(a) * 14,
+              vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+              life: 10, maxLife: 10, size: e.heavy ? 4.5 : 3.5,
+              color: i % 2 ? '#ffffff' : sCol, back: false,
+            });
+          }
           break;
+        }
+        case 'bounce': {
+          const wallDir = e.wall ? Math.sign(e.dir || e.vx || 1) : 0;
+          const intensity = Math.min(1.8, Math.max(0.75, (e.speed || e.impactSpeed || 12) / 16));
+          this.rings.push({
+            x: e.x, y: e.y + (wallDir ? 0 : 4), r: 10 * intensity, maxR: 62 * intensity,
+            life: 13, maxLife: 13, color: '#ffe8b8', lineWidth: 5,
+          });
+          this.rings.push({
+            x: e.x, y: e.y + (wallDir ? 0 : 4), r: 6 * intensity, maxR: 42 * intensity,
+            life: 10, maxLife: 10, color: '#ffffff', lineWidth: 3,
+          });
+          for (let i = 0; i < 8; i++) {
+            const a = wallDir ? (wallDir < 0 ? Math.PI : 0) + (i - 3.5) * 0.3 : 0.18 + (i / 7) * (Math.PI - 0.36);
+            const sp = (2.6 + Math.abs(i - 3.5) * 0.9) * intensity;
+            this.particles.push({
+              x: e.x + (wallDir ? 0 : (i - 3.5) * 4), y: e.y + (wallDir ? (i - 3.5) * 4 : 4),
+              vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+              life: 14 + (i % 4), maxLife: 18, size: (9 + (i % 3) * 3) * intensity,
+              color: i % 2 ? 'rgba(255,244,224,0.88)' : 'rgba(235,242,252,0.82)', back: true, smoke: true,
+            });
+          }
+          break;
+        }
         case 'shieldBreak':
           this.rings.push({
             x: e.x, y: e.y, r: 10, maxR: 120,
@@ -604,11 +662,21 @@ export class FxSystem {
           this.rings.push({ x: e.x, y: e.y, r: 12, maxR: 150, life: 20, maxLife: 20, color: '#ffdf4d', lineWidth: 7 });
           this.callouts.push({ x: e.x, y: e.y + 64, text: 'PING!! HOME RUN!', color: '#ffdf4d', bg: '#7a1800', life: 48, maxLife: 48, scale: 1.4 });
           break;
-        case 'powershield':
-          this.rings.push({ x: e.x, y: e.y + 34, r: 18, maxR: 85, life: 14, maxLife: 14, color: '#38f5ff', lineWidth: 5 });
-          this.rings.push({ x: e.x, y: e.y + 34, r: 10, maxR: 58, life: 10, maxLife: 10, color: '#ffffff', lineWidth: 3 });
+        case 'powershield': {
+          const cy = e.y + 34;
+          this.rings.push({ x: e.x, y: cy, r: 18, maxR: 92, life: 15, maxLife: 15, color: '#38f5ff', lineWidth: 6, hex: true });
+          this.rings.push({ x: e.x, y: cy, r: 10, maxR: 62, life: 11, maxLife: 11, color: '#ffffff', lineWidth: 3.5, hex: true });
+          for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * TAU;
+            this.particles.push({
+              x: e.x + Math.cos(a) * 16, y: cy + Math.sin(a) * 16,
+              vx: Math.cos(a) * 6.5, vy: Math.sin(a) * 6.5,
+              life: 12, maxLife: 12, size: 4.5, color: i % 2 ? '#ffffff' : '#6cf5ff', back: false,
+            });
+          }
           this.callouts.push({ x: e.x, y: e.y + 82, text: 'POWER SHIELD!', color: '#38f5ff', bg: 'rgba(10,18,40,0.9)', life: 34, maxLife: 34, scale: 1.05 });
           break;
+        }
         case 'explosion':
           this.rings.push({ x: e.x, y: e.y, r: 14, maxR: e.radius || 140, life: 22, maxLife: 22, color: '#ff7b24', lineWidth: 8 });
           for (let i = 0; i < 22; i++) {
@@ -807,6 +875,7 @@ export class FxSystem {
   }
 
   update() {
+    if (this.killBurst && --this.killBurst.life <= 0) this.killBurst = null;
     for (let i = this.combat.length - 1; i >= 0; i--) if (--this.combat[i].life <= 0) this.combat.splice(i, 1);
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -848,12 +917,34 @@ export class FxSystem {
         legacySpecialEvents(f, special, this.specialSamples.get(f.port), (e) => this._specialEvent(e, match));
         this.specialSamples.set(f.port, { special, x: f.x, y: f.y });
         const speed = Math.hypot(f.kbVx || 0, f.kbVy || 0);
-        if (speed >= 11 && !f.grounded && !f.hitlag && hurt.has(f.state) && match.frame % 2 === 0) {
+        if (speed >= 11 && !f.grounded && !f.hitlag && hurt.has(f.state) && (speed >= 17 || match.frame % 2 === 0)) {
           const angle = Math.atan2(f.kbVy || 0, f.kbVx || 0);
-          const x = f.x - Math.cos(angle) * 28, cy = f.y + f.def.stats.height * (f.scale || 1) * .52 - Math.sin(angle) * 28;
-          this._cue({ type: 'launchTrail', x, cy, angle, reach: Math.min(126, speed * 3.1),
-            rim: this.hitColors.get(f.port) ? '#58e8ff' : (speed >= 22 ? '#ff5978' : '#ffae59') }, 12);
-          this.spawnTrail(x, cy, speed >= 22 ? 'rgba(255,244,236,0.92)' : '#f2e5e2', Math.min(52, 24 + speed * .48));
+          const nx = Math.cos(angle), ny = Math.sin(angle);
+          const lethal = speed >= 20 || (f.lastKnockback || 0) >= 145 || (f.percent >= 115 && speed >= 16);
+          const electric = this.hitColors.get(f.port) === true;
+          const x = f.x - nx * 24, cy = f.y + f.def.stats.height * (f.scale || 1) * .52 - ny * 24;
+          if (match.frame % 2 === 0) {
+            this._cue({ type: 'launchTrail', x, cy, angle, reach: Math.min(136, speed * 3.3),
+              rim: electric ? '#58e8ff' : lethal ? '#ff4264' : '#ffbe5c' }, 12);
+          }
+          const puffs = speed >= 21 ? 2 : 1;
+          for (let p = 0; p < puffs; p++) {
+            const back = p * 14;
+            const jitter = (Math.random() - 0.5) * 14;
+            const px = x - nx * back - ny * jitter, py = cy - ny * back + nx * jitter;
+            const tint = lethal && (match.frame + p) % 3 === 0 ? '#ffd87a'
+              : lethal && (match.frame + p) % 3 === 1 ? '#ff7a92' : '#f7faff';
+            if (this.particles.length < 300) {
+              this.particles.push({
+                x: px, y: py,
+                vx: -nx * 1.1 + (Math.random() - 0.5) * 1.2,
+                vy: -ny * 1.1 + 0.5 + (Math.random() - 0.5) * 1.2,
+                life: lethal ? 22 : 18, maxLife: lethal ? 22 : 18,
+                size: Math.min(34, 14 + speed * 0.55) * (1 - p * 0.16),
+                color: tint, rim: lethal ? '#ff3b5c' : '#d2dfee', back: true, smoke: true,
+              });
+            }
+          }
         }
       }
     }
@@ -890,37 +981,53 @@ export class FxSystem {
       if (!p.back) continue;
       const alpha = p.life / p.maxLife;
       ctx.save();
-      ctx.globalAlpha = alpha * 0.75;
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, -p.y, Math.max(1, p.size * alpha), 0, Math.PI * 2);
-      ctx.fill();
+      if (p.smoke) {
+        const r = Math.max(2, p.size * (0.68 + (1 - alpha) * 0.62) * Math.min(1, alpha * 2.2));
+        ctx.globalAlpha = alpha * 0.86;
+        ctx.fillStyle = p.rim || '#d2dfee';
+        ctx.beginPath();
+        ctx.arc(p.x + r * 0.12, -p.y + r * 0.14, r * 0.94, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, -p.y, r * 0.86, 0, Math.PI * 2);
+        ctx.arc(p.x - r * 0.34, -p.y - r * 0.12, r * 0.56, 0, Math.PI * 2);
+        ctx.arc(p.x + r * 0.32, -p.y - r * 0.18, r * 0.50, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.globalAlpha = alpha * 0.75;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, -p.y, Math.max(1, p.size * alpha), 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
   }
 
-  _drawCrescent(ctx, x, y, angle, reach, paint, arc, alpha) {
+  _drawCrescent(ctx, x, y, angle, reach, paint, arc, alpha, bold = false) {
     const [rim, core, spark] = paint;
+    const widen = bold ? 1.24 : 1;
     ctx.save();
     ctx.translate(x, -y);
     ctx.rotate(-angle);
     ctx.globalAlpha = alpha;
     ctx.shadowColor = rim;
-    ctx.shadowBlur = 9;
+    ctx.shadowBlur = bold ? 14 : 9;
     const path = (outer, inner) => {
       ctx.beginPath();
       for (let side = 0; side < 2; side++) for (let i = 0; i <= 24; i++) {
         const u = (side ? 24 - i : i) / 24, a = (u - .5) * arc;
-        const edge = Math.sin(Math.PI * u) ** .70;
-        const r = reach * (.65 + .10 * u + edge * (side ? inner : outer));
+        const edge = Math.sin(Math.PI * u) ** .66;
+        const r = reach * (.64 + .12 * u + edge * (side ? inner : outer) * widen);
         if (side || i) ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
         else ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
       }
       ctx.closePath();
     };
-    path(.12, -.23); ctx.fillStyle = rim; ctx.fill();
-    path(.04, -.09); ctx.fillStyle = spark; ctx.fill();
-    path(.035, -.012); ctx.fillStyle = core; ctx.fill();
+    path(.13, -.25); ctx.fillStyle = rim; ctx.fill();
+    path(.05, -.10); ctx.fillStyle = spark; ctx.fill();
+    path(.042, -.010); ctx.fillStyle = core; ctx.fill();
     ctx.restore();
   }
 
@@ -1048,11 +1155,16 @@ export class FxSystem {
         drawMittTell(ctx, tell, !this.allowFlash); ctx.restore();
       }
       if (a?.melee) {
-        const reach = a.reach * (.92 + .16 * Math.min(1, a.age / 3));
+        const reach = a.reach * (.94 + .16 * Math.min(1, a.age / 3));
         const shift = a.radial ? 0 : reach * .34;
-        this._drawCrescent(ctx, a.x - Math.cos(a.angle) * shift, a.y - Math.sin(a.angle) * shift,
-          a.angle + (a.radial ? match.frame * .22 : (a.age / a.duration - .5) * .68), reach, combatPaint[a.style],
-          a.radial ? 5.5 : 2.55, 1 - .34 * a.age / a.duration);
+        const bold = a.blade || a.sweetspot || a.archetype === 'heavy' || ['fire', 'electric', 'psychic', 'dark'].includes(a.style);
+        const swingAngle = a.angle + (a.radial ? match.frame * .22 : (a.age / a.duration - .5) * .74);
+        const cx = a.x - Math.cos(a.angle) * shift, cy = a.y - Math.sin(a.angle) * shift;
+        const alpha = 1 - .32 * a.age / a.duration;
+        if (bold && !a.radial) {
+          this._drawCrescent(ctx, cx, cy, swingAngle - .26 * (f.facing || 1), reach * .94, combatPaint[a.style], 2.85, alpha * .36, true);
+        }
+        this._drawCrescent(ctx, cx, cy, swingAngle, reach, combatPaint[a.style], a.radial ? 5.5 : (bold ? 2.85 : 2.55), alpha, bold);
       }
       if (f.moveData?.kind === 'chargePunch' || f.chargeShotLevel > 0 &&
           Object.values(f.def.moves).some((m) => m.kind === 'chargePunch')) {
@@ -1166,5 +1278,52 @@ export class FxSystem {
       ctx.fillText(c.text, 0, 0);
       ctx.restore();
     }
+  }
+
+  drawScreenFx(ctx, camera, w, h) {
+    const b = this.killBurst;
+    if (!b || b.life <= 0) return;
+    const t = 1 - b.life / b.maxLife;
+    const pt = camera ? camera.worldToScreen(b.x, b.y, w, h) : { sx: w * 0.5, sy: h * 0.5 };
+    const cx = Math.max(w * 0.1, Math.min(w * 0.9, pt.sx));
+    const cy = Math.max(h * 0.12, Math.min(h * 0.88, pt.sy));
+    const rad = Math.hypot(w, h);
+    const alpha = Math.max(0, 1 - t * t);
+    ctx.save();
+    if (t < 0.34) {
+      const flashA = (1 - t / 0.34) * (b.crimson ? 0.30 : 0.22);
+      const vg = ctx.createRadialGradient(cx, cy, h * 0.14, cx, cy, rad * 0.72);
+      vg.addColorStop(0, 'rgba(255,255,255,0)');
+      vg.addColorStop(0.55, b.crimson ? `rgba(255,34,76,${flashA})` : `rgba(255,212,68,${flashA})`);
+      vg.addColorStop(1, b.crimson ? `rgba(92,6,28,${flashA * 1.6})` : `rgba(38,24,78,${flashA * 1.4})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
+    }
+    const rays = 30;
+    for (let i = 0; i < rays; i++) {
+      const a = (i / rays) * TAU + Math.sin(i * 11.3) * 0.05 + t * 0.04;
+      const start = h * (0.24 + ((i * 37) % 10) * 0.024 + t * 0.16);
+      const end = rad * 0.82;
+      const spread = (i % 3 === 0 ? 0.015 : 0.006) * (1 - t * 0.55);
+      const ca = Math.cos(a), sa = Math.sin(a);
+      ctx.globalAlpha = alpha * (i % 3 === 0 ? 0.76 : 0.52);
+      ctx.fillStyle = i % 4 === 0 ? '#12081c' : i % 3 === 0 ? '#ffdf6b' : b.crimson ? '#ff2e55' : b.color;
+      ctx.beginPath();
+      ctx.moveTo(cx + ca * start, cy + sa * start);
+      ctx.lineTo(cx + (ca - sa * spread) * end, cy + (sa + ca * spread) * end);
+      ctx.lineTo(cx + (ca + sa * spread) * end, cy + (sa - ca * spread) * end);
+      ctx.closePath();
+      ctx.fill();
+    }
+    if (t < 0.42) {
+      const k = 1 - t / 0.42;
+      ctx.globalAlpha = k * 0.9;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 6 * k;
+      ctx.beginPath();
+      ctx.arc(cx, cy, (22 + t * 210), 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 }

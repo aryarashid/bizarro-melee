@@ -224,12 +224,12 @@ export class GameRenderer {
     const targets = match.mode === MODE.TARGETS ? match.targets : null;
     this.camera.update(match.fighters, match.stage, w, h, shake, derbyBag, targets);
 
-    // Spawn knockback smoke trails for fighters flying in tumble/hitstun
+    // Light knockback trail below speed 11 (dense Melee launch smoke >= 11 is driven by FxSystem)
     for (const f of match.fighters) {
       if ((f.state === STATE.TUMBLE || f.state === STATE.HITSTUN) && (match.frame % 2 === 0)) {
         const speed = Math.hypot((f.kbVx || 0) + (f.vx || 0), (f.kbVy || 0) + (f.vy || 0));
-        if (speed > 7) {
-          this.fx.spawnTrail(f.x, f.y + f.def.stats.height * (f.scale || 1) * .5, f.palette?.accent || '#ffffff', Math.min(18, 6 + speed * 0.4));
+        if (speed > 7 && speed < 11) {
+          this.fx.spawnTrail(f.x, f.y + f.def.stats.height * (f.scale || 1) * .5, 'rgba(242,248,255,0.78)', Math.min(14, 5 + speed * 0.45));
         }
       }
     }
@@ -261,10 +261,13 @@ export class GameRenderer {
     this.fx.drawFront(ctx);
     ctx.restore();
 
-    if (flash && options.shakeEnabled !== false && match.screenFlash > 0.01) {
-      const intensity = match.fighters.length >= 4 ? .023 : .035;
-      ctx.fillStyle = `rgba(255,245,225,${Math.min(.18, match.screenFlash * intensity)})`;
-      ctx.fillRect(0, 0, w, h);
+    if (flash && options.shakeEnabled !== false) {
+      this.fx.drawScreenFx(ctx, this.camera, w, h);
+      if (match.screenFlash > 0.01) {
+        const intensity = match.fighters.length >= 4 ? .023 : .035;
+        ctx.fillStyle = `rgba(255,245,225,${Math.min(.18, match.screenFlash * intensity)})`;
+        ctx.fillRect(0, 0, w, h);
+      }
     }
 
     // 3. Screen-space warnings, port tags and off-screen fighter indicators.
@@ -385,6 +388,53 @@ export class GameRenderer {
       ctx.moveTo(w * 0.15, 0); ctx.lineTo(w * 0.45, h); ctx.lineTo(w * 0.05, h); ctx.closePath();
       ctx.moveTo(w * 0.85, 0); ctx.lineTo(w * 0.95, h); ctx.lineTo(w * 0.55, h); ctx.closePath();
       ctx.fill();
+    }
+    // Signature ambient atmosphere particles (deterministic, subtle behind fighters)
+    const sid = stage.id;
+    if (stage.theme === 'acid' || sid === 'venom-barge') {
+      for (let i = 0; i < 24; i++) {
+        const age = ((t * (0.28 + (i % 4) * 0.07) + i * 0.37) % 1);
+        const ex = ((i * 139 + Math.sin(t * 2 + i) * 28 + px * 0.6) % w + w) % w;
+        const ey = h * (1.02 - age * 0.95);
+        ctx.globalAlpha = Math.sin(age * Math.PI) * 0.72;
+        ctx.fillStyle = i % 3 === 0 ? '#ffe078' : sid === 'acid-vat-basement' && i % 2 === 0 ? '#a8ff4a' : '#ff6b2b';
+        ctx.beginPath(); ctx.arc(ex, ey, 2 + (i % 3) * 1.1, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (sid === 'slush-summit') {
+      for (let i = 0; i < 36; i++) {
+        const age = ((t * (0.20 + (i % 3) * 0.06) + i * 0.29) % 1);
+        const sx = ((i * 97 - age * 140 + Math.sin(t * 1.8 + i) * 16) % w + w) % w;
+        const sy = age * h;
+        ctx.globalAlpha = Math.sin(age * Math.PI) * 0.75;
+        ctx.fillStyle = i % 3 === 0 ? '#c8f4ff' : '#ffffff';
+        ctx.beginPath(); ctx.arc(sx, sy, 1.8 + (i % 3) * 0.9, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (['randalls-tax-shelter', 'yoshis-tax-island', 'retro-tax-island-64', 'lowrule-temple', 'nightmare-suburb', 'green-greens-suburb'].includes(sid)) {
+      const col = sid === 'lowrule-temple' ? '#f6d17a' : sid === 'randalls-tax-shelter' ? '#ffb8d4' : '#b7eb8f';
+      for (let i = 0; i < 18; i++) {
+        const age = ((t * (0.14 + (i % 3) * 0.04) + i * 0.41) % 1);
+        const lx = ((i * 157 + Math.sin(t * 1.4 + i * 2) * 38 + px * 0.5) % w + w) % w;
+        const ly = age * h;
+        ctx.save();
+        ctx.globalAlpha = Math.sin(age * Math.PI) * 0.62;
+        ctx.translate(lx, ly); ctx.rotate(t * 1.5 + i);
+        ctx.fillStyle = i % 3 === 0 ? '#fff2cc' : col;
+        ctx.beginPath(); ctx.ellipse(0, 0, 5.5, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    } else if (stage.theme === 'cosmos' || stage.theme === 'fountain') {
+      for (let i = 0; i < 24; i++) {
+        const tw = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * 2.6 + i * 2.3)) ** 3;
+        const mx = ((i * 173 + px * 0.35) % w + w) % w;
+        const my = ((i * 83 + py * 0.35) % (h * 0.78) + h * 0.78) % (h * 0.78);
+        const r = 2 + (i % 3) * 1.6;
+        ctx.globalAlpha = tw * 0.72;
+        ctx.fillStyle = stage.theme === 'cosmos' ? (i % 2 ? '#ff9ee6' : '#a8f2ff') : '#d0f8ff';
+        ctx.beginPath();
+        ctx.moveTo(mx, my - r); ctx.lineTo(mx + r * 0.28, my - r * 0.28); ctx.lineTo(mx + r, my);
+        ctx.lineTo(mx + r * 0.28, my + r * 0.28); ctx.lineTo(mx, my + r); ctx.lineTo(mx - r * 0.28, my + r * 0.28);
+        ctx.lineTo(mx - r, my); ctx.lineTo(mx - r * 0.28, my - r * 0.28); ctx.closePath(); ctx.fill();
+      }
     }
     ctx.restore();
   }
@@ -938,25 +988,52 @@ export class GameRenderer {
       ctx.lineTo(w,-h*.91);ctx.lineTo(w*.94,-3);ctx.lineTo(w*.69,2);ctx.lineTo(-w*.84,0);
       ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
     }
-    // Shield bubble
+    // Shield bubble (3-tier health readability: cyan/player >=50% -> amber <50% -> pulsing danger red <25%)
     if (f.state === STATE.SHIELD || f.state === STATE.SHIELD_STUN) {
       const scale = f.scale || 1, shield = f.shieldScale ?? 1;
       const ratio = Math.max(0, Math.min(1, (f.shieldHp ?? MELEE.SHIELD_MAX) / MELEE.SHIELD_MAX));
-      const sr = (stats.shieldRadius || 42) * scale * shield * (0.35 + 0.65 * ratio);
+      const danger = ratio < 0.25, warn = !danger && ratio < 0.5;
+      const stun = f.state === STATE.SHIELD_STUN;
+      const pulse = 0.5 + 0.5 * Math.sin(match.frame * (danger ? 0.62 : 0.26));
+      const jitter = danger ? Math.sin(match.frame * 1.3) * 1.8 : 0;
+      const sr = (stats.shieldRadius || 42) * scale * shield * (0.35 + 0.65 * ratio) * (stun ? 1.08 : 1 + (danger ? pulse * 0.06 : 0));
+      const sx = px + (f.facing || 1) * 5 + jitter, sy = py - stats.height * scale * .48;
       const pColor = PLAYER_COLORS[f.port % PLAYER_COLORS.length];
+      const strokeCol = danger ? (pulse > 0.55 ? '#ff7c92' : '#ff2442') : warn ? '#ffaa22' : (shield > 1 ? '#a8f2ff' : '#4ce8ff');
       ctx.save();
       ctx.beginPath();
-      ctx.arc(px + (f.facing || 1) * 5, py - stats.height * scale * .48, sr, 0, Math.PI * 2);
-      ctx.fillStyle = pColor + (shield > 1 ? '24' : '44');
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      const grad = ctx.createRadialGradient(sx - sr * 0.28, sy - sr * 0.28, sr * 0.08, sx, sy, sr);
+      grad.addColorStop(0, danger ? 'rgba(255,48,80,0.18)' : warn ? 'rgba(255,176,42,0.14)' : 'rgba(130,244,255,0.14)');
+      grad.addColorStop(0.72, danger ? `rgba(255,36,66,${0.28 + pulse * 0.22})` : warn ? 'rgba(255,148,24,0.28)' : pColor + (shield > 1 ? '26' : '3d'));
+      grad.addColorStop(1, danger ? 'rgba(255,96,120,0.68)' : warn ? 'rgba(255,208,92,0.58)' : 'rgba(84,238,255,0.56)');
+      ctx.fillStyle = grad;
       ctx.fill();
-      ctx.lineWidth = shield > 1 ? 2 : 3;
-      ctx.strokeStyle = pColor;
-      ctx.stroke();
-      if (shield > 1) {
-        ctx.beginPath(); ctx.arc(px + (f.facing || 1) * 5, py - stats.height * scale * .48, sr - 2,
-          Math.PI * 1.08, Math.PI * 1.73);
-        ctx.strokeStyle = '#f2fbff9c'; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.save();
+      ctx.clip();
+      ctx.strokeStyle = stun ? 'rgba(255,255,255,0.65)' : danger ? `rgba(255,150,168,${0.32 + pulse * 0.35})` : 'rgba(210,250,255,0.28)';
+      ctx.lineWidth = stun ? 1.8 : 1.1;
+      const hexR = Math.max(8, sr * 0.34);
+      for (let row = -2; row <= 2; row++) for (let col = -2; col <= 2; col++) {
+        const hx = sx + col * hexR * 1.5, hy = sy + row * hexR * 1.73 + (col & 1 ? hexR * 0.865 : 0);
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = i * Math.PI / 3;
+          if (i) ctx.lineTo(hx + Math.cos(a) * hexR * 0.56, hy + Math.sin(a) * hexR * 0.56);
+          else ctx.moveTo(hx + Math.cos(a) * hexR * 0.56, hy + Math.sin(a) * hexR * 0.56);
+        }
+        ctx.closePath();
+        ctx.stroke();
       }
+      ctx.restore();
+      ctx.shadowColor = strokeCol;
+      ctx.shadowBlur = danger || stun ? 12 : 6;
+      ctx.lineWidth = stun ? 4 : danger ? 3.5 : shield > 1 ? 2.2 : 3;
+      ctx.strokeStyle = strokeCol;
+      ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(sx, sy, sr - 2.5, Math.PI * 1.08, Math.PI * 1.72);
+      ctx.strokeStyle = 'rgba(255,255,255,0.68)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke();
       ctx.restore();
     }
 
@@ -1084,19 +1161,39 @@ export class GameRenderer {
       drawItemIcon(ctx,{def:{id:'bunny_ears',radius:w*.52}});ctx.restore();
     }
 
-    // Weapon / Attack Smear Arc
+    // Weapon / Attack Tapering Motion-Blur Smear Crescent
     if (activeSwing) {
       const md = f.moveData;
-      const ox = (md.offsetX || 36);
+      const ox = (md.offsetX || 36) * 0.45;
       const oy = -(md.offsetY || 36);
-      const rad = md.radius || 28;
+      const rad = (md.radius || 28) * 1.12;
+      const progress = Math.max(0, Math.min(1, (f.moveFrame - md.startup) / Math.max(1, md.active + 2)));
+      const rimCol = md.element === 'fire' || rig.prop === 'fireBroom' ? '#ff5c24'
+        : md.element === 'electric' || md.element === 'lightning' ? '#24dcff'
+        : md.element === 'dark' || md.style === 'dark' ? '#a448f5'
+        : md.sweetspot ? '#ffdf4d' : (pal.accent || '#38f5ff');
       ctx.save();
-      ctx.strokeStyle = md.sweetspot ? '#ffdf4d' : (pal.accent || '#38f5ff');
-      ctx.lineWidth = md.sweetspot ? 10 : 6;
-      ctx.lineCap = 'round';
-      ctx.globalAlpha = 0.82;
+      ctx.translate(ox, oy);
+      ctx.globalAlpha = 0.86 * (1 - progress * 0.45);
       ctx.beginPath();
-      ctx.arc(ox * 0.45, oy, rad * 1.05, -0.95, 0.85);
+      for (let i = 0; i <= 14; i++) {
+        const u = i / 14, a = -1.05 + u * 2.0;
+        const r = rad * (1.02 + Math.sin(u * Math.PI) * (md.sweetspot ? 0.24 : 0.16));
+        if (i) ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        else ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      for (let i = 14; i >= 0; i--) {
+        const u = i / 14, a = -1.05 + u * 2.0;
+        const r = rad * (0.94 - Math.sin(u * Math.PI) * (md.sweetspot ? 0.22 : 0.14));
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fillStyle = rimCol;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = md.sweetspot ? 2.8 : 1.8;
+      ctx.beginPath();
+      ctx.arc(0, 0, rad * 1.06, -0.82, 0.72);
       ctx.stroke();
       ctx.restore();
     }
@@ -1655,17 +1752,47 @@ export class GameRenderer {
         ctx.restore();
         continue;
       }
-      ctx.fillStyle = 'rgba(12, 10, 28, 0.86)';
-      ctx.strokeStyle = pColor;
+      const ix = Math.max(36, Math.min(w - 36, pt.sx));
+      const iy = Math.max(36, Math.min(h - 36, pt.sy));
+      const angle = Math.atan2(pt.sy - iy, pt.sx - ix);
+      const pct = Math.floor(f.percent || 0);
+      const pctCol = pct >= 160 ? '#ff425e' : pct >= 110 ? '#ff9642' : pct >= 65 ? '#ffe066' : '#ffffff';
+      const urgent = (f.state === STATE.HITSTUN || f.state === STATE.TUMBLE) && pct >= 90;
+      const ringCol = urgent && Math.floor(match.frame / 4) % 2 === 0 ? '#ffe066' : pColor;
+      // Glowing directional arrow
+      ctx.save();
+      ctx.shadowColor = ringCol; ctx.shadowBlur = 10;
+      const tipX = ix + Math.cos(angle) * 32, tipY = iy + Math.sin(angle) * 32;
+      const lX = ix + Math.cos(angle - 0.34) * 21, lY = iy + Math.sin(angle - 0.34) * 21;
+      const rX = ix + Math.cos(angle + 0.34) * 21, rY = iy + Math.sin(angle + 0.34) * 21;
+      ctx.beginPath(); ctx.moveTo(tipX, tipY); ctx.lineTo(lX, lY); ctx.lineTo(rX, rY); ctx.closePath();
+      ctx.lineWidth = 3; ctx.strokeStyle = '#120c22'; ctx.stroke();
+      ctx.fillStyle = ringCol; ctx.fill();
+      // Magnifying glass body
+      ctx.fillStyle = 'rgba(14, 11, 30, 0.90)';
+      ctx.strokeStyle = ringCol;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+      ctx.arc(ix, iy, 22, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#fff';
-      ctx.font = '900 11px system-ui, sans-serif';
+      ctx.shadowBlur = 0;
+      // Inner subtle glass highlight
+      ctx.strokeStyle = 'rgba(255,255,255,0.42)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(ix, iy, 18.5, Math.PI * 1.1, Math.PI * 1.68); ctx.stroke();
+      // Player tag + live %
       ctx.textAlign = 'center';
-      ctx.fillText(f.def.name.slice(0, 5).toUpperCase(), cx, cy + 4);
+      ctx.textBaseline = 'middle';
+      ctx.font = '900 9px system-ui, sans-serif';
+      ctx.fillStyle = pColor;
+      ctx.fillText(f.def.id === 'sagging-bag' ? 'BAG' : `P${f.port + 1}`, ix, iy - 7);
+      ctx.font = '900 12px system-ui, sans-serif';
+      ctx.strokeStyle = '#120c22'; ctx.lineWidth = 3;
+      ctx.strokeText(`${pct}%`, ix, iy + 6);
+      ctx.fillStyle = pctCol;
+      ctx.fillText(`${pct}%`, ix, iy + 6);
+      ctx.restore();
       ctx.restore();
     }
   }

@@ -832,6 +832,31 @@ export function getDamageSmokeTexture(T, owner) {
 export function getImpactPuffTexture(kind, T, owner) {
   return cached(owner, 'impact-puff:' + kind, () => {
     const c = canvas(128), dust = kind === 'dustPuff';
+    if (!dust) {
+      // Iconic Melee-style billowy cumulus smoke puff for high-speed launch trails.
+      glow(c, 64, 64, 60, '#ffffff42', '#ffffff00');
+      const lobes = [
+        [64, 66, 39, '#e7edf7', '#ffffff'],
+        [42, 60, 26, '#eef3fb', '#ffffff'],
+        [86, 62, 25, '#dce5f2', '#f7faff'],
+        [56, 44, 27, '#f8fbff', '#ffffff'],
+        [76, 48, 22, '#edf2fa', '#ffffff'],
+        [62, 79, 24, '#cdd8ea', '#eef3fa'],
+      ];
+      for (const [x, y, r, edgeCol, coreCol] of lobes) {
+        const g = c.createRadialGradient(x - r * 0.24, y - r * 0.28, r * 0.08, x, y, r);
+        g.addColorStop(0, coreCol);
+        g.addColorStop(0.68, edgeCol + 'f0');
+        g.addColorStop(1, edgeCol + '00');
+        c.fillStyle = g;
+        c.beginPath();
+        c.arc(x, y, r, 0, TAU);
+        c.fill();
+      }
+      stroke(c, (p) => { p.moveTo(31, 52); p.quadraticCurveTo(44, 26, 74, 30); }, '#ffffffc8', 4.5);
+      stroke(c, (p) => { p.moveTo(46, 86); p.quadraticCurveTo(66, 94, 86, 81); }, '#b8c7df75', 3.2);
+      return texture(T, c);
+    }
     const edge = (radius, amplitude) => {
       for (let i = 0; i < 96; i++) {
         const a = i * TAU / 96;
@@ -842,21 +867,20 @@ export function getImpactPuffTexture(kind, T, owner) {
       }
       c.closePath();
     };
-    glow(c, 64, 65, 61, dust ? '#ffe5ba44' : '#fff1cf26', '#ffe5ba00');
+    glow(c, 64, 65, 61, '#ffe5ba44', '#ffe5ba00');
     const paint = c.createLinearGradient(44, 24, 82, 109);
     paint.addColorStop(0, '#fffffff5');
-    paint.addColorStop(.48, dust ? '#fff3d4ef' : '#fff8e5f0');
-    paint.addColorStop(1, dust ? '#dba36ed6' : '#ffc06fb8');
+    paint.addColorStop(.48, '#fff3d4ef');
+    paint.addColorStop(1, '#dba36ed6');
     c.beginPath();
-    edge(dust ? 45 : 47, dust ? 7 : 5);
-    if (!dust) edge(28, 4.2);
+    edge(45, 7);
     c.fillStyle = paint;
     c.fill('evenodd');
-    c.strokeStyle = dust ? '#ffe4b273' : '#fff4d876';
+    c.strokeStyle = '#ffe4b273';
     c.lineWidth = 2.5;
     c.stroke();
     stroke(c, (p) => { p.moveTo(27, 54); p.quadraticCurveTo(34, 30, 61, 28); }, '#ffffffa8', 4);
-    if (dust) stroke(c, (p) => {
+    stroke(c, (p) => {
       p.moveTo(51, 73); p.quadraticCurveTo(66, 54, 85, 61); p.quadraticCurveTo(98, 64, 96, 75);
     }, '#fffefa85', 3);
     return texture(T, c);
@@ -979,27 +1003,43 @@ export function addFighterRim(material) {
   const flash = { value: 0 };
   const flashColor = { value: material.color.clone().set('#ffffff') };
   const metal = { value: 0 };
-  material.userData.combatFlash = { flash, flashColor, metal };
+  const rimStrength = { value: 0.22 };
+  const frost = { value: 0 };
+  material.userData.combatFlash = { flash, flashColor, metal, rimStrength, frost };
+  material.customProgramCacheKey = () => 'bizarro-fighter-rim-v2';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.metalCoat = metal;
     shader.uniforms.combatFlash = flash;
     shader.uniforms.combatFlashColor = flashColor;
+    shader.uniforms.fighterRimStrength = rimStrength;
+    shader.uniforms.fighterFrost = frost;
     shader.fragmentShader = `uniform float metalCoat;
       uniform float combatFlash;
       uniform vec3 combatFlashColor;
+      uniform float fighterRimStrength;
+      uniform float fighterFrost;
        ${shader.fragmentShader}`.replace('#include <metalnessmap_fragment>', `
       #include <metalnessmap_fragment>
-      metalnessFactor = mix(metalnessFactor, 0.92, metalCoat);
-      roughnessFactor = mix(roughnessFactor, 0.14, metalCoat);
-      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.716,.791,.913), metalCoat);
+      metalnessFactor = mix(metalnessFactor, 0.94, metalCoat);
+      roughnessFactor = mix(roughnessFactor, 0.13, metalCoat);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.75,.82,.93), metalCoat);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.62,.90,1.0), fighterFrost * 0.42);
+    `).replace('#include <emissivemap_fragment>', `
+      #include <emissivemap_fragment>
+      totalEmissiveRadiance *= (1.0 - metalCoat * 0.85);
     `).replace('#include <opaque_fragment>', `
-      float faceOn = clamp(dot(normalize(geometryViewDir), normal), 0.0, 1.0);
-      float edge = (1.0 - smoothstep(0.06, 0.47, faceOn)) * smoothstep(0.06, 0.95, normal.y * 0.5 + 0.5);
-      vec3 rimInk = mix(vec3(0.25, 0.64, 0.86), vec3(1.0, 0.64, 0.30), smoothstep(-0.8, 0.8, normal.x));
-      outgoingLight += rimInk * edge * .22 * (1.0-metalCoat);
-      float reflectionBand = smoothstep(.38,.53,reflect(-normalize(geometryViewDir),normal).y);
-      outgoingLight += metalCoat * mix(vec3(.10,.14,.20),vec3(.68,.79,.95),reflectionBand);
-      outgoingLight = mix(outgoingLight, combatFlashColor * 3.7, combatFlash);
+      vec3 viewDirN = normalize(geometryViewDir);
+      float faceOn = clamp(dot(viewDirN, normal), 0.0, 1.0);
+      float edge = (1.0 - smoothstep(0.04, 0.40, faceOn)) * smoothstep(0.08, 0.94, normal.y * 0.5 + 0.5);
+      vec3 rimInk = mix(vec3(0.28, 0.72, 0.94), vec3(1.0, 0.68, 0.36), smoothstep(-0.75, 0.75, normal.x));
+      outgoingLight += rimInk * edge * fighterRimStrength * (1.0 - metalCoat);
+      vec3 refl = reflect(-viewDirN, normal);
+      float reflectionBand = smoothstep(.32, .52, refl.y);
+      float chromeGlint = pow(clamp(dot(refl, normalize(vec3(0.35, 0.72, 0.60))), 0.0, 1.0), 10.0);
+      float chromeRim = pow(1.0 - faceOn, 2.4);
+      outgoingLight += metalCoat * (mix(vec3(.12,.16,.24), vec3(.76,.85,.98), reflectionBand) + vec3(.65,.78,.95) * chromeGlint * .52 + vec3(.45,.58,.74) * chromeRim * .36);
+      outgoingLight += fighterFrost * vec3(0.22, 0.68, 0.96) * (0.14 + (1.0 - faceOn) * 0.52);
+      outgoingLight = mix(outgoingLight, combatFlashColor * 3.4, combatFlash);
       #include <opaque_fragment>
     `);
   };

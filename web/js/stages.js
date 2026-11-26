@@ -297,7 +297,7 @@ export const STAGES = [
     palette: { skyTop: '#0f4c5c', skyMid: '#2a9d8f', skyBottom: '#e9c46a', accent: '#f4a261', deckTop: '#d4a373', deckBody: '#6f4e37', deckTrim: '#e9c46a', platColor: '#faedcd' },
     blastzones: { left: -1300, right: 1300, top: 940, bottom: -680 },
     cameraBounds: { left: -940, right: 940, top: 700, bottom: -400 },
-    spawns: [{ x: -290, y: 90, facing: 1 }, { x: 290, y: 90, facing: -1 }, { x: -100, y: 250, facing: 1 }, { x: 100, y: 250, facing: -1 }],
+    spawns: [{ x: -290, y: 90, facing: 1 }, { x: 290, y: 90, facing: -1 }, { x: -310, y: 230, facing: 1 }, { x: 310, y: 230, facing: -1 }],
     respawnPoint: { x: 0, y: 330 },
     barrelCannon: { y: -165, minX: -270, maxX: 270, speed: 0.025, radius: 48, launchVy: 29 },
     solid: [
@@ -378,7 +378,7 @@ export const STAGES = [
     palette: { skyTop: '#0284c7', skyMid: '#38bdf8', skyBottom: '#bae6fd', accent: '#fde047', deckTop: '#e2e8f0', deckBody: '#475569', deckTrim: '#38bdf8', platColor: '#67e8f9' },
     blastzones: { left: -1300, right: 1300, top: 940, bottom: -640 },
     cameraBounds: { left: -960, right: 960, top: 700, bottom: -380 },
-    spawns: [{ x: -310, y: 120, facing: 1 }, { x: 40, y: 90, facing: -1 }, { x: -320, y: 240, facing: 1 }, { x: 320, y: 90, facing: -1 }],
+    spawns: [{ x: -340, y: 120, facing: 1 }, { x: 60, y: 90, facing: -1 }, { x: -340, y: 240, facing: 1 }, { x: -110, y: 90, facing: -1 }],
     respawnPoint: { x: -80, y: 320 },
     solid: [
       { x: -560, y: 55, w: 320, h: 210, ledges: true, shape: 'street' },

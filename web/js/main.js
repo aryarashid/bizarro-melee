@@ -66,6 +66,8 @@ const app = {
   trainingCpuMode: 'stand',
   trainingDi: 'none',
   suddenDeathBannerFrames: 0,
+  lastMusicIntensity: 0,
+  matchClanks: [0, 0, 0, 0],
   stocks: 4,
   timeSeconds: 300,
   itemFrequency: ITEM_FREQUENCY.MEDIUM,
@@ -195,6 +197,13 @@ function showScreen(name) {
   input.setMenuMode?.(name !== 'match');
   input.syncMenuButtons?.();
   sound.setPaused?.(name === 'pause');
+  if (name !== 'match' && name !== 'pause') {
+    delete document.body.dataset.mode;
+    if (app.lastMusicIntensity !== 0) {
+      app.lastMusicIntensity = 0;
+      sound.setIntensity?.(0);
+    }
+  }
   $('css-bio-panel')?.classList.remove('bio-open');
   updateTouchVisibility();
 
@@ -306,12 +315,52 @@ function buildCssGrid() {
   renderBioPanel(getFighterById(app.ports[0].fighterId), app.ports[0].paletteIndex);
 }
 
+function getFighterArchetypePills(def) {
+  const s = def?.stats || {};
+  const weight = Math.round(s.weight || 95);
+  const pills = [];
+  if (weight >= 112) pills.push({ label: `Super Heavy · ${weight}`, cls: 'pill-heavy' });
+  else if (weight >= 104) pills.push({ label: `Heavy · ${weight}`, cls: 'pill-heavy' });
+  else if (weight >= 85) pills.push({ label: `Midweight · ${weight}`, cls: 'pill-mid' });
+  else if (weight >= 70) pills.push({ label: `Lightweight · ${weight}`, cls: 'pill-light' });
+  else pills.push({ label: `Feather · ${weight}`, cls: 'pill-light' });
+
+  if ((s.fallSpeed || 0) >= 14.5 || (s.gravity || 0) >= 0.76) {
+    pills.push({ label: 'Fast-Faller', cls: 'pill-fast' });
+  } else if (s.floaty || (s.fallSpeed || 12) <= 10.6 || (s.gravity || 0.6) <= 0.50) {
+    pills.push({ label: 'Floaty', cls: 'pill-floaty' });
+  } else if ((s.fallSpeed || 0) >= 13.0) {
+    pills.push({ label: 'Semi-Fast', cls: 'pill-fast' });
+  } else {
+    pills.push({ label: 'All-Rounder', cls: 'pill-mid' });
+  }
+
+  if ((s.maxJumps || 2) >= 5) pills.push({ label: `${s.maxJumps} Jumps`, cls: 'pill-trait' });
+  else if (def?.canFloat) pills.push({ label: 'Float Cancel', cls: 'pill-trait' });
+  else if (def?.doubleJumpArmor) pills.push({ label: 'DJ Armor', cls: 'pill-trait' });
+  else if ((s.traction || 0.7) <= 0.38) pills.push({ label: 'Long Wavedash', cls: 'pill-trait' });
+  else if ((s.jumpSquat || 4) <= 3) pills.push({ label: '3f Jump', cls: 'pill-trait' });
+  else if ((def?.moveScale?.reach || 1) >= 1.24) pills.push({ label: 'Disjoint', cls: 'pill-trait' });
+  else if ((s.runSpeed || 0) >= 12.2) pills.push({ label: 'Rushdown', cls: 'pill-trait' });
+  return pills;
+}
+
 function renderBioPanel(def, paletteIndex = 0) {
   if (!def) return;
   renderer2d.drawPortrait($('bio-portrait'), def, paletteIndex);
   $('bio-parody').textContent = `${String(def.rig?.silhouette || 'bizarro').toUpperCase()} FIGHTER`;
   $('bio-name').textContent = def.name;
   $('bio-epithet').textContent = def.epithet;
+  const pillsEl = $('bio-pills');
+  if (pillsEl) {
+    pillsEl.textContent = '';
+    for (const pill of getFighterArchetypePills(def)) {
+      const span = document.createElement('span');
+      span.className = `bio-pill ${pill.cls}`;
+      span.textContent = pill.label;
+      pillsEl.appendChild(span);
+    }
+  }
   $('bio-desc').textContent = def.bio;
   $('bio-taunt').textContent = `Taunt: ${def.taunt}`;
 
@@ -431,7 +480,9 @@ function syncCssSelection() {
     const id = tile.dataset.fighterId;
     const matched = activePorts.filter((p) => p.fighterId === id);
     tile.classList.toggle('sel-p0', matched.length === 1 && matched[0].port === 0);
-    tile.classList.toggle('sel-p1', matched.length === 1 && matched[0].port > 0);
+    tile.classList.toggle('sel-p1', matched.length === 1 && matched[0].port === 1);
+    tile.classList.toggle('sel-p2', matched.length === 1 && matched[0].port === 2);
+    tile.classList.toggle('sel-p3', matched.length === 1 && matched[0].port === 3);
     tile.classList.toggle('sel-both', matched.length > 1);
     const badges = tile.querySelector('.tile-badges');
     badges.textContent = '';
@@ -468,6 +519,12 @@ function syncCssSelection() {
   const focusedPortIdx = focusedPortCard ? Number(focusedPortCard.dataset.port) : -1;
   const focusedCtrlIdx = focusedPortCard
     ? Array.from(focusedPortCard.querySelectorAll('button, select')).indexOf(app.padFocusEl)
+    : -1;
+  const activeDomEl = document.activeElement;
+  const nativePortCard = activeDomEl?.closest?.('#css-ports .port-card');
+  const nativePortIdx = nativePortCard ? Number(nativePortCard.dataset.port) : -1;
+  const nativeCtrlIdx = nativePortCard
+    ? Array.from(nativePortCard.querySelectorAll('button, select')).indexOf(activeDomEl)
     : -1;
 
   const portsEl = $('css-ports');
@@ -561,6 +618,7 @@ function syncCssSelection() {
         p.isCpu = !p.isCpu;
         p.manualCpu = p.isCpu;
         p.name = p.isCpu ? `CPU ${p.port + 1}` : `P${p.port + 1}`;
+        if (p.isCpu && app.cssCursors[p.port]) app.cssCursors[p.port].locked = false;
         syncCssSelection();
       });
       controls.appendChild(cpuBtn);
@@ -592,6 +650,10 @@ function syncCssSelection() {
     if (focusedPortIdx === p.port && focusedCtrlIdx >= 0) {
       const rebuilt = card.querySelectorAll('button, select')[focusedCtrlIdx];
       if (rebuilt) setPadFocus(rebuilt);
+    }
+    if (nativePortIdx === p.port && nativeCtrlIdx >= 0) {
+      const rebuiltNative = card.querySelectorAll('button, select')[nativeCtrlIdx];
+      if (rebuiltNative && typeof rebuiltNative.focus === 'function') rebuiltNative.focus();
     }
   }
 
@@ -828,6 +890,9 @@ function launchConfiguredMatch(onlineCfg = null) {
   }
 
   app.suddenDeathBannerFrames = 0;
+  app.matchClanks = [0, 0, 0, 0];
+  app.lastMusicIntensity = 0;
+  sound.setIntensity?.(0);
   app.onlineMatchActive = Boolean(app.selectedMode === MODE.ONLINE && onlineCfg && app.onlineSession?.getStats().active);
   app.onlineMenuOpen = false;
   app.onlineReconnecting = false;
@@ -861,6 +926,7 @@ function launchConfiguredMatch(onlineCfg = null) {
 }
 
 function buildMatchHud(match) {
+  document.body.dataset.mode = match.mode;
   const classicRound = app.classicGauntlet?.[app.classicStep % (app.classicGauntlet?.length || 1)];
   const modeLabel = {
     [MODE.VS_STOCK]: `${match.stage.name} • ${app.teamBattle ? 'TEAMS • ' : ''}${app.stocks} STOCK • ITEMS ${app.itemFrequency.toUpperCase()}`,
@@ -961,12 +1027,15 @@ function buildMatchHud(match) {
         stockPips.push(pip);
       }
     }
+    const buffsEl = document.createElement('div');
+    buffsEl.className = 'hud-buffs';
+    buffsEl.hidden = true;
     const resEl = document.createElement('div');
     resEl.className = 'hud-resource';
     resEl.hidden = true;
     const comboEl = document.createElement('div');
     comboEl.className = 'hud-combo';
-    meta.append(nameEl, stocksEl, resEl, comboEl);
+    meta.append(nameEl, stocksEl, buffsEl, resEl, comboEl);
 
     const pctEl = document.createElement('div');
     pctEl.className = isBoss ? 'hud-pct hud-boss-hp' : 'hud-pct';
@@ -978,9 +1047,12 @@ function buildMatchHud(match) {
     container.appendChild(card);
 
     app.hudRefs.push({
-      port: f.port, card, canvas: c, stocksEl, pctEl, resEl, comboEl,
+      port: f.port, card, canvas: c, stocksEl, buffsEl, pctEl, resEl, comboEl,
       bossBar, bossFill, scorePill, stockPips,
-      lastPct: Math.floor(f.percent || 0), lastHp: -1, lastStocks: -1, lastScore: null, lastCombo: '', lastRes: '',
+      lastPct: Math.floor(f.percent || 0), lastHp: -1, lastStocks: Math.min(6, Math.max(0, f.stocks)),
+      lostPipIdx: -1, lostPipFrames: 0, stockFlashFrames: 0,
+      lastScore: null, lastCombo: '', lastComboCount: 0, comboPopFrames: 0,
+      lastRes: '', lastBuffKey: '', isDanger: false,
       shake: 0, pipColor: borderCol, isBoss,
     });
   }
@@ -1102,6 +1174,41 @@ function updateMatchHud(match) {
     banner.hidden = true;
   }
 
+  // Dynamic clutch music intensity: Final Stock, Sudden Death, final 30s of timed match, or low-HP Boss
+  let clutch = false;
+  if (match.status === 'playing') {
+    if (match.suddenDeath) {
+      clutch = true;
+    } else if ((match.timed || match.mode === MODE.VS_TIME) && match.mode !== MODE.HOMERUN && (match.timeLeftFrames || 0) > 0 && (match.timeLeftFrames || 0) <= 30 * 60) {
+      clutch = true;
+    } else if (match.mode === MODE.MULTIMAN && (match.multimanRemaining || 0) > 0 && (match.multimanRemaining || 0) <= 5) {
+      clutch = true;
+    } else if (match.mode === MODE.VS_STOCK || match.mode === MODE.CLASSIC || match.mode === MODE.ONLINE || match.mode === EVENT_MODE()) {
+      const boss = match.fighters.find((ft) => ft.def.id === MASTER_MITT.id || (ft.bossMaxHp || 0) > 0);
+      if (boss) {
+        const maxHp = boss.bossMaxHp || 300;
+        const curHp = Math.max(0, Math.ceil(boss.bossHp ?? (maxHp - (boss.percent || 0))));
+        const p1 = match.fighters[0];
+        if (curHp / maxHp <= 0.25 || (p1 && (p1.stocks || 0) === 1)) clutch = true;
+      } else {
+        const alive = match.fighters.filter((ft) => (ft.stocks || 0) > 0);
+        const hasTeams = alive.some((ft) => ft.team);
+        if (hasTeams) {
+          const teams = new Set(alive.map((ft) => ft.team || `p${ft.port}`));
+          if (teams.size === 2 && alive.every((ft) => ft.stocks === 1)) clutch = true;
+        } else if (alive.length === 2 && alive[0].stocks === 1 && alive[1].stocks === 1) {
+          clutch = true;
+        }
+      }
+    }
+  }
+  const nextIntensity = clutch ? 1 : 0;
+  if (nextIntensity !== app.lastMusicIntensity) {
+    app.lastMusicIntensity = nextIntensity;
+    sound.setIntensity?.(nextIntensity);
+  }
+
+  const reducedMotion = isReducedMotion();
   for (const ref of app.hudRefs) {
     const f = match.fighters.find((ft) => ft.port === ref.port);
     if (!f) continue;
@@ -1110,14 +1217,14 @@ function updateMatchHud(match) {
     const pct = Math.floor(f.percent);
     const dmgDelta = pct - ref.lastPct;
     if (dmgDelta > 0) {
-      ref.shake = (app.shakeEnabled && !isReducedMotion())
+      ref.shake = (app.shakeEnabled && !reducedMotion)
         ? Math.min(22, Math.max(6, Math.round(5 + dmgDelta * 0.85)))
         : 0;
       ref.pctFlash = 4;
     }
     ref.lastPct = pct;
 
-    if (ref.shake > 0 && app.shakeEnabled && !isReducedMotion()) {
+    if (ref.shake > 0 && app.shakeEnabled && !reducedMotion) {
       ref.shake--;
       const pop = 1 + Math.min(0.34, ref.shake * 0.017);
       ref.card.style.transform = `translate(${(Math.random() - 0.5) * ref.shake * 1.6}px, ${(Math.random() - 0.5) * ref.shake * 1.6}px)`;
@@ -1155,6 +1262,13 @@ function updateMatchHud(match) {
         if (ref.pctFlash === 0) ref.pctFlash = -1;
       }
 
+      const danger = pct >= 120;
+      if (danger !== ref.isDanger) {
+        ref.isDanger = danger;
+        ref.pctEl.classList.toggle('danger', danger);
+        ref.card.classList.toggle('hud-card-danger', danger);
+      }
+
       if (match.mode === MODE.VS_TIME && ref.scorePill) {
         const teamScore = f.team
           ? match.fighters.filter((ft) => ft.team === f.team).reduce((acc, ft) => acc + ((ft.kos || 0) - (ft.falls || 0)), 0)
@@ -1168,11 +1282,57 @@ function updateMatchHud(match) {
       } else if (ref.stockPips.length) {
         const showCount = Math.min(6, Math.max(0, f.stocks));
         if (showCount !== ref.lastStocks) {
+          if (ref.lastStocks >= 0 && showCount < ref.lastStocks && !reducedMotion) {
+            ref.lostPipIdx = showCount;
+            ref.lostPipFrames = 24;
+            ref.stockFlashFrames = 22;
+            ref.card.classList.remove('stock-loss-flash');
+            void ref.card.offsetWidth;
+            ref.card.classList.add('stock-loss-flash');
+          }
           ref.lastStocks = showCount;
           for (let i = 0; i < ref.stockPips.length; i++) {
-            ref.stockPips[i].hidden = i >= showCount;
+            const isLostAnim = ref.lostPipFrames > 0 && i === ref.lostPipIdx;
+            ref.stockPips[i].hidden = i >= showCount && !isLostAnim;
+            ref.stockPips[i].classList.toggle('stock-lost', isLostAnim);
           }
         }
+        if (ref.lostPipFrames > 0) {
+          ref.lostPipFrames--;
+          if (ref.lostPipFrames === 0 && ref.lostPipIdx >= 0) {
+            const lostPip = ref.stockPips[ref.lostPipIdx];
+            if (lostPip) {
+              lostPip.classList.remove('stock-lost');
+              lostPip.hidden = ref.lostPipIdx >= ref.lastStocks;
+            }
+            ref.lostPipIdx = -1;
+          }
+        }
+      }
+      if (ref.stockFlashFrames > 0) {
+        ref.stockFlashFrames--;
+        if (ref.stockFlashFrames === 0) ref.card.classList.remove('stock-loss-flash');
+      }
+    }
+
+    // Active status buff mini-pills (METAL, BUNNY, STAR, GIANT, TINY, FROZEN)
+    const buffs = [];
+    if ((f.metalFrames || 0) > 0) buffs.push(['METAL', 'buff-metal', f.metalFrames < 90]);
+    if ((f.bunnyFrames || 0) > 0) buffs.push(['BUNNY', 'buff-bunny', f.bunnyFrames < 90]);
+    if ((f.starTimer || 0) > 0) buffs.push(['STAR', 'buff-star', f.starTimer < 90]);
+    if ((f.giantTimer || 0) > 0 || f.permanentGiant) buffs.push(['GIANT', 'buff-giant', !f.permanentGiant && f.giantTimer < 90]);
+    if ((f.tinyTimer || 0) > 0) buffs.push(['TINY', 'buff-tiny', f.tinyTimer < 90]);
+    if ((f.freezeFrames || 0) > 0) buffs.push(['FROZEN', 'buff-frozen', f.freezeFrames < 30]);
+    const buffKey = buffs.map(([lbl, , exp]) => (exp ? `${lbl}!` : lbl)).join('|');
+    if (ref.buffsEl && buffKey !== ref.lastBuffKey) {
+      ref.lastBuffKey = buffKey;
+      ref.buffsEl.hidden = buffs.length === 0;
+      ref.buffsEl.textContent = '';
+      for (const [lbl, cls, exp] of buffs) {
+        const pill = document.createElement('span');
+        pill.className = exp ? `hud-buff-pill ${cls} expiring` : `hud-buff-pill ${cls}`;
+        pill.textContent = lbl;
+        ref.buffsEl.appendChild(pill);
       }
     }
 
@@ -1209,12 +1369,37 @@ function updateMatchHud(match) {
           ? `HOLD: ${heldItem.def.name} (${heldItem.ammo > 0 ? heldItem.ammo : 'EMPTY'})`
           : `HOLD: ${heldItem.def.name}`)
       : null;
+    const comboHits = f.trueComboCount || f.comboCount || 0;
     const comboDmg = Math.round(f.comboDamage || 0);
-    const comboText = heldText || (f.comboCount >= 2 ? (comboDmg > 0 ? `${f.comboCount} HIT • ${comboDmg}%` : `${f.comboCount} HIT COMBO!`) : '');
-    if (comboText !== ref.lastCombo) {
-      ref.lastCombo = comboText;
+    const activeCombo = comboHits >= 2;
+    const comboText = activeCombo
+      ? (comboDmg > 0 ? `${comboHits} HITS · ${comboDmg}%` : `${comboHits} HITS`)
+      : (heldText || '');
+    if (activeCombo && comboHits > (ref.lastComboCount || 0) && !reducedMotion) {
+      ref.comboPopFrames = 14;
+      ref.comboEl.classList.remove('combo-pop');
+      void ref.comboEl.offsetWidth;
+      ref.comboEl.classList.add('combo-pop');
+    }
+    ref.lastComboCount = activeCombo ? comboHits : 0;
+    if (ref.comboPopFrames > 0) {
+      ref.comboPopFrames--;
+      if (ref.comboPopFrames === 0) ref.comboEl.classList.remove('combo-pop');
+    }
+    const comboStateKey = `${comboText}|${activeCombo ? (comboHits >= 5 ? 3 : comboHits >= 3 ? 2 : 1) : (heldText ? -1 : 0)}`;
+    if (comboStateKey !== ref.lastCombo) {
+      ref.lastCombo = comboStateKey;
       ref.comboEl.textContent = comboText;
-      ref.comboEl.className = (!heldText && f.comboCount >= 3) ? 'hud-combo hot' : 'hud-combo';
+      const popCls = ref.comboPopFrames > 0 ? ' combo-pop' : '';
+      if (activeCombo) {
+        ref.comboEl.className = comboHits >= 5
+          ? `hud-combo active blazing${popCls}`
+          : (comboHits >= 3 ? `hud-combo active hot${popCls}` : `hud-combo active${popCls}`);
+      } else if (heldText) {
+        ref.comboEl.className = 'hud-combo held';
+      } else {
+        ref.comboEl.className = 'hud-combo';
+      }
     }
   }
 
@@ -1254,6 +1439,8 @@ function openResults(match, abortReason = null) {
     : (isDraw ? `Simultaneous KO on ${match.stage.name}!` : `Stage: ${match.stage.name}`);
   let won = isDraw ? false : (match.winningTeam ? (me.team === match.winningTeam) : (match.winnerPort === localPort));
   if (match.mode === MODE.HOMERUN) won = Math.round(match.homerun?.maxDistanceFt || 0) > 0;
+  app.lastMusicIntensity = 0;
+  sound.setIntensity?.(0);
   sound.setMusic(won ? 'victory' : (isDraw ? 'draw' : 'defeat'));
   app.onlineMatchActive = false;
   app.onlineMenuOpen = false;
@@ -1335,31 +1522,45 @@ function openResults(match, abortReason = null) {
   const cards = $('results-cards');
   cards.textContent = '';
   for (const f of match.fighters) {
+    const isCardWinner = !isDraw && (match.winningTeam ? (f.team === match.winningTeam) : (f.port === match.winnerPort));
     const card = document.createElement('div');
-    card.className = 'result-stat-card';
-    card.style.borderColor = PLAYER_COLORS[f.port % PLAYER_COLORS.length];
+    card.className = isCardWinner ? 'result-stat-card result-winner' : 'result-stat-card';
+    card.style.borderColor = f.team ? (TEAM_COLORS[f.team] || PLAYER_COLORS[f.port % PLAYER_COLORS.length]) : PLAYER_COLORS[f.port % PLAYER_COLORS.length];
     const head = document.createElement('div');
-    head.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:8px;';
+    head.className = 'result-card-head';
     const pc = document.createElement('canvas');
     pc.width = 96; pc.height = 96;
-    pc.style.cssText = 'width:56px;height:56px;border-radius:10px;border:2px solid rgba(255,255,255,0.22);flex-shrink:0;';
     renderer2d.drawPortrait(pc, f.def, f.paletteIndex);
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'result-card-title';
     const h3 = document.createElement('h3');
-    h3.style.margin = '0';
-    h3.textContent = `${f.def.name} (${f.name})`;
-    head.append(pc, h3);
+    const sameName = String(f.name || '').trim().toUpperCase() === String(f.def.name || '').trim().toUpperCase();
+    h3.textContent = (sameName || !f.name) ? f.def.name : `${f.def.name} (${f.name})`;
+    titleWrap.appendChild(h3);
+    if (isCardWinner) {
+      const crown = document.createElement('span');
+      crown.className = 'result-crown';
+      crown.textContent = 'WINNER';
+      titleWrap.appendChild(crown);
+    }
+    head.append(pc, titleWrap);
+    const clanks = f.clankCount ?? f.clanks ?? app.matchClanks?.[f.port] ?? 0;
     const dl = document.createElement('dl');
     for (const [k, v] of [
       ['KOs', String(f.kos || 0)],
       ['Falls', String(f.falls || 0)],
-      ['Damage Dealt', `${Math.round(f.damageDealt || 0)}%`],
+      ['Damage', `${Math.round(f.damageDealt || 0)}%`],
+      ['Max Combo', String(f.maxCombo || 0)],
       ['Wavedashes', String(f.wavedashCount || 0)],
       ['L-Cancels', String(f.lCancelCount || 0)],
-      ['Max Combo', String(f.maxCombo || 0)],
+      ['Clanks', String(clanks)],
     ]) {
+      const pair = document.createElement('div');
+      pair.className = 'result-stat-pair';
       const dt = document.createElement('dt'); dt.textContent = k;
       const dd = document.createElement('dd'); dd.textContent = v;
-      dl.append(dt, dd);
+      pair.append(dt, dd);
+      dl.appendChild(pair);
     }
     card.append(head, dl);
     cards.appendChild(card);
@@ -1751,8 +1952,8 @@ function updatePadHintBar(connected, padName = '', padCount = 0) {
   const hints = {
     title: 'Stick / D-Pad: Move  •  A: Select  •  Start: Quick Fight',
     css: padCount > 1
-      ? 'Each Pad Picks Own Fighter!  •  Stick / D-Pad: Move Token  •  A: Lock In  •  B: Cancel  •  X/Y: Costume  •  Start: Fight'
-      : 'Stick / D-Pad: Move Token  •  A: Lock In  •  B: Cancel / Back  •  X/Y: Costume  •  LB/RB: Switch Port  •  Start: Stage Select',
+      ? 'Each Pad Picks Own Fighter!  •  Stick: Move  •  A: Lock  •  B: Cancel  •  X/Y: Alt  •  Sel: Random  •  Start: Fight'
+      : 'Stick: Move Token  •  A: Lock In  •  B: Back  •  X/Y: Alt  •  Sel: Random  •  LB/RB: Port  •  Start: Stage',
     stage: 'Stick / D-Pad: Browse  •  A: Fight  •  B: Fighters  •  X/Y: Random  •  LB/RB: Filter',
     events: 'Stick / D-Pad: Browse  •  A: Launch Event  •  B: Title',
     controller: padCount > 1
@@ -1795,7 +1996,7 @@ function handleGamepadMenus() {
     const act = app.rebindAction;
     if (PAD_REBINDABLE.has(act)) {
       const cfg = input.getConfig?.() || {};
-      const pressedBtn = nav.rawPressedByPort?.[0]?.[0] ?? nav.rawPressed[0];
+      const pressedBtn = nav.rawPressedByPort?.[app.testerPadPort]?.[0] ?? nav.rawPressedByPort?.[0]?.[0] ?? nav.rawPressed[0];
       const nextPadBinds = { ...(cfg.padBinds || {}), [act]: [pressedBtn] };
       input.setConfig?.({ padBinds: nextPadBinds });
       dpad.saveData(input.getConfig(), 'controller');
@@ -1822,7 +2023,7 @@ function handleGamepadMenus() {
     }
   }
 
-  if (app.screen === 'css' && nav.connected && !nav.keyboardActive && Array.isArray(nav.perPort)) {
+  if (app.screen === 'css' && nav.connected && Array.isArray(nav.perPort)) {
     const isVs = app.selectedMode === MODE.VS_STOCK || app.selectedMode === MODE.VS_TIME;
     const cols = getCssGridColumns();
     const totalTiles = ROSTER.length;
@@ -1880,6 +2081,11 @@ function handleGamepadMenus() {
         } else if (!multiPad && padSlot === 0) {
           app.activeCssPort = (app.activeCssPort + (act.rb ? 1 : count - 1)) % count;
           app.cssPortManualByP1 = true;
+          const nextPort = app.ports[app.activeCssPort];
+          if (nextPort) {
+            lastBioDef = getFighterById(nextPort.fighterId);
+            lastBioPal = nextPort.paletteIndex || 0;
+          }
           sound.playUi('move');
           changed = true;
         }
@@ -1914,7 +2120,8 @@ function handleGamepadMenus() {
       }
 
       if (act.select && !cur.locked) {
-        const randIdx = Math.floor(Math.random() * totalTiles);
+        let randIdx = Math.floor(Math.random() * totalTiles);
+        if (totalTiles > 1 && randIdx === cur.index) randIdx = (randIdx + 1) % totalTiles;
         cur.index = randIdx;
         const def = ROSTER[randIdx];
         if (def) {
@@ -1929,6 +2136,8 @@ function handleGamepadMenus() {
         sound.playUi('move');
         if (app.rumbleEnabled) input.rumblePort?.(padSlot, { weak: 0.2, strong: 0.1, durationMs: 45 });
         changed = true;
+        const tileEl = $('css-grid')?.children?.[randIdx];
+        try { tileEl?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch {}
         continue;
       }
 
@@ -1977,7 +2186,7 @@ function handleGamepadMenus() {
 
     if (lastBioDef) renderBioPanel(lastBioDef, lastBioPal);
     if (changed) syncCssSelection();
-    return;
+    if (!nav.keyboardActive) return;
   }
 
   // Context-sensitive shoulder / shortcut buttons
@@ -2499,7 +2708,13 @@ function wireUi() {
   // CSS controls
   $('btn-css-back').addEventListener('click', () => { sound.playUi('back'); showScreen('title'); });
   for (let i = 0; i < 4; i++) {
-    $(`btn-active-port-${i}`).addEventListener('click', () => { app.activeCssPort = i; app.cssPortManualByP1 = true; syncCssSelection(); });
+    $(`btn-active-port-${i}`).addEventListener('click', () => {
+      app.activeCssPort = i;
+      app.cssPortManualByP1 = true;
+      const p = app.ports[i];
+      if (p) renderBioPanel(getFighterById(p.fighterId), p.paletteIndex || 0);
+      syncCssSelection();
+    });
   }
   $('sel-stocks').addEventListener('change', (e) => { app.stocks = Number(e.target.value); });
   $('sel-time').addEventListener('change', (e) => { app.timeSeconds = Number(e.target.value); });
@@ -2591,7 +2806,23 @@ function wireUi() {
       app.match.slowMoFrames = 0;
       app.match.events = [];
     }
+    app.matchClanks = [0, 0, 0, 0];
+    for (const ref of app.hudRefs) {
+      ref.lastPct = 0;
+      ref.shake = 0;
+      ref.pctFlash = 0;
+      ref.comboPopFrames = 0;
+      ref.lastComboCount = 0;
+      ref.lastCombo = '';
+      ref.lastBuffKey = '';
+      ref.isDanger = false;
+      ref.card.style.transform = '';
+      ref.pctEl.style.transform = '';
+      ref.pctEl.classList.remove('danger');
+      ref.card.classList.remove('hud-card-danger', 'stock-loss-flash');
+    }
     renderer3d.reset(app.match.stage);
+    updateMatchHud(app.match);
   };
   $('sel-train-speed')?.addEventListener('change', (e) => { setTrainingSpeed(e.target.value); returnFocusToArena(); });
   $('sel-pause-train-speed')?.addEventListener('change', (e) => setTrainingSpeed(e.target.value));
@@ -2614,8 +2845,14 @@ function wireUi() {
   $('btn-random-all').addEventListener('click', () => {
     sound.playUi('move');
     for (const p of app.ports) {
-      p.fighterId = ROSTER[Math.floor(Math.random() * ROSTER.length)].id;
-      p.paletteIndex = Math.floor(Math.random() * 4);
+      const randIdx = Math.floor(Math.random() * ROSTER.length);
+      const def = ROSTER[randIdx];
+      p.fighterId = def.id;
+      p.paletteIndex = Math.floor(Math.random() * (def.palettes?.length || 4));
+      if (app.cssCursors[p.port]) app.cssCursors[p.port].index = randIdx;
+      if (p.port === 0 && app.onlineSession && !app.onlineSession.getStats().isHost) {
+        app.onlineSession.sendGuestPick(p.fighterId, p.paletteIndex);
+      }
     }
     renderBioPanel(getFighterById(app.ports[app.activeCssPort].fighterId), app.ports[app.activeCssPort].paletteIndex);
     syncCssSelection();
@@ -2698,10 +2935,15 @@ function wireUi() {
 
   // HUD / Pause / Results
   $('btn-hud-pause').addEventListener('click', () => togglePause(true));
+  const syncHitboxLabels = () => {
+    const label = `Hitboxes: ${app.hitboxesVisible ? 'On' : 'Off'}`;
+    if ($('btn-hud-hitboxes')) $('btn-hud-hitboxes').textContent = label;
+    if ($('btn-pause-hitboxes')) $('btn-pause-hitboxes').textContent = label;
+  };
   $('btn-hud-hitboxes').addEventListener('click', () => {
     app.hitboxesVisible = !app.hitboxesVisible;
     $('inp-hitboxes').checked = app.hitboxesVisible;
-    $('btn-hud-hitboxes').textContent = `Hitboxes: ${app.hitboxesVisible ? 'On' : 'Off'}`;
+    syncHitboxLabels();
     persistSettings();
   });
   $('btn-hud-reset').addEventListener('click', resetTrainingPositions);
@@ -2716,7 +2958,7 @@ function wireUi() {
   $('btn-pause-hitboxes').addEventListener('click', () => {
     app.hitboxesVisible = !app.hitboxesVisible;
     $('inp-hitboxes').checked = app.hitboxesVisible;
-    $('btn-hud-hitboxes').textContent = `Hitboxes: ${app.hitboxesVisible ? 'On' : 'Off'}`;
+    syncHitboxLabels();
     persistSettings();
   });
   const exitMatchToSelect = () => {
@@ -2839,11 +3081,15 @@ function togglePause(pause, pauserPort = null) {
     if ($('btn-pause-mute')) {
       $('btn-pause-mute').textContent = `Sound: ${sound.isMuted() ? 'Off' : 'On'}`;
     }
+    if ($('btn-pause-hitboxes')) {
+      $('btn-pause-hitboxes').textContent = `Hitboxes: ${app.hitboxesVisible ? 'On' : 'Off'}`;
+    }
     const isTraining = app.match.mode === MODE.TRAINING;
     if ($('pause-training-controls')) $('pause-training-controls').hidden = !isTraining;
     if (isTraining) {
       if ($('sel-pause-train-speed')) $('sel-pause-train-speed').value = String(app.trainingSpeed);
       if ($('sel-pause-train-cpu')) $('sel-pause-train-cpu').value = app.trainingCpuMode;
+      if ($('sel-pause-train-di')) $('sel-pause-train-di').value = app.trainingDi;
       if ($('sel-pause-train-item') && $('sel-train-item')) $('sel-pause-train-item').value = $('sel-train-item').value;
     }
     showScreen('pause');
@@ -2977,6 +3223,15 @@ function tickSimulation() {
     stepMatch(app.match, inputsByPort);
     if (app.match.mode === MODE.ONLINE && app.onlineMatchActive && app.onlineSession?.getStats().active && app.match.frame > 0 && app.match.frame % 60 === 0) {
       app.onlineSession.recordLocalChecksum(app.match.frame, computeMatchChecksum(app.match));
+    }
+    if (app.match.events?.length) {
+      for (const e of app.match.events) {
+        if (e.type === 'clank' && Array.isArray(e.ports)) {
+          for (const p of e.ports) {
+            if (p >= 0 && p < 4) app.matchClanks[p] = (app.matchClanks[p] || 0) + 1;
+          }
+        }
+      }
     }
     renderer3d.ingestEvents(app.match.events, app.match);
     sound.playEvents(app.match.events);

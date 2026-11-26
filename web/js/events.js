@@ -116,7 +116,7 @@ export const EVENTS = [
     id: 'ev-judge-roulette',
     num: 7,
     title: 'Judge 9 Roulette',
-    subtitle: 'Everyone starts at 99% on Flat-Screen Calculator with Critter Capsules pouring in.',
+    subtitle: 'Everyone starts at 99% on Flat-Screen Calculator with Critter Capsules & Home-Run Plungers pouring in.',
     difficulty: 'CHAOS',
     objective: 'eliminate',
     stageId: 'flat-screen-calc',

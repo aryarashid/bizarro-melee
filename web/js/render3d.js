@@ -30,7 +30,7 @@ const catmull = (a, b, c, d, t) => b + .5 * t * (c - a + t * (2*a - 5*b + 4*c - 
 const hurtStates = new Set([S.HITSTUN, S.TUMBLE, S.SHIELD_BREAK, S.GRABBED, S.KNOCKDOWN]);
 const isHurt = (f) => hurtStates.has(f.state) || f.sleepTimer > 0;
 const smashes = new Set([M.FSMASH, M.USMASH, M.DSMASH]);
-const blades = new Set(['yardstick', 'fireBroom', 'wrench', 'spatula']);
+const blades = new Set(['yardstick', 'fireBroom', 'wrench', 'spatula', 'spork']);
 const swings = new Set([M.FTILT, M.UTILT, M.DTILT, M.FAIR, M.BAIR, M.UAIR, M.DAIR, M.NAIR, M.SIDE_B]);
 const impactPaint = {
   standard: ['#ff923c', '#fff5dd', '#ffcb76'],
@@ -40,8 +40,11 @@ const impactPaint = {
   electric: ['#38dcff', '#edffff', '#ffde56'],
   meteor: ['#ff4864', '#fff0b8', '#ffae68'],
 };
-const combatFxPoolLimits = { impactStar: 16, impactSpark: 56, lightning: 24, shockwave: 12, launchPuff: 40, speedStreak: 36, dustPuff: 20 };
-const FX_BUDGET = 208;
+const combatFxPoolLimits = {
+  impactStar: 16, impactSpark: 56, lightning: 24, shockwave: 14, launchPuff: 56, speedStreak: 44, dustPuff: 24,
+  ring: 20, hexRing: 12, spark: 48, smoke: 24, damageSmoke: 24, core: 12, flame: 16, slash: 12,
+};
+const FX_BUDGET = 248;
 const STAGE_WARNING_LEAD = 120;
 const LAUNCH_PER_KB = MELEE.KB_TO_VEL * WORLD_SCALE;
 const RECOIL_POP = [1, .82, .39, -.27, -.12];
@@ -483,6 +486,8 @@ export class GameRenderer3D {
     this.slideUntil = new Map();
     this.hitFocus = new Map();
     this.chargeSamples = new Map();
+    this.shieldHits = new Map();
+    this.killBurst = null;
     this.comboBanners = [];
     this.matchBanners = [];
     this.calloutFlags = new Set();
@@ -685,6 +690,7 @@ export class GameRenderer3D {
         hex: () => new T.CylinderGeometry(1, 1, 1, 6, 1), cone: () => new T.ConeGeometry(1, 1, 12),
         rod: () => new T.CylinderGeometry(1, 1, 1, 8), plane: () => new T.PlaneGeometry(1, 1),
         ring: () => new T.TorusGeometry(1, 0.047, 6, 32),
+        hexRing: () => new T.TorusGeometry(1, 0.058, 6, 6),
         shockwave: () => new T.RingGeometry(.912, 1, 48),
         swingRim: () => crescentGeometry(T, 2.55), swingCore: () => crescentGeometry(T, 2.55, true),
         sweepRim: () => crescentGeometry(T, 5.35), sweepCore: () => crescentGeometry(T, 5.35, true),
@@ -791,6 +797,7 @@ export class GameRenderer3D {
     if (this.sky) this.sky.visible = true;
     if (this.stageLighting) this._updateLighting('battle', false, 0);
     this.finish = null;
+    this.killBurst = null;
     this.stagePulse = null;
     this.stageWarning = null;
     this.warpPulses.clear();
@@ -806,7 +813,8 @@ export class GameRenderer3D {
     this.dustFrames.clear();
     this.hitFocus.clear();
     this.chargeSamples.clear();
-    this.cameraKick = this.flash = null;
+    this.shieldHits.clear();
+    this.cameraKick = this.flash = this.killBurst = null;
     if (this.impact) this.impact.intensity = 0;
   }
 
@@ -868,17 +876,24 @@ export class GameRenderer3D {
     this.stageAnimations = [];
     this.acidMesh = this.barrierMesh = this.waterMesh = this.warningLane = this.acidSparks = null;
     const style = skyStyle(stage);
+    const darkStage = ['space', 'moon', 'neon', 'acid'].includes(style) || id === 'venom-barge' || id === 'fiveside-skyscrapers';
+    const lcdStage = style === 'lcd';
     const haze = new T.Color(pal.skyMid);
     if (deepDaylight(id)) haze.lerp(new T.Color('#243963'), 0.29);
     this.scene.fog = new T.Fog(haze, 1150, 3200);
     this.hemi.color.set(style === 'acid' ? 0xffcdb9 : style === 'day' ? 0xcdefff : 0xdce4ff);
     this.hemi.groundColor.set(style === 'day' ? 0xa48473 : 0x644966);
-    this.rim.color.set(pal.accent).lerp(new T.Color(0xb3e5ff), 0.27);
+    this.rim.color.set(pal.accent).lerp(new T.Color(0xb3e5ff), darkStage ? 0.34 : 0.22);
     this.sun.color.set(style === 'day' || style === 'sunset' ? 0xffe2b3 : 0xffefd6);
     this.stageLighting = {
-      fog: this.scene.fog, previewFog: new T.FogExp2(haze, style === 'lcd' ? 0 : 0.00023),
+      fog: this.scene.fog, previewFog: new T.FogExp2(haze, lcdStage ? 0 : 0.00023),
       hemi: this.hemi.color.clone(), ground: this.hemi.groundColor.clone(),
       sun: this.sun.color.clone(), rim: this.rim.color.clone(),
+      hemiIntensity: darkStage ? 1.96 : lcdStage ? 1.72 : 1.82,
+      sunIntensity: darkStage ? 2.68 : lcdStage ? 2.18 : 2.38,
+      rimIntensity: darkStage ? 2.65 : lcdStage ? 1.70 : 1.95,
+      fillIntensity: darkStage ? 0.88 : lcdStage ? 0.54 : 0.58,
+      rimStrength: darkStage ? 0.32 : lcdStage ? 0.15 : 0.14,
     };
     this.sky = this._add(this.scene, new T.SphereGeometry(8500, 48, 24),
       this._basic(0xffffff, { map: getSkyTexture(stage, T, this), side: T.BackSide, depthWrite: false, fog: false, toneMapped: false }), 0, 0, 0, false);
@@ -1402,7 +1417,7 @@ export class GameRenderer3D {
       const block = this._mat('#6b5e54', { roughness: 0.95 });
       for (let i = 0; i < 4; i++) this._shape(root, 'box', block, -320 + i * 210, 22, -240, 78, 40, 52, false);
     }
-    this._ambientPoints(form.id === 'grass' ? 12 : -44, form.id === 'fire' ? 'acid' : 'mist',
+    this._ambientPoints(form.id === 'grass' ? 210 : -44, form.id === 'fire' ? 'ember' : form.id === 'grass' ? 'petal' : 'mist',
       form.accent, 90, root, this.terrainAnimations);
   }
 
@@ -1621,7 +1636,10 @@ export class GameRenderer3D {
     const { theme, palette: pal, id } = stage;
     const rim = this._energy(pal.accent || '#ffffff', 0.42);
     if (theme === 'cosmos') {
-      this._ambientPoints(240, 'drift', '#d5e7ff', 36, backdrop);
+      const embers = id === 'venom-barge';
+      this._ambientPoints(embers ? -120 : 210, embers ? 'ember' : 'starlight',
+        embers ? '#ff7c32' : (id === 'final-obligation' ? '#f6b8ff' : '#d5e7ff'), embers ? 85 : 72, backdrop);
+      if (id === 'final-obligation') this._ambientPoints(180, 'starlight', '#8df2ff', 44, backdrop);
       for (const side of [-1, 1]) {
         const spire = this._shape(backdrop, 'gem', this._mat(pal.accent, { emissive: pal.accent, emissiveIntensity: 0.35, roughness: 0.4 }),
           side * 860, 210, -1280, 28, 180, 22, false);
@@ -1631,21 +1649,33 @@ export class GameRenderer3D {
       }
     }
     if (theme === 'twilight') {
-      this._ambientPoints(160, 'drift', '#ffc49a', 28, backdrop);
+      if (id === 'lowrule-temple') {
+        this._ambientPoints(340, 'petal', '#f7d078', 68, backdrop);
+      } else {
+        this._ambientPoints(190, 'starlight', '#ffd3a8', 46, backdrop);
+      }
       for (const side of [-1, 1]) {
         this._shape(backdrop, 'cone', this._mat('#6d4a86', { emissive: '#c084fc', emissiveIntensity: 0.25, roughness: 0.6 }),
           side * 720, 80, -980, 46, 220, 46, false);
       }
     }
     if (theme === 'fountain') {
-      this._ambientPoints(90, 'drift', '#b7f6ff', 32, backdrop);
-      for (const side of [-1, 1]) {
+      if (id === 'slush-summit') {
+        this._ambientPoints(440, 'snow', '#eefaff', 120, backdrop);
+        this._ambientPoints(320, 'snow', '#bdeeff', 60, backdrop);
+      } else if (id === 'puddle-of-insomnia') {
+        this._ambientPoints(190, 'starlight', '#c4f8ff', 68, backdrop);
+      } else {
+        this._ambientPoints(120, 'drift', '#b7f6ff', 36, backdrop);
+      }
+      if (id !== 'slush-summit') for (const side of [-1, 1]) {
         const jet = this._shape(backdrop, 'cone', this._energy('#d9fbff', 0.5), side * 260, 30, -540, 12, 110, 12, false);
         this.stageAnimations.push({ type: 'torch', node: jet, a: 110, i: side + 3 });
       }
     }
     if (theme === 'suburb') {
-      this._ambientPoints(140, 'drift', '#fff1c9', 24, backdrop);
+      const leafy = id === 'nightmare-suburb' || id === 'green-greens-suburb';
+      this._ambientPoints(leafy ? 320 : 140, leafy ? 'petal' : 'drift', leafy ? '#c5f58c' : '#fff1c9', leafy ? 48 : 24, backdrop);
       const roof = this._mat('#d4564a', { roughness: 0.7 });
       const wall = this._mat('#f3e6cf', { roughness: 0.8 });
       for (const side of [-1, 1]) {
@@ -1655,7 +1685,9 @@ export class GameRenderer3D {
       }
     }
     if (theme === 'craft') {
-      this._ambientPoints(180, 'drift', '#ffd7a1', 26, backdrop);
+      const petals = ['randalls-tax-shelter', 'yoshis-tax-island', 'retro-tax-island-64', 'tropic-condo-falls', 'jungle-japes-hoa', 'retro-jungle-64'].includes(id);
+      const petalTint = id === 'randalls-tax-shelter' ? '#ffc2dc' : ['yoshis-tax-island', 'retro-tax-island-64'].includes(id) ? '#ffe08a' : '#a8e878';
+      this._ambientPoints(petals ? 340 : 180, petals ? 'petal' : 'drift', petals ? petalTint : '#ffd7a1', petals ? 56 : 26, backdrop);
       for (let i = 0; i < 4; i++) {
         const block = this._shape(backdrop, 'box', this._mat(i % 2 ? '#e7c07b' : '#8d5a3c', { roughness: 0.86 }),
           (i - 1.5) * 220, 40 + (i % 2) * 30, -720 - i * 40, 70, 36, 70, false);
@@ -1675,6 +1707,7 @@ export class GameRenderer3D {
     }
     if (theme === 'acid') {
       this._ambientPoints(40, 'acid', '#b6ff4a', 40, backdrop);
+      this._ambientPoints(-140, 'ember', id === 'acid-vat-depths' ? '#ff6a26' : '#ff9838', id === 'acid-vat-depths' ? 96 : 64, backdrop);
       const vat = this._mat('#163018', { emissive: '#7CFF3A', emissiveIntensity: 0.2, roughness: 0.45 });
       for (const side of [-1, 1]) this._shape(backdrop, 'box', vat, side * 520, 20, -640, 80, 70, 40, false);
     }
@@ -1690,56 +1723,104 @@ export class GameRenderer3D {
 
   _ambientPoints(y, mode, tint, count, parent = this.stageGroup, animations = this.stageAnimations) {
     const T = this.T, geometry = new T.BufferGeometry();
-    const coords = [], seeds = [], crowd = mode === 'crowd', acid = mode === 'acid', drift = mode === 'drift';
+    const modeId = { crowd: 0, acid: 1, mist: 2, drift: 3, ember: 4, petal: 5, snow: 6, starlight: 7 }[mode] ?? 2;
+    const coords = [], seeds = [];
     for (let i = 0; i < count; i++) {
       const a = phase01(i * 0.61803399 + 0.17), b = phase01(i * 0.573743 + 0.24);
       const fountain = (i % 2 ? -1 : 1) * (i % 3 ? 443 : 194);
-      coords.push(crowd ? (a - 0.5) * 2780 : drift ? (a - 0.5) * 2100 : acid ? (a - 0.5) * 1660 : fountain + (a - 0.5) * 168,
-        crowd ? Math.floor(b * 6) * 14 + i % 3 * 2 : drift ? (b - 0.25) * 260 : 0,
-        crowd ? -352 - Math.floor(b * 6) * 21 : drift ? -380 - b * 820 : -150 - b * (acid ? 460 : 290));
+      const px = modeId === 0 ? (a - 0.5) * 2780
+        : modeId >= 3 ? (a - 0.5) * 2250
+        : modeId === 1 ? (a - 0.5) * 1660
+        : fountain + (a - 0.5) * 168;
+      const py = modeId === 0 ? Math.floor(b * 6) * 14 + i % 3 * 2
+        : (modeId === 3 || modeId === 7) ? (b - 0.25) * 320
+        : (modeId === 5 || modeId === 6) ? (b - 0.5) * 180
+        : 0;
+      const pz = modeId === 0 ? -352 - Math.floor(b * 6) * 21
+        : modeId >= 4 ? -210 - b * 760
+        : modeId === 3 ? -380 - b * 820
+        : -150 - b * (modeId === 1 ? 460 : 290);
+      coords.push(px, py, pz);
       seeds.push(a, b, phase01(i * 0.763291));
     }
     geometry.setAttribute('position', new T.Float32BufferAttribute(coords, 3));
     geometry.setAttribute('seed', new T.Float32BufferAttribute(seeds, 3));
     const material = new T.ShaderMaterial({
       uniforms: { clock: { value: 0 }, viewport: { value: this.height }, tint: { value: new T.Color(tint) },
-        mode: { value: crowd ? 0 : acid ? 1 : drift ? 3 : 2 } },
-      transparent: true, depthWrite: false, blending: T.AdditiveBlending,
+        mode: { value: modeId } },
+      transparent: true, depthWrite: false, blending: modeId === 5 ? T.NormalBlending : T.AdditiveBlending,
       vertexShader: `
         uniform float clock, viewport, mode;
         attribute vec3 seed;
-        varying float brightness, hue;
+        varying float brightness, hue, spin;
         void main() {
           vec3 p = position;
-          float age = fract(clock*(0.40+seed.y*0.35)+seed.z);
-          float size = 2.5 + seed.y*4.0;
+          float age = fract(clock*(0.24+seed.y*0.28)+seed.z);
+          float size = 2.6 + seed.y*4.2;
           hue = seed.z;
+          spin = clock * (1.2 + seed.x * 2.0) + seed.z * 6.283;
           if (mode == 0.0) {
             brightness = 0.13+0.71*pow(0.5+0.5*sin(clock*3.0+seed.z*71.0),8.0);
-          } else if (mode == 3.0) {
-            p.x += sin(clock*0.35+seed.x*12.0)*18.0;
-            p.y += sin(clock*0.22+seed.y*9.0)*14.0;
-            size *= 1.35;
-            brightness = 0.28+0.62*pow(0.5+0.5*sin(clock*2.2+seed.z*40.0),3.0);
+          } else if (mode == 3.0 || mode == 7.0) {
+            p.x += sin(clock*0.35+seed.x*12.0)*22.0;
+            p.y += sin(clock*0.24+seed.y*9.0)*18.0;
+            size *= mode == 7.0 ? 1.75 : 1.35;
+            brightness = (mode == 7.0 ? 0.24 : 0.28)+0.66*pow(0.5+0.5*sin(clock*(mode == 7.0 ? 2.8 : 2.2)+seed.z*48.0), mode == 7.0 ? 4.0 : 3.0);
+          } else if (mode == 4.0) {
+            float eAge = fract(clock*(0.18+seed.y*0.22)+seed.z);
+            p.x += eAge * (65.0 + seed.x * 95.0) + sin(eAge*7.0 + seed.x*21.0) * 28.0;
+            p.y += eAge * (340.0 + seed.y * 260.0);
+            size *= 1.15 * (1.15 - eAge * 0.65);
+            brightness = sin(eAge * 3.14159) * (0.48 + 0.52 * pow(0.5 + 0.5 * sin(clock*9.0 + seed.z*53.0), 2.0));
+          } else if (mode == 5.0) {
+            float pAge = fract(clock*(0.08+seed.y*0.09)+seed.z);
+            p.x += sin(pAge*6.283 + seed.x*18.0) * 62.0 + pAge * 75.0;
+            p.y -= pAge * (440.0 + seed.y * 210.0);
+            size *= 1.95;
+            brightness = sin(pAge * 3.14159) * 0.72;
+          } else if (mode == 6.0) {
+            float sAge = fract(clock*(0.14+seed.y*0.14)+seed.z);
+            p.x -= sAge * (135.0 + seed.x * 95.0) - sin(sAge*6.0 + seed.x*17.0) * 24.0;
+            p.y -= sAge * (480.0 + seed.y * 220.0);
+            size *= 1.45;
+            brightness = sin(sAge * 3.14159) * (0.44 + 0.36 * sin(clock*4.0 + seed.z*31.0));
           } else {
-            p.x += sin(age*5.0+seed.x*19.0)*(mode==1.0 ? 18.0 : 24.0);
-            p.y += age*(mode==1.0 ? 123.0+seed.y*97.0 : 105.0+seed.y*147.0);
-            size *= mode == 1.0 ? 1.1+age*2.0 : 1.9-age*0.71;
-            brightness = sin(age*3.14159)*(0.25+0.51*pow(0.5+0.5*sin(clock*5.0+seed.z*63.0),4.0));
+            float mAge = fract(clock*(0.40+seed.y*0.35)+seed.z);
+            p.x += sin(mAge*5.0+seed.x*19.0)*(mode==1.0 ? 18.0 : 24.0);
+            p.y += mAge*(mode==1.0 ? 123.0+seed.y*97.0 : 105.0+seed.y*147.0);
+            size *= mode == 1.0 ? 1.1+mAge*2.0 : 1.9-mAge*0.71;
+            brightness = sin(mAge*3.14159)*(0.25+0.51*pow(0.5+0.5*sin(clock*5.0+seed.z*63.0),4.0));
           }
           vec4 view = modelViewMatrix*vec4(p,1.0);
-          gl_PointSize = clamp(size*viewport*projectionMatrix[1][1]/max(16.0,-view.z),1.2,18.0);
+          gl_PointSize = clamp(size*viewport*projectionMatrix[1][1]/max(16.0,-view.z),1.4,20.0);
           gl_Position = projectionMatrix*view;
         }`,
       fragmentShader: `
         uniform vec3 tint;
         uniform float mode;
-        varying float brightness, hue;
+        varying float brightness, hue, spin;
         void main() {
           vec2 p = gl_PointCoord*2.0-1.0;
           float r = length(p);
-          float core = mode == 1.0 ? 1.0-smoothstep(0.02,0.31,abs(r-0.63)) : 1.0-smoothstep(0.05,0.89,r);
-          vec3 color = mode == 3.0 ? tint : mix(tint, mode == 1.0 ? vec3(0.87,1.0,0.31) : vec3(1.0,0.65,0.77), hue*0.47);
+          float core;
+          if (mode == 1.0) {
+            core = 1.0 - smoothstep(0.02, 0.31, abs(r - 0.63));
+          } else if (mode == 5.0) {
+            float cs = cos(spin), sn = sin(spin);
+            vec2 q = vec2(p.x*cs - p.y*sn, p.x*sn + p.y*cs);
+            core = 1.0 - smoothstep(0.45, 0.85, length(vec2(q.x * 1.15, q.y * 2.25)));
+          } else if (mode == 7.0) {
+            float crossStar = max(exp(-abs(p.x)*9.0) * (1.0 - smoothstep(0.0, 0.92, abs(p.y))),
+              exp(-abs(p.y)*9.0) * (1.0 - smoothstep(0.0, 0.92, abs(p.x))));
+            core = clamp(crossStar + (1.0 - smoothstep(0.0, 0.42, r)) * 0.9, 0.0, 1.0);
+          } else {
+            core = 1.0 - smoothstep(0.05, 0.89, r);
+          }
+          vec3 color = mode == 3.0 || mode == 6.0 ? tint
+            : mode == 4.0 ? mix(tint, vec3(1.0, 0.92, 0.48), hue * 0.62)
+            : mode == 5.0 ? mix(tint, vec3(1.0, 0.96, 0.86), hue * 0.35)
+            : mode == 7.0 ? mix(tint, vec3(1.0, 0.98, 1.0), 0.35 + hue * 0.4)
+            : mix(tint, mode == 1.0 ? vec3(0.87,1.0,0.31) : vec3(1.0,0.65,0.77), hue*0.47);
           gl_FragColor = vec4(color, brightness*core);
           #include <colorspace_fragment>
         }`,
@@ -2345,21 +2426,28 @@ export class GameRenderer3D {
         : TORSO_SCULPTS[sil] || 'HeroTorso';
       const dress = sil === 'dress';
       const tripoHeadSrc = id !== 'mr-beep-blob' && this.assets['tripo-heads']?.get('Tripo_' + id);
+      const prepTripo = (node, tintWeight) => {
+        node.traverse((n) => {
+          if (!n.isMesh) return;
+          n.userData.isTripo = true;
+          const prep = (mat) => {
+            if (!mat?.isMeshStandardMaterial) return mat;
+            const m = this.ownedMaterials.has(mat) ? mat : mat.clone();
+            this.ownedMaterials.add(m);
+            if (f.paletteIndex > 0 && m.color) m.color.lerp(new T.Color(pal.body), tintWeight);
+            if (!m.roughnessMap && m.roughness < 0.38) m.roughness = 0.48;
+            if (!m.metalnessMap && m.metalness > 0.30) m.metalness = 0.20;
+            return m;
+          };
+          n.material = Array.isArray(n.material) ? n.material.map(prep) : prep(n.material);
+        });
+      };
       if (puff && tripoHeadSrc) {
         const tMesh = this._model('tripo-heads', 'Tripo_' + id);
         if (tMesh) {
           tMesh.position.set(0, chestSz * 0.52, 0);
           tMesh.scale.set(chestRx * 1.14, chestSz * 0.58, breadth * 1.14);
-          if (f.paletteIndex > 0) {
-            tMesh.traverse((n) => {
-              if (n.isMesh && n.material?.color) {
-                const m = n.material.clone();
-                m.color.lerp(new T.Color(pal.body), 0.24);
-                this.ownedMaterials.add(m);
-                n.material = m;
-              }
-            });
-          }
+          prepTripo(tMesh, 0.30);
           torso.add(tMesh);
           rig.hasTripoHead = true;
         }
@@ -2388,16 +2476,7 @@ export class GameRenderer3D {
           const uScale = Math.max(rx, ry) * boost;
           tripo.position.set(rx * 0.05, ry * 0.24, 0);
           tripo.scale.set(uScale, uScale, uScale);
-          if (f.paletteIndex > 0) {
-            tripo.traverse((n) => {
-              if (n.isMesh && n.material?.color) {
-                const m = n.material.clone();
-                m.color.lerp(new T.Color(pal.body), 0.20);
-                this.ownedMaterials.add(m);
-                n.material = m;
-              }
-            });
-          }
+          prepTripo(tripo, 0.28);
           head.add(tripo);
           rig.skull = tripo;
           rig.hasTripoHead = true;
@@ -2505,7 +2584,7 @@ export class GameRenderer3D {
     root.traverse((node) => {
       if (!node.isMesh) return;
       const rim = (m) => {
-        if (!m.isMeshStandardMaterial || m.transparent) return m;
+        if (!m.isMeshStandardMaterial || (m.transparent && !(node.userData.isTripo && m.opacity >= 0.8))) return m;
         const zone = zones.get(node) || 'body';
         let copies = edged.get(m);
         if (!copies) edged.set(m, copies = new Map());
@@ -2982,7 +3061,10 @@ export class GameRenderer3D {
   _fresnel(color, opacity, power, pattern = 0) {
     const T = this.T;
     const mat = new T.ShaderMaterial({
-      uniforms: { paint: { value: new T.Color(color) }, alpha: { value: opacity }, power: { value: power }, pattern: { value: pattern }, clock: { value: 0 } },
+      uniforms: {
+        paint: { value: new T.Color(color) }, alpha: { value: opacity }, power: { value: power },
+        pattern: { value: pattern }, clock: { value: 0 }, ripple: { value: 0 }, danger: { value: 0 },
+      },
       transparent: true, depthWrite: false, blending: T.AdditiveBlending,
       vertexShader: `
         varying vec3 n;
@@ -3001,6 +3083,8 @@ export class GameRenderer3D {
         uniform float power;
         uniform float pattern;
         uniform float clock;
+        uniform float ripple;
+        uniform float danger;
         varying vec3 n;
         varying vec3 v;
         varying vec2 tex;
@@ -3012,11 +3096,16 @@ export class GameRenderer3D {
           vec2 b = mod(p - q*0.5, q) - q*0.5;
           vec2 cell = abs(dot(a,a) < dot(b,b) ? a : b);
           float border = max(dot(cell, vec2(0.5,0.866)), cell.x);
-          float hex = smoothstep(0.445, 0.49, border) * pattern;
-          float pulse = 0.68 + 0.32*sin(tex.y*24.0 - clock*5.0);
+          float hex = smoothstep(0.44, 0.49, border) * pattern;
+          float pulse = 0.68 + 0.32*sin(tex.y*24.0 - clock*(5.0 + danger * 7.0));
+          float wavePos = 1.0 - ripple;
+          float wave = ripple * exp(-pow((tex.y - wavePos) * 7.5, 2.0));
+          float hexFlash = hex * wave * 1.45 + ripple * rim * 0.65;
+          float dangerBeat = danger * (0.5 + 0.5 * sin(clock * 16.0));
           float lightWave = pow(0.5+0.5*cos(tex.y*18.0 + cos(tex.x*6.283-clock)*2.5-clock*2.8), 7.0);
-          float amount = 0.055 + rim*0.79 + hex*0.59*pulse + (1.0-pattern)*lightWave*0.18;
-          gl_FragColor = vec4(mix(paint, vec3(1.0), rim*0.39), alpha*amount);
+          float amount = 0.06 + rim*(0.80 + dangerBeat * 0.25) + hex*(0.58 + dangerBeat * 0.35)*pulse + hexFlash + (1.0-pattern)*lightWave*0.18;
+          vec3 col = mix(paint, vec3(1.0), clamp(rim*0.36 + hexFlash * 0.55 + dangerBeat * 0.16, 0.0, 1.0));
+          gl_FragColor = vec4(col, alpha*amount);
           #include <colorspace_fragment>
         }`,
     });
@@ -3146,6 +3235,7 @@ export class GameRenderer3D {
     rig.star = this._bone(root, 'Invinci-Star');
     const shimmer = this._fresnel('#ffd75e', 0.57, 3.2);
     this._shape(rig.star, 'ball', shimmer, 0, h * 0.51, 0, rig.w * 0.64, h * 0.61, rig.w * 0.57, false);
+    rig.starFresnel = shimmer;
     rig.starShimmer = shimmer.uniforms.paint.value;
     rig.starSparks = Array.from({ length: 7 }, (_, i) => this._sparkle(rig.star,
       this._energy(0xffffff, 0.87, { side: T.DoubleSide }), i % 3 ? 5 : 8));
@@ -3174,11 +3264,14 @@ export class GameRenderer3D {
     rig.shadow = this._shape(root, 'plane', shadow, 0, 0, 0, 1, 1, 1, false);
     rig.shadow.rotation.x = -Math.PI / 2;
     rig.shadow.renderOrder = -1;
-    rig.shield = this._shape(root, 'ball', this._fresnel(playerColor(f.port), 0.8, 1.7, 1), 0, h * 0.48, 0, 1, 1, 1, false);
+    rig.shield = this._shape(root, 'ball', this._fresnel(playerColor(f.port), 0.82, 1.7, 1), 0, h * 0.48, 0, 1, 1, 1, false);
     rig.shield.visible = false;
     rig.shieldColor = new T.Color(playerColor(f.port));
-    rig.pastelShield = rig.shieldColor.clone().lerp(new T.Color('#edf0ff'), 0.61);
-    rig.shieldWarn = new T.Color('#ff4d62');
+    rig.shieldHealthy = rig.shieldColor.clone().lerp(new T.Color('#3ee8ff'), 0.42);
+    rig.pastelShield = rig.shieldHealthy.clone().lerp(new T.Color('#edf6ff'), 0.54);
+    rig.shieldAmber = new T.Color('#ffaa22');
+    rig.shieldWarn = new T.Color('#ff2442');
+    rig.shieldDangerPulse = new T.Color('#ff94a6');
     rig.shieldInk = new T.Color();
     rig.lightShieldBand = this._shape(rig.shield, 'ring', this._energy(rig.pastelShield, 0.20), 0, 0, 0, 1.01, 1.01, 0.47, false);
     rig.shine = this._bone(root, 'Reflector', 0, h * 0.49, 0);
@@ -3437,6 +3530,7 @@ export class GameRenderer3D {
     if (rig.star.visible = f.starTimer > 0) {
       const hue = phase01(tick * 0.015 + f.port * 0.18);
       rig.starShimmer.setHSL(hue, 0.92, 0.61);
+      if (rig.starFresnel) rig.starFresnel.uniforms.clock.value = tick / 60;
       rig.starSparks.forEach((spark, i) => {
         const a = i * TAU / rig.starSparks.length + tick * 0.105;
         spark.position.set(Math.cos(a) * rig.w * 0.71, h * (0.52 + 0.48 * Math.sin(a * 2)), Math.sin(a) * rig.w * 0.64);
@@ -3606,11 +3700,19 @@ export class GameRenderer3D {
     const [strikeRim, strikeCore, strikeSpark] = combatPaint[strike?.style || 'unarmed'];
     rig.heldFlash = this.allowFlash && strikeZone === 'held' ? .18 + .50 * strikePulse : 0;
     rig.heldFlashColor = strikeSpark;
-    for (const [zone, slots] of rig.flashMaterials) for (const { flash, flashColor, metal } of slots) {
+    const stageRim = showcase ? 0.24 : (this.stageLighting?.rimStrength ?? 0.22);
+    const frozen = !showcase && f.freezeFrames > 0 ? 1 : 0;
+    const starGlow = !showcase && this.allowFlash && f.starTimer > 0 ? 0.14 : 0;
+    for (const [zone, slots] of rig.flashMaterials) for (const slot of slots) {
+      const { flash, flashColor, metal, rimStrength, frost } = slot;
       metal.value = !showcase && f.metalFrames > 0 ? 1 : 0;
+      if (rimStrength) rimStrength.value = stageRim;
+      if (frost) frost.value = frozen;
       const limbPulse = this.allowFlash && zone === strikeZone && strike ? .18 + .50 * strikePulse : 0;
-      flash.value = Math.max(hitPulse, limbPulse);
-      if (flash.value) flashColor.value.set(hitPulse ? hit?.electric ? '#b7f8ff' : '#ffffff' : strikeSpark);
+      flash.value = Math.max(hitPulse, limbPulse, starGlow);
+      if (hitPulse) flashColor.value.set(hit?.electric ? '#b7f8ff' : '#ffffff');
+      else if (limbPulse) flashColor.value.set(strikeSpark);
+      else if (starGlow) flashColor.value.copy(rig.starShimmer);
     }
     const limbScale = !strike ? 1 : strikeZone === 'tool' ? mix(1, 1.12, strikePulse)
       : mix(1.14, accent || strikeZone === 'held' ? 1.56 : 1.40, strikePulse);
@@ -3652,18 +3754,31 @@ export class GameRenderer3D {
     if (rig.shield.visible = state === S.SHIELD || state === S.SHIELD_STUN) {
       const bubble = clamp((f.shieldHp ?? 60) / MELEE.SHIELD_MAX);
       const light = f.lightShielding === true;
+      const danger = bubble < 0.25, warn = !danger && bubble < 0.50;
+      const hitInfo = this.shieldHits.get(f.port);
+      const rippleAge = hitInfo ? tick - hitInfo.frame : Infinity;
+      const ripple = rippleAge >= 0 && rippleAge < 12 ? 1 - rippleAge / 12 : 0;
       const r = (f.def.stats.shieldRadius || 43) * (0.35 + 0.65 * bubble) * (f.shieldScale ?? (light ? 1.34 : 1));
-      const beat = (state === S.SHIELD_STUN ? 1.10 : 1) + Math.sin(tick * 0.27) * 0.027;
+      const beat = (state === S.SHIELD_STUN ? 1.10 : 1) + Math.sin(tick * (danger ? 0.62 : 0.27)) * (danger ? 0.055 : 0.027) + ripple * 0.06;
       rig.shield.scale.set(r * beat, r * beat * 1.02, r * beat);
-      rig.shield.rotation.y = tick * (light ? 0.024 : 0.006);
+      rig.shield.rotation.y = tick * (light ? 0.024 : danger ? 0.022 : 0.008);
       const u = rig.shield.material.uniforms;
       u.clock.value = tick / 60;
-      const tired = 1 - bubble;
-      rig.shieldInk.copy(light ? rig.pastelShield : rig.shieldColor).lerp(rig.shieldWarn, tired * (light ? 0.25 : 0.82));
+      u.ripple.value = ripple;
+      u.danger.value = danger ? 1 : 0;
+      if (danger) {
+        const pulse = 0.5 + 0.5 * Math.sin(tick * 0.62);
+        rig.shieldInk.copy(rig.shieldWarn).lerp(rig.shieldDangerPulse, pulse * 0.42);
+      } else if (warn) {
+        const tWarn = clamp((0.50 - bubble) / 0.25);
+        rig.shieldInk.copy(rig.shieldAmber).lerp(rig.shieldWarn, tWarn * 0.45);
+      } else {
+        rig.shieldInk.copy(light ? rig.pastelShield : rig.shieldHealthy);
+      }
       u.paint.value.copy(rig.shieldInk);
-      u.alpha.value = light ? 0.47 : state === S.SHIELD_STUN ? 1.0 : 0.78 + tired * 0.19;
-      u.pattern.value = light ? 0 : 1;
-      u.power.value = (light ? 3.2 : 1.8) + tired * 1.6;
+      u.alpha.value = light ? 0.52 + ripple * 0.3 : state === S.SHIELD_STUN || ripple > 0.2 ? 1.0 : danger ? 0.96 : 0.80 + (1 - bubble) * 0.16;
+      u.pattern.value = light ? (ripple > 0 ? ripple : 0) : 1;
+      u.power.value = (light ? 3.0 : 1.7) + (1 - bubble) * 1.4;
       rig.lightShieldBand.visible = light;
       rig.lightShieldBand.rotation.set(0.48 + Math.sin(tick * 0.07) * 0.46, tick * 0.039, 0.26);
     }
@@ -3723,7 +3838,8 @@ export class GameRenderer3D {
     const { w,h } = rig;
     if (f.bunnyFrames > 0 && !rig.bunny) {
       const parent = rig.head || rig.torso;
-      rig.bunny = this._bone(parent,'Bunny headband',0,rig.head ? h*.18 : h*.93,0);
+      const bunnyY = rig.head ? h * (rig.hasTripoHead ? 0.33 : 0.18) : h * (rig.hasTripoHead ? 0.97 : 0.93);
+      rig.bunny = this._bone(parent, 'Bunny headband', 0, bunnyY, 0);
       const ears = this._model('items','Item_BunnyEars');
       if (ears) {
         ears.scale.setScalar(w*.68);
@@ -3742,7 +3858,10 @@ export class GameRenderer3D {
         flatShading:true }),0,0,0,false);
       rig.ice.rotation.y = .24;
     }
-    if (rig.ice) rig.ice.visible = f.freezeFrames > 0;
+    if (rig.ice && (rig.ice.visible = f.freezeFrames > 0)) {
+      rig.ice.position.x = f.freezeFrames < 30 ? Math.sin(tick * 1.7) * 2.4 : 0;
+      rig.ice.rotation.y = 0.24 + Math.sin(tick * 0.08) * 0.06;
+    }
     const beam = f.tetherBeam;
     if (beam && !rig.tether) {
       rig.tether = this._bone(rig.root,'Grapple');
@@ -3765,20 +3884,22 @@ export class GameRenderer3D {
     const [rim, core, spark] = paint;
     rig.swingArc.visible = root.visible && Boolean(strike?.melee);
     if (rig.swingArc.visible) {
-      const reach = strike.reach * (.97 + .15 * Math.min(1, strike.age / 3));
+      const bold = strike.blade || strike.sweetspot || strike.archetype === 'heavy' || ['fire', 'electric', 'psychic', 'dark'].includes(strike.style);
+      const reach = strike.reach * (bold ? 1.08 : .98) * (1 + .15 * Math.min(1, strike.age / 3));
       const shift = strike.radial ? 0 : reach * .36;
       const phase = strike.age / Math.max(1, strike.duration);
       const kick = rig.archetype === 'spacie' && [M.FAIR, M.FTILT, M.BAIR].includes(f.moveKey);
+      const flicker = (strike.style === 'electric' || strike.style === 'fire') && tick % 2 ? 1.07 : 1;
       rig.swingArc.position.set((strike.x - Math.cos(strike.angle) * shift - root.position.x) / sc,
         (strike.y - Math.sin(strike.angle) * shift - root.position.y) / sc, 26 / sc);
-      rig.swingArc.scale.set(reach / sc, reach / sc * (kick ? .34 : 1), reach / sc);
-      rig.swingArc.rotation.set(.20, -.23, strike.angle + (strike.radial ? tick * .26 : (phase - .36) * (kick ? .28 : .72)), 'ZYX');
+      rig.swingArc.scale.set(reach * flicker / sc, reach * flicker / sc * (kick ? .36 : bold ? 1.12 : 1), reach / sc);
+      rig.swingArc.rotation.set(.20, -.23, strike.angle + (strike.radial ? tick * .26 : (phase - .36) * (kick ? .28 : bold ? .82 : .72)), 'ZYX');
       rig.swingRim.geometry = this._unit(strike.radial ? 'sweepRim' : 'swingRim');
       rig.swingCore.geometry = this._unit(strike.radial ? 'sweepCore' : 'swingCore');
       rig.swingRim.material.color.set(rim);
       rig.swingCore.material.color.set(core);
-      rig.swingRim.material.opacity = 1 - phase * .39;
-      rig.swingCore.material.opacity = .98 - phase * .51;
+      rig.swingRim.material.opacity = (bold ? 1 : .92) * (1 - phase * .36);
+      rig.swingCore.material.opacity = .99 - phase * .46;
     }
     rig.strikeGlow.visible = root.visible && Boolean(strike && rig.strikeNodes[zone]);
     if (rig.strikeGlow.visible) {
@@ -3891,22 +4012,34 @@ export class GameRenderer3D {
           a + 1.15, reach * (.50 + i * .13), (tick + i) % 3);
       }
     }
-    if (f.grounded || f.hitlag || !flying || (f.state === S.TUMBLE ? speed < 4 : speed < 12)) {
+    if (f.grounded || f.hitlag || !flying || (f.state === S.TUMBLE ? speed < 4 : speed < 11)) {
       rig.nextLaunchPuff = null;
       return;
     }
     if (tick < (rig.nextLaunchPuff ?? 0)) return;
-    rig.nextLaunchPuff = tick + (speed > 23 ? 2 : speed >= 12 ? 3 : 5);
+    const lethal = speed >= 20 || (hit?.kb || f.lastKnockback || 0) >= 145 || (f.percent >= 115 && speed >= 16);
+    rig.nextLaunchPuff = tick + (speed >= 16 ? 1 : speed >= 11 ? 2 : 5);
     const a = Math.atan2(vy, vx), nx = vx / speed, ny = vy / speed;
-    const wobble = (phase01(tick * .618 + f.port * .37) - .5) * 19;
-    const px = x - nx * 22 - ny * wobble, py = cy - ny * 22 + nx * wobble;
-    this._particle('launchPuff', px, py, -12, 0xffffff, clamp(speed * .80 + 17, 23, 60), 27,
-      -nx * 1.35, .62 - ny * 1.35, 0, tick, { angle: a, swirl: wobble * .10 });
-    if (speed >= 12) for (let i = -1; i <= 1; i++) {
-      const electric = rig.launchElectric;
-      const color = i ? electric ? '#42dfff' : '#ff783a' : electric ? '#eaffff' : '#fff0a9';
-      this._particle('speedStreak', px - nx * 24 - i * ny * 11, py - ny * 24 + i * nx * 11, 5 + Math.abs(i) * 9, color,
-        clamp(speed * (i ? 2.0 : 2.9), 38, 124), 13, -nx * 2.5, -ny * 2.5, 0, tick, { angle: a + i * .09 });
+    const puffs = speed >= 22 ? 2 : 1;
+    for (let k = 0; k < puffs; k++) {
+      const wobble = (phase01((tick + k * 0.5) * .618 + f.port * .37) - .5) * 16;
+      const back = 18 + k * 14;
+      const px = x - nx * back - ny * wobble, py = cy - ny * back + nx * wobble;
+      const smokeCol = lethal && (tick + k) % 3 === 0 ? '#ffd978'
+        : lethal && (tick + k) % 3 === 1 ? '#ff7088' : '#ffffff';
+      this._particle('launchPuff', px, py, -11 - k * 3, smokeCol, clamp(speed * .92 + 18, 22, 62) * (1 - k * 0.16),
+        lethal ? 30 : 25, -nx * 1.25, .55 - ny * 1.25, 0, tick, { angle: a, swirl: wobble * .09 });
+    }
+    if (speed >= 11 && (speed >= 18 || tick % 2 === 0)) {
+      const px = x - nx * 22, py = cy - ny * 22;
+      for (let i = -1; i <= 1; i++) {
+        const electric = rig.launchElectric;
+        const color = electric ? (i ? '#42dfff' : '#eaffff')
+          : lethal ? (i ? '#ff335c' : '#ffe170')
+          : (i ? '#ff8a48' : '#fff4c2');
+        this._particle('speedStreak', px - nx * 24 - i * ny * 11, py - ny * 24 + i * nx * 11, 5 + Math.abs(i) * 9, color,
+          clamp(speed * (i ? 2.1 : 3.0), 40, 132), 13, -nx * 2.6, -ny * 2.6, 0, tick, { angle: a + i * .09 });
+      }
     }
   }
 
@@ -3931,23 +4064,32 @@ export class GameRenderer3D {
       while (a.length >= TRAIL_HISTORY) rig.trailVectors.push(a.pop().pair);
       const pair = rig.trailVectors.pop();
       const [inner, outer] = pair;
+      const heavy = rig.archetype === 'heavy';
       if (node) {
-        node.localToWorld(outer.set(rig.w * .37, -4, 4));
-        node.localToWorld(inner.set(-rig.w * .24, 8, 3));
+        const boost = heavy ? 1.28 : 1.05;
+        node.localToWorld(outer.set(rig.w * .40 * boost, -5, 4));
+        node.localToWorld(inner.set(-rig.w * .26 * boost, 9, 3));
       } else if (itemKey && f.moveKey === M.ITEM_SWING) {
-        rig.heldSocket.localToWorld(inner.set(itemKey === 'glow_saber' ? 24 : 13, 0, 1));
-        rig.heldSocket.localToWorld(outer.set(itemKey === 'glow_saber' ? 58 : itemKey === 'plunger_bat' ? 51 : 38, 0, 1));
+        rig.heldSocket.localToWorld(inner.set(itemKey === 'glow_saber' ? 18 : 10, 0, 1));
+        rig.heldSocket.localToWorld(outer.set(itemKey === 'glow_saber' ? 62 : itemKey === 'plunger_bat' ? 54 : 42, 0, 1));
       } else {
         rig.trailBase.getWorldPosition(inner);
         rig.trailTip.getWorldPosition(outer);
-        if (!rig.hasWeapon) {
-          inner.y += 7;
-          outer.y -= 6;
+        if (rig.hasWeapon) {
+          // Expand cleanly along the blade axis so vertical & horizontal swings never pinch.
+          const dx = outer.x - inner.x, dy = outer.y - inner.y, dz = outer.z - inner.z;
+          const len = Math.hypot(dx, dy, dz) || 1;
+          const padIn = sword ? 0.32 : 0.20, padOut = sword ? 0.24 : 0.14;
+          inner.x -= dx * padIn; inner.y -= dy * padIn; inner.z -= dz * padIn;
+          outer.x += dx * padOut; outer.y += dy * padOut; outer.z += dz * padOut;
+          if (len < 16) { inner.y += 7; outer.y -= 7; }
+        } else {
+          inner.y += 9;
+          outer.y -= 8;
         }
       }
-      if (weapon) { inner.y += 8; outer.y -= 8; }
       a.unshift({ tick, pair });
-      rig.trailStyle = itemKey === 'plunger_bat' || (!itemKey && prop === 'bat') ? 'rainbow' : strike?.style || (sword ? 'blade' : 'unarmed');
+      rig.trailStyle = itemKey === 'plunger_bat' || (!itemKey && prop === 'bat') ? 'rainbow' : strike?.style || (sword ? 'blade' : heavy ? 'kinetic' : 'unarmed');
     }
     while (a.length && tick - a.at(-1).tick >= TRAIL_HISTORY) rig.trailVectors.push(a.pop().pair);
     ribbon.visible = a.length >= 2;
@@ -3960,22 +4102,34 @@ export class GameRenderer3D {
     for (let row = 0; row < rows; row++) {
       const i = Math.floor(row / TRAIL_SUBSTEPS), mid = (row % TRAIL_SUBSTEPS) / TRAIL_SUBSTEPS;
       const age = tick - (mid ? mix(a[i].tick, a[i+1].tick, mid) : a[i].tick);
+      const frac = clamp(age / TRAIL_HISTORY);
+      const tailTaper = (row / Math.max(1, rows - 1)) ** 1.55 * 0.72;
       if (rig.trailStyle === 'rainbow') { base.setHSL(phase01(row * 0.078 + tick * 0.017), 0.95, 0.59); edge.set('#ffe87a'); }
-      for (let side = 0; side < 2; side++) {
-        const b = a[i].pair[side], j = row * 2 + side;
-        if (mid) {
-          const prev = a[Math.max(0, i-1)].pair[side], c = a[i+1].pair[side], next = a[Math.min(a.length-1, i+2)].pair[side];
-          position.setXYZ(j, (catmull(prev.x,b.x,c.x,next.x,mid)-x)/s, (catmull(prev.y,b.y,c.y,next.y,mid)-y)/s,
-            (catmull(prev.z,b.z,c.z,next.z,mid)-z)/s);
-        } else position.setXYZ(j, (b.x-x)/s, (b.y-y)/s, (b.z-z)/s);
-        const paint = side ? edge : base;
-        color.setXYZW(j, paint.r, paint.g, paint.b, clamp(1 - age / TRAIL_HISTORY) ** 1.6 * (side ? 1 : .43));
-      }
+      const samp = [0, 1].map((side) => {
+        const b = a[i].pair[side];
+        if (!mid) return [(b.x - x) / s, (b.y - y) / s, (b.z - z) / s];
+        const prev = a[Math.max(0, i-1)].pair[side], c = a[i+1].pair[side], next = a[Math.min(a.length-1, i+2)].pair[side];
+        return [
+          (catmull(prev.x, b.x, c.x, next.x, mid) - x) / s,
+          (catmull(prev.y, b.y, c.y, next.y, mid) - y) / s,
+          (catmull(prev.z, b.z, c.z, next.z, mid) - z) / s,
+        ];
+      });
+      // Taper inner edge smoothly toward outer edge along the tail for crisp Melee slash arcs.
+      const inX = mix(samp[0][0], samp[1][0], tailTaper);
+      const inY = mix(samp[0][1], samp[1][1], tailTaper);
+      const inZ = mix(samp[0][2], samp[1][2], tailTaper);
+      const j0 = row * 2, j1 = j0 + 1;
+      position.setXYZ(j0, inX, inY, inZ);
+      position.setXYZ(j1, samp[1][0], samp[1][1], samp[1][2]);
+      const fade = (1 - frac) ** 1.45;
+      color.setXYZW(j0, base.r, base.g, base.b, fade * .58);
+      color.setXYZW(j1, edge.r, edge.g, edge.b, fade);
     }
     position.needsUpdate = true;
     color.needsUpdate = true;
     ribbon.geometry.setDrawRange(0, (rows - 1) * 6);
-    ribbon.material.opacity = active ? .97 : .81;
+    ribbon.material.opacity = active ? 1.0 : .84;
   }
 
   _syncMap(map, entities, make, update, matches) {
@@ -4348,7 +4502,7 @@ export class GameRenderer3D {
     const damageSmoke = kind === 'damageSmoke', smoke = kind === 'smoke' || damageSmoke || puff;
     const bolt = kind === 'lightning';
     const blending = smoke || opts.solid ? T.NormalBlending : T.AdditiveBlending;
-    const type = damageSmoke || puff ? 'plane' : kind === 'ring' || kind === 'shockwave' || kind === 'impactStar' ? kind
+    const type = damageSmoke || puff ? 'plane' : kind === 'ring' || kind === 'hexRing' || kind === 'shockwave' || kind === 'impactStar' ? kind
       : kind === 'flame' ? 'flameTongue' : kind === 'slash' ? 'swingRim'
       : bolt ? 'lightning:' + opts.variant : kind === 'beam' ? 'cone' : smoke || kind === 'core' ? 'smallBall' : 'gem';
     let effect = this.combatFxPool.get(kind)?.pop();
@@ -4366,18 +4520,21 @@ export class GameRenderer3D {
         toneMapped: false, fog: smoke, blending,
         ...(puff ? { map: getImpactPuffTexture(kind, T, this) } : damageSmoke ? { map: getDamageSmokeTexture(T, this) } : {}),
         ...(bolt ? { vertexColors: true } : {}),
-        ...(bolt || kind === 'ring' || kind === 'shockwave' || kind === 'beam' || kind === 'flame' || kind === 'slash' ? { side: T.DoubleSide } : {}) });
+        ...(bolt || kind === 'ring' || kind === 'hexRing' || kind === 'shockwave' || kind === 'beam' || kind === 'flame' || kind === 'slash' ? { side: T.DoubleSide } : {}) });
       const mesh = this._shape(this.fxGroup, type, mat, x, y, z, size, size, size, false);
       mesh.name = kind;
       effect = { mesh, kind };
     }
-    Object.assign(effect, { x, y, z, vx, vy, vz, size, life, born: frame }, opts);
+    Object.assign(effect, {
+      x, y, z, vx, vy, vz, size, life, born: frame,
+      end: undefined, angle: 0, tilt: 0, yaw: 0, roll: 0, aspect: 1, alpha: 1, swirl: 0, heavy: false, solid: false, variant: 0, length: 0,
+    }, opts);
     const { mesh } = effect;
     if (kind === 'spark') mesh.rotation.z = Math.atan2(vy, vx);
     if (kind === 'flame' || kind === 'slash') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.angle || 0);
-    if (kind === 'impactStar' || bolt || kind === 'shockwave') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.angle, 'ZYX');
-    if (kind === 'impactSpark' || kind === 'speedStreak') mesh.rotation.z = opts.angle;
-    if (kind === 'ring') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.roll || 0);
+    if (kind === 'impactStar' || bolt || kind === 'shockwave') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.angle || 0, 'ZYX');
+    if (kind === 'impactSpark' || kind === 'speedStreak') mesh.rotation.z = opts.angle || 0;
+    if (kind === 'ring' || kind === 'hexRing') mesh.rotation.set(opts.tilt || 0, opts.yaw || 0, opts.roll || 0);
     if (kind === 'beam') {
       mesh.rotation.z = opts.angle;
       const len = opts.length;
@@ -4563,22 +4720,28 @@ export class GameRenderer3D {
         { end: size * (colossal ? 1.22 : .99), angle, tilt: -.46, yaw: -.54 });
     }
     this._flash(colossal ? '#ff647c' : electric || slash ? '#a4f6ff' : '#ffca81', x, y, mix(36000, colossal ? 165000 : 122000, weight), t, colossal ? 13 : weight > .6 ? 10 : 7, true);
+    if (colossal || (e.sweetspot && kb >= 120) || (e.trueSpike && kb >= 100)) {
+      this.killBurst = {
+        x, y, frame: t, duration: colossal ? 16 : 12,
+        color: colossal ? '#ff3b5c' : rim, crimson: colossal || Boolean(e.trueSpike), angle,
+      };
+    }
     if ((colossal || kb >= 105) && (e.sweetspot || heavy) && (this.cameraKick?.frame !== t || kb >= this.cameraKick.kb)) {
       const power = clamp((kb - 95) / 115);
       this.cameraKick = { frame: t, kb, x: Math.cos(angle), y: Math.sin(angle), zoom: mix(.042, colossal ? .076 : .058, power), shake: mix(5, colossal ? 12 : 9, power) };
     }
   }
 
-  _bounceDust(port, x, y, frame, wallDir = 0) {
+  _bounceDust(port, x, y, frame, wallDir = 0, intensity = 1) {
     if (port != null) {
       if (this.dustFrames.get(port) === frame) return;
       this.dustFrames.set(port, frame);
     }
     for (let i = 0; i < 7; i++) {
       const angle = wallDir ? (wallDir < 0 ? Math.PI : 0) + (i - 3) * .29 : .15 + i * (Math.PI - .30) / 6;
-      const speed = 2.3 + Math.abs(i - 3) * .73;
+      const speed = (2.3 + Math.abs(i - 3) * .73) * intensity;
       this._particle('dustPuff', x + (wallDir ? 0 : (i - 3) * 3), y + (wallDir ? (i - 3) * 4 : 4), 9 + i * 2,
-        0xffffff, 15 + i % 3 * 4, 13 + i % 4 * 2, Math.cos(angle) * speed, Math.sin(angle) * speed, 0, frame,
+        0xffffff, (15 + i % 3 * 4) * intensity, 13 + i % 4 * 2, Math.cos(angle) * speed, Math.sin(angle) * speed, 0, frame,
         { angle, swirl: (i - 3) * .35 });
     }
   }
@@ -4674,11 +4837,40 @@ export class GameRenderer3D {
       this._startFinish(e, match);
       return;
     }
+    if (e.type === 'shieldHit') {
+      const f = match.fighters?.find((fighter) => fighter.port === e.port);
+      const ratio = clamp((f?.shieldHp ?? MELEE.SHIELD_MAX) / MELEE.SHIELD_MAX);
+      const cy = y + (f?.def.stats.height || 72) * (f?.scale || 1) * 0.48;
+      const col = ratio < 0.25 ? '#ff2a48' : ratio < 0.5 ? '#ffaa22' : '#4ce8ff';
+      if (e.port != null) this.shieldHits.set(e.port, { frame: t, heavy: !!e.heavy, power: false });
+      this._particle('hexRing', x, cy, 26, col, 18, 13, 0, 0, 0, t, { end: e.heavy ? 84 : 66, yaw: 0.24, roll: t * 0.1 });
+      this._particle('hexRing', x, cy, 29, '#ffffff', 11, 9, 0, 0, 0, t, { end: e.heavy ? 54 : 42, tilt: 0.35, yaw: -0.22 });
+      const sparks = e.heavy ? 9 : 5;
+      for (let i = 0; i < sparks; i++) {
+        const a = i * TAU / sparks + 0.18;
+        this._particle('spark', x + Math.cos(a) * 16, cy + Math.sin(a) * 16, 22, i % 2 ? '#ffffff' : col,
+          e.heavy ? 4.5 : 3.5, 11, Math.cos(a) * (e.heavy ? 6 : 4), Math.sin(a) * (e.heavy ? 6 : 4), 0, t);
+      }
+      this._flash(col, x, cy, e.heavy ? 72000 : 42000, t, 7, true);
+      return;
+    }
+    if (e.type === 'bounce') {
+      const wallDir = e.wall ? Math.sign(e.dir || e.vx || 1) : 0;
+      const intensity = clamp((e.speed || e.impactSpeed || 12) / 16, 0.75, 1.8);
+      this._bounceDust(e.port, x, y, t, wallDir, intensity);
+      this._particle('shockwave', x, y + (wallDir ? 0 : 3), wallDir ? 16 : 6, '#ffe8b8',
+        12 * intensity, 13, 0, 0, 0, t, { end: 60 * intensity, tilt: wallDir ? 0.15 : Math.PI / 2, yaw: wallDir ? 0.45 * wallDir : 0 });
+      this._particle('ring', x, y + (wallDir ? 0 : 4), wallDir ? 14 : 8, '#ffffff',
+        8 * intensity, 10, 0, 0, 0, t, { end: 44 * intensity, tilt: wallDir ? 0.2 : Math.PI / 2 });
+      return;
+    }
     if (e.type === 'powershield') {
       const f = match.fighters.find((fighter) => fighter.port === e.port);
       const cy = y + (f?.def.stats.height || 75) * (f?.scale || 1) * 0.48;
-      this._particle('ring', x, cy, 28, '#7cfaff', 22, 19, 0, 0, 0, t, { end: 110, yaw: 0.39 });
-      this._particle('ring', x, cy, 21, '#efffff', 22, 12, 0, 0, 0, t, { end: 78, tilt: 0.76, yaw: -0.28 });
+      if (e.port != null) this.shieldHits.set(e.port, { frame: t, heavy: true, power: true });
+      this._particle('hexRing', x, cy, 30, '#4ef8ff', 22, 18, 0, 0, 0, t, { end: 112, yaw: 0.32 });
+      this._particle('hexRing', x, cy, 24, '#ffffff', 16, 12, 0, 0, 0, t, { end: 78, tilt: 0.65, yaw: -0.28, roll: Math.PI / 6 });
+      this._particle('ring', x, cy, 21, '#7cfaff', 20, 15, 0, 0, 0, t, { end: 98, yaw: -0.2 });
       this._particle('core', x, cy, 18, '#d9ffff', 28, 6, 0, 0, 0, t);
       for (let i = 0; i < 12; i++) {
         const a = i * TAU / 12;
@@ -4779,8 +4971,17 @@ export class GameRenderer3D {
         return;
       }
     }
-    if ((e.type === 'land' && (e.speed || 0) > 8) || (e.type === 'jump' && e.doubleJump)) {
-      this._particle('ring', x, y + 2, 2, '#e4faff', 6, 12, 0, 0, 0, t, { end: 39, tilt: Math.PI / 2 });
+    if (e.type === 'dash') {
+      const dir = e.dir || 1;
+      for (let i = 0; i < 4; i++) {
+        this._particle('dustPuff', x - dir * (4 + i * 5), y + 4, 2 + i * 2, '#eef8ff',
+          10 + i * 2.5, 11 + i * 2, -dir * (2.6 + i * 0.9), 0.8 + i * 0.3, 0, t, { angle: dir > 0 ? Math.PI : 0, swirl: -dir * 0.28 });
+      }
+      return;
+    }
+    if ((e.type === 'land' && (e.speed || 0) > 6) || (e.type === 'jump' && e.doubleJump)) {
+      const wScale = e.type === 'land' ? clamp((e.weight || 100) / 95, 0.72, 1.45) : 1;
+      this._particle('ring', x, y + 2, 2, '#e4faff', 6 * wScale, 12, 0, 0, 0, t, { end: 39 * wScale, tilt: Math.PI / 2 });
     }
     if (burst.includes(e.type)) {
       const explosion = e.type === 'explosion';
@@ -4909,9 +5110,9 @@ export class GameRenderer3D {
       } else if (p.kind === 'beam') {
         mesh.scale.set(size * Math.sqrt(left), p.length * (0.72 + left * 0.28), size * Math.sqrt(left));
         mesh.material.opacity = 0.66 * left;
-      } else if (p.kind === 'ring' || p.kind === 'shockwave') {
+      } else if (p.kind === 'ring' || p.kind === 'hexRing' || p.kind === 'shockwave') {
         mesh.scale.setScalar(mix(size, p.end || size * 5, 1 - left ** 2.1));
-        mesh.material.opacity = left ** 1.5 * (p.kind === 'shockwave' ? .98 : .83);
+        mesh.material.opacity = left ** 1.5 * (p.kind === 'shockwave' ? .98 : p.kind === 'hexRing' ? .95 : .83);
       } else {
         const advance = (1 - 0.94 ** elapsed) / 0.06;
         const gravity = p.kind === 'spark' ? .075 : p.kind === 'impactSpark' ? .030 : 0;
@@ -4995,9 +5196,10 @@ export class GameRenderer3D {
         this.sun.color.lerp(this.formTint, 0.22);
       }
     }
-    this.hemi.intensity = victory ? 1.84 : 2 - p * 0.20;
-    this.sun.intensity = victory ? 1.95 : 2.75 + p * 0.18;
-    this.rim.intensity = victory ? 2.9 : 2.40 + p * 0.26;
+    this.hemi.intensity = victory ? 1.84 : (palette.hemiIntensity ?? 2.0) - p * 0.20;
+    this.sun.intensity = victory ? 1.95 : (palette.sunIntensity ?? 2.65) + p * 0.18;
+    this.rim.intensity = victory ? 2.9 : (palette.rimIntensity ?? 2.35) + p * 0.26;
+    this.fill.intensity = victory ? 0.68 : (palette.fillIntensity ?? 0.72);
     if (mode !== 'battle') this.impact.intensity = 0;
   }
 
@@ -5460,6 +5662,59 @@ export class GameRenderer3D {
     ctx.restore();
   }
 
+  _drawKillConfirmBurst(ctx, match, w, h) {
+    const b = this.killBurst;
+    if (!b) return;
+    const age = match.frame - b.frame;
+    if (age < 0 || age >= b.duration) {
+      if (age >= b.duration) this.killBurst = null;
+      return;
+    }
+    // Defer to full dramaticFinish burst when active.
+    if (this._finishAge(match) < (this.finish?.duration ?? 0)) return;
+    const p = this.projectToScreen(b.x, b.y, 20);
+    const x = clamp(p.sx, w * 0.12, w * 0.88), y = clamp(p.sy, h * 0.14, h * 0.86);
+    const t = clamp(age / b.duration);
+    const alpha = (1 - t * t);
+    const radius = Math.hypot(w, h);
+    ctx.save();
+    if (t < 0.36) {
+      const flashA = (1 - t / 0.36) * (b.crimson ? 0.30 : 0.22);
+      const vg = ctx.createRadialGradient(x, y, h * 0.15, x, y, radius * 0.72);
+      vg.addColorStop(0, 'rgba(255,255,255,0)');
+      vg.addColorStop(0.58, b.crimson ? `rgba(255,34,76,${flashA})` : `rgba(255,212,68,${flashA})`);
+      vg.addColorStop(1, b.crimson ? `rgba(92,6,28,${flashA * 1.55})` : `rgba(38,24,78,${flashA * 1.4})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
+    }
+    const rays = 32;
+    for (let i = 0; i < rays; i++) {
+      const a = (i + 0.32 * Math.sin(i * 13.7)) * TAU / rays + t * 0.04;
+      const start = h * (0.24 + 0.22 * phase01(i * 0.618) + t * 0.16);
+      const end = radius * (0.66 + 0.18 * phase01(i * 0.729));
+      const width = (i % 3 === 0 ? 0.015 : 0.006) * (1 - t * 0.55);
+      const ca = Math.cos(a), sa = Math.sin(a);
+      ctx.globalAlpha = alpha * (i % 3 === 0 ? 0.80 : 0.55);
+      ctx.fillStyle = i % 4 === 0 ? '#12081c' : i % 3 === 0 ? '#ffdf6b' : b.crimson ? '#ff2e55' : b.color;
+      ctx.beginPath();
+      ctx.moveTo(x + ca * start, y + sa * start);
+      ctx.lineTo(x + (ca - sa * width) * end, y + (sa + ca * width) * end);
+      ctx.lineTo(x + (ca + sa * width) * end, y + (sa - ca * width) * end);
+      ctx.closePath();
+      ctx.fill();
+    }
+    if (t < 0.44) {
+      const k = 1 - t / 0.44;
+      ctx.globalAlpha = k * 0.92;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 6 * k;
+      ctx.beginPath();
+      ctx.arc(x, y, 24 + t * 220, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   _drawArcadeBanner(ctx, text, x, y, age, life, finishing, w, h) {
     const size = clamp(w * (finishing ? 0.039 : 0.025), finishing ? 25 : 15, finishing ? 47 : 28);
     const progress = clamp(age / life), pop = 0.70 + 0.41 * ease(age / 5) - 0.11 * ease((age - 5) / 7);
@@ -5515,6 +5770,7 @@ export class GameRenderer3D {
       if (mode !== 'battle') return;
       if (this.allowFlash && options.shakeEnabled !== false) {
         this._drawFinishBurst(ctx, match, w, h);
+        this._drawKillConfirmBurst(ctx, match, w, h);
         if (match.screenFlash > 0.01) {
           ctx.fillStyle = `rgba(255,245,225,${clamp(match.screenFlash * (this.portCount >= 4 ? .023 : .035), 0, 0.18)})`;
           ctx.fillRect(0, 0, w, h);
@@ -5545,25 +5801,43 @@ export class GameRenderer3D {
             corners.every((p) => p.sy < 0) || corners.every((p) => p.sy > h);
         }
         if (offscreen) {
-          const x = clamp(eye.sx, 28, w - 28), y = clamp(eye.sy, 28, h - 28);
+          const x = clamp(eye.sx, 36, w - 36), y = clamp(eye.sy, 36, h - 36);
           const angle = Math.atan2(eye.sy - y, eye.sx - x);
-          ctx.lineWidth = 2.5;
-          ctx.strokeStyle = col; ctx.fillStyle = '#181126e8';
-          ctx.beginPath(); ctx.arc(x, y, 19, 0, TAU); ctx.fill(); ctx.stroke();
+          const pct = Math.floor(f.percent || 0);
+          const pctCol = pct >= 160 ? '#ff425e' : pct >= 110 ? '#ff9642' : pct >= 65 ? '#ffe066' : '#ffffff';
+          const urgent = isHurt(f) && pct >= 90;
+          const ringCol = urgent && Math.floor(match.frame / 4) % 2 === 0 ? '#ffe066' : col;
+          ctx.save();
+          // Glowing directional pointer arrow
+          ctx.shadowColor = ringCol; ctx.shadowBlur = 10;
+          const tipX = x + Math.cos(angle) * 33, tipY = y + Math.sin(angle) * 33;
+          const lX = x + Math.cos(angle - 0.34) * 22, lY = y + Math.sin(angle - 0.34) * 22;
+          const rX = x + Math.cos(angle + 0.34) * 22, rY = y + Math.sin(angle + 0.34) * 22;
+          ctx.beginPath(); ctx.moveTo(tipX, tipY); ctx.lineTo(lX, lY); ctx.lineTo(rX, rY); ctx.closePath();
+          ctx.lineWidth = 3; ctx.strokeStyle = '#120c22'; ctx.stroke();
+          ctx.fillStyle = ringCol; ctx.fill();
+          // Magnifying glass frame
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = ringCol; ctx.fillStyle = '#140f24ee';
+          ctx.beginPath(); ctx.arc(x, y, 22, 0, TAU); ctx.fill(); ctx.stroke();
+          ctx.shadowBlur = 0;
           const face = getFaceTexture(f.def, f.palette || f.def.palettes[0], isHurt(f) ? 'hurt' : 'normal', this.T, this).image;
           ctx.save();
-          ctx.clip();
+          ctx.beginPath(); ctx.arc(x, y, 20.2, 0, TAU); ctx.clip();
           ctx.fillStyle = f.palette?.skin || '#ecd9d4';
-          ctx.fillRect(x - 17, y - 21, 34, 30);
-          ctx.drawImage(face, x - 19, y - 23, 38, 38);
+          ctx.fillRect(x - 19, y - 22, 38, 30);
+          ctx.drawImage(face, x - 20, y - 24, 40, 38);
+          // Compact dark lower band for crisp live % readability
+          ctx.fillStyle = 'rgba(12, 9, 26, 0.84)';
+          ctx.fillRect(x - 22, y + 4, 44, 18);
           ctx.restore();
-          ctx.fillStyle = col;
-          ctx.beginPath();
-          ctx.moveTo(x + Math.cos(angle) * 25, y + Math.sin(angle) * 25);
-          ctx.lineTo(x + Math.cos(angle - 0.23) * 18, y + Math.sin(angle - 0.23) * 18);
-          ctx.lineTo(x + Math.cos(angle + 0.23) * 18, y + Math.sin(angle + 0.23) * 18);
-          ctx.closePath(); ctx.fill();
-          label(f.def.id === 'sagging-bag' ? 'BAG' : `P${f.port + 1}`, x, y + 11, '#ffffff', 8);
+          // Specular glass rim
+          ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.arc(x, y, 18.5, Math.PI * 1.1, Math.PI * 1.68); ctx.stroke();
+          // Compact P# tag at top rim & bold live % inside glass
+          label(f.def.id === 'sagging-bag' ? 'BAG' : `P${f.port + 1}`, x, y - 16, ringCol, 8.5);
+          label(`${pct}%`, x, y + 12, pctCol, 11);
+          ctx.restore();
         } else {
           ctx.font = '900 12px system-ui, sans-serif';
           const width = Math.max(10, Math.min(w - 10, ctx.measureText(name).width));

@@ -306,10 +306,13 @@ export const ITEM_DEF = {
     swingDamage: 6,
     swingBkb: 18,
     swingKbg: 22,
+    swingAngle: 36,
     shieldDamage: 34,
     swingReach: 64,
     smashReach: 74,
     throwDamage: 8,
+    throwBkb: 28,
+    throwKbg: 54,
     weight: 8,
     despawnFrames: 840,
   },
@@ -326,6 +329,7 @@ export const ITEM_DEF = {
     swingDamage: 14,
     swingBkb: 46,
     swingKbg: 92,
+    swingAngle: 40,
     swingReach: 76,
     smashReach: 88,
     shootsStar: true,
@@ -335,6 +339,8 @@ export const ITEM_DEF = {
     shotSpeed: 18,
     projStyle: 'star',
     throwDamage: 14,
+    throwBkb: 44,
+    throwKbg: 84,
     weight: 7,
     despawnFrames: 900,
   },
@@ -431,5 +437,5 @@ export function pickRandomItemDef(rng = Math.random, excludeContainers = false) 
     r -= (item.weight || 5);
     if (r <= 0) return item;
   }
-  return pool[0];
+  return pool[pool.length - 1];
 }
