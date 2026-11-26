@@ -1021,9 +1021,11 @@ export class GameRenderer3D {
         this.terrainAnimations.push({ type: 'jet', node: plume, length: plume.scale.y, phase: z });
         blob('smallBall', lamp, x * 0.87, -h * 0.32, z, 9, 5, 11, false);
       }
-      const canopyX = x * (racer ? 0.48 : 0.37);
-      blob('ball', gunmetal, canopyX, -h * 0.30, d * 0.90, x * 0.38, h * 0.21, 16);
-      blob('ball', glass, canopyX + 3, -h * 0.29, d * 0.99, x * 0.29, h * 0.15, 12, false);
+      const canopyX = x * (racer ? 0.22 : 0.08);
+      const canopyW = Math.min(racer ? 34 : 26, x * 0.07);
+      const canopyY = -h * 0.06;
+      blob('ball', gunmetal, canopyX, canopyY, d * 0.42, canopyW * 1.15, h * 0.12, 9);
+      blob('ball', glass, canopyX + 1, canopyY + h * 0.03, d * 0.48, canopyW, h * 0.07, 7, false);
       if (racer) {
         const white = glow('#eff4ff', 0.22);
         for (const z of [-16, -3]) band(white, 0.6, z, s.w * 0.86, 0.8, 5);
@@ -1201,6 +1203,9 @@ export class GameRenderer3D {
     }
     if (s.ledges && !s.walkOff) for (const side of [-1, 1]) {
       blob('gem', trim, side * (x - 10), -5, depth * 0.72, 5, 4, 6, false);
+    }
+    if (s.w < 1800 && shape !== 'cloud' && shape !== 'balloon') {
+      band(glow(pal.deckTrim || pal.accent, 0.62), -1.1, depth + 1.6, Math.max(16, s.w - 10), 1.5, 2.1);
     }
     return root;
   }
@@ -1567,24 +1572,96 @@ export class GameRenderer3D {
         this.stageAnimations.push({ type: 'streak', node: band, i, y: band.position.y });
       }
     }
+    this._dressAtmosphere(backdrop, stage, style);
+  }
+
+  _dressAtmosphere(backdrop, stage, style) {
+    const { theme, palette: pal, id } = stage;
+    const rim = this._energy(pal.accent || '#ffffff', 0.42);
+    if (theme === 'cosmos') {
+      this._ambientPoints(240, 'drift', '#d5e7ff', 36, backdrop);
+      for (const side of [-1, 1]) {
+        const spire = this._shape(backdrop, 'gem', this._mat(pal.accent, { emissive: pal.accent, emissiveIntensity: 0.35, roughness: 0.4 }),
+          side * 860, 210, -1280, 28, 180, 22, false);
+        spire.rotation.z = side * -0.12;
+        const halo = this._shape(backdrop, 'ring', rim, side * 860, 310, -1280, 70, 70, 16, false);
+        halo.rotation.x = 1.05;
+      }
+    }
+    if (theme === 'twilight') {
+      this._ambientPoints(160, 'drift', '#ffc49a', 28, backdrop);
+      for (const side of [-1, 1]) {
+        this._shape(backdrop, 'cone', this._mat('#6d4a86', { emissive: '#c084fc', emissiveIntensity: 0.25, roughness: 0.6 }),
+          side * 720, 80, -980, 46, 220, 46, false);
+      }
+    }
+    if (theme === 'fountain') {
+      this._ambientPoints(90, 'drift', '#b7f6ff', 32, backdrop);
+      for (const side of [-1, 1]) {
+        const jet = this._shape(backdrop, 'cone', this._energy('#d9fbff', 0.5), side * 260, 30, -540, 12, 110, 12, false);
+        this.stageAnimations.push({ type: 'torch', node: jet, a: 110, i: side + 3 });
+      }
+    }
+    if (theme === 'suburb') {
+      this._ambientPoints(140, 'drift', '#fff1c9', 24, backdrop);
+      const roof = this._mat('#d4564a', { roughness: 0.7 });
+      const wall = this._mat('#f3e6cf', { roughness: 0.8 });
+      for (const side of [-1, 1]) {
+        this._shape(backdrop, 'box', wall, side * 780, 70, -860, 90, 120, 70, false);
+        this._shape(backdrop, 'cone', roof, side * 780, 150, -860, 110, 50, 80, false);
+        this._shape(backdrop, 'box', rim, side * 780, 78, -820, 16, 22, 4, false);
+      }
+    }
+    if (theme === 'craft') {
+      this._ambientPoints(180, 'drift', '#ffd7a1', 26, backdrop);
+      for (let i = 0; i < 4; i++) {
+        const block = this._shape(backdrop, 'box', this._mat(i % 2 ? '#e7c07b' : '#8d5a3c', { roughness: 0.86 }),
+          (i - 1.5) * 220, 40 + (i % 2) * 30, -720 - i * 40, 70, 36, 70, false);
+        block.rotation.y = i * 0.4;
+      }
+    }
+    if (id === 'critter-arena') {
+      this._shape(backdrop, 'box', this._mat('#1a2838', { emissive: pal.accent, emissiveIntensity: 0.22, roughness: 0.45 }),
+        0, 250, -980, 420, 8, 10, false);
+    }
+    if (theme === 'stadium' && id !== 'critter-arena') {
+      this._ambientPoints(200, 'drift', '#d7ecff', 20, backdrop);
+      for (const side of [-1, 1]) {
+        this._shape(backdrop, 'box', this._mat('#243044', { emissive: pal.accent, emissiveIntensity: 0.18, roughness: 0.5 }),
+          side * 640, 160, -900, 28, 220, 18, false);
+      }
+    }
+    if (theme === 'acid') {
+      this._ambientPoints(40, 'acid', '#b6ff4a', 40, backdrop);
+      const vat = this._mat('#163018', { emissive: '#7CFF3A', emissiveIntensity: 0.2, roughness: 0.45 });
+      for (const side of [-1, 1]) this._shape(backdrop, 'box', vat, side * 520, 20, -640, 80, 70, 40, false);
+    }
+    if (theme === 'lcd' || style === 'lcd') {
+      const bezel = this._mat('#9aa882', { emissive: '#d6ff9a', emissiveIntensity: 0.35, roughness: 0.4 });
+      for (let i = 0; i < 6; i++) {
+        const bar = this._shape(backdrop, 'box', bezel, (i - 2.5) * 180, 40 + (i % 3) * 70, -520, 8, 160, 6, false);
+        this.stageAnimations.push({ type: 'streak', node: bar, i: i + 8, y: bar.position.y });
+      }
+      this._ambientPoints(80, 'drift', '#d6ff9a', 18, backdrop);
+    }
   }
 
   _ambientPoints(y, mode, tint, count, parent = this.stageGroup, animations = this.stageAnimations) {
     const T = this.T, geometry = new T.BufferGeometry();
-    const coords = [], seeds = [], crowd = mode === 'crowd', acid = mode === 'acid';
+    const coords = [], seeds = [], crowd = mode === 'crowd', acid = mode === 'acid', drift = mode === 'drift';
     for (let i = 0; i < count; i++) {
       const a = phase01(i * 0.61803399 + 0.17), b = phase01(i * 0.573743 + 0.24);
       const fountain = (i % 2 ? -1 : 1) * (i % 3 ? 443 : 194);
-      coords.push(crowd ? (a - 0.5) * 2780 : acid ? (a - 0.5) * 1660 : fountain + (a - 0.5) * 168,
-        crowd ? Math.floor(b * 6) * 14 + i % 3 * 2 : 0,
-        crowd ? -352 - Math.floor(b * 6) * 21 : -150 - b * (acid ? 460 : 290));
+      coords.push(crowd ? (a - 0.5) * 2780 : drift ? (a - 0.5) * 2100 : acid ? (a - 0.5) * 1660 : fountain + (a - 0.5) * 168,
+        crowd ? Math.floor(b * 6) * 14 + i % 3 * 2 : drift ? (b - 0.25) * 260 : 0,
+        crowd ? -352 - Math.floor(b * 6) * 21 : drift ? -380 - b * 820 : -150 - b * (acid ? 460 : 290));
       seeds.push(a, b, phase01(i * 0.763291));
     }
     geometry.setAttribute('position', new T.Float32BufferAttribute(coords, 3));
     geometry.setAttribute('seed', new T.Float32BufferAttribute(seeds, 3));
     const material = new T.ShaderMaterial({
       uniforms: { clock: { value: 0 }, viewport: { value: this.height }, tint: { value: new T.Color(tint) },
-        mode: { value: crowd ? 0 : acid ? 1 : 2 } },
+        mode: { value: crowd ? 0 : acid ? 1 : drift ? 3 : 2 } },
       transparent: true, depthWrite: false, blending: T.AdditiveBlending,
       vertexShader: `
         uniform float clock, viewport, mode;
@@ -1597,6 +1674,11 @@ export class GameRenderer3D {
           hue = seed.z;
           if (mode == 0.0) {
             brightness = 0.13+0.71*pow(0.5+0.5*sin(clock*3.0+seed.z*71.0),8.0);
+          } else if (mode == 3.0) {
+            p.x += sin(clock*0.35+seed.x*12.0)*18.0;
+            p.y += sin(clock*0.22+seed.y*9.0)*14.0;
+            size *= 1.35;
+            brightness = 0.28+0.62*pow(0.5+0.5*sin(clock*2.2+seed.z*40.0),3.0);
           } else {
             p.x += sin(age*5.0+seed.x*19.0)*(mode==1.0 ? 18.0 : 24.0);
             p.y += age*(mode==1.0 ? 123.0+seed.y*97.0 : 105.0+seed.y*147.0);
@@ -1615,7 +1697,7 @@ export class GameRenderer3D {
           vec2 p = gl_PointCoord*2.0-1.0;
           float r = length(p);
           float core = mode == 1.0 ? 1.0-smoothstep(0.02,0.31,abs(r-0.63)) : 1.0-smoothstep(0.05,0.89,r);
-          vec3 color = mix(tint, mode == 1.0 ? vec3(0.87,1.0,0.31) : vec3(1.0,0.65,0.77), hue*0.47);
+          vec3 color = mode == 3.0 ? tint : mix(tint, mode == 1.0 ? vec3(0.87,1.0,0.31) : vec3(1.0,0.65,0.77), hue*0.47);
           gl_FragColor = vec4(color, brightness*core);
           #include <colorspace_fragment>
         }`,
@@ -1786,7 +1868,7 @@ export class GameRenderer3D {
           + mix(vec3(0.09, 0.22, 0.20), vec3(0.32, 0.09, 0.025), displayAlert) * sweep;
       `);
     };
-    this._shape(mount, 'plane', m, 0, scale * 0.8, scale * 0.439, scale * 3.7, scale * 1.80, 1, false);
+    this._shape(mount, 'plane', m, 0, scale * 0.36, scale * 0.36, scale * 2.05, scale * 0.78, 1, false);
     this.stageAnimations.push({ type: 'jumbotron', clock, alert, live, material: m });
   }
 
@@ -2120,11 +2202,11 @@ export class GameRenderer3D {
         const wave = Math.sin(tick * 0.15 - t * 4.5 + u * 2.1 + offset);
         const fold = Math.cos(u * 6 + t * 2.3) * (0.8 + t * 1.5);
         const drag = Math.max(-0.24, air * 0.67 + fall * 0.35);
-        const x = apron ? 1.7 + Math.sin(t * Math.PI) * 2.7 + fold * t
+        const x = apron ? 0.32 + Math.sin(t * Math.PI) * 0.42 + fold * t * 0.22
           : -height * (scarf ? 0.83 + drag * 0.62 : 0.12 + drag) * t - wave * t * (1.4 + Math.abs(air) * 2.8) - fold;
         const y = -height * t * (scarf ? 0.30 - drag * 0.86 : 1 - Math.max(0, drag) * 0.40)
           + t * t * (4 * fall + wave * (scarf ? 4.5 : 2.6) + u * u * 2.5);
-        const z = width * (offset + u * slice * (scarf ? 1 - t * 0.44 : 0.78 + 0.35 * t));
+        const z = width * (offset + u * slice * (scarf ? 1 - t * 0.44 : apron ? 0.46 : 0.78 + 0.35 * t));
         position.setXYZ(j, x, y, z);
       }
       position.needsUpdate = true;
@@ -2146,13 +2228,15 @@ export class GameRenderer3D {
     const rig = { root, impactAxis, impactRest, tumble, turn, pelvis, torso, pose: { ...neutral }, stride: 0, h, w, pal, archetype,
       yaw: f.facing < 0 ? -Math.PI + STANCE : -STANCE, history: [], trailVectors: [],
       air: 0, fall: 0 };
+    const id = def.id;
     const fur = ['fox', 'bird', 'rodent', 'tinyRodent', 'dino', 'tallCat'].includes(sil);
     const armor = sil === 'armor' || style.prop === 'shellSpikes', isFlat = sil === 'flat2d';
     const fabric = getOutfitTextures(def, pal, T, this);
     const body = this._mat(0xffffff, { ...fabric, bumpScale: 1.30, roughness: armor ? 0.42 : 0.69, metalness: armor ? 0.37 : 0.06 });
-    const main = this._mat(pal.body, { roughness: armor ? 0.41 : 0.61, metalness: armor ? 0.30 : 0.03 });
-    const pants = this._mat(pal.outfit, { bumpMap: fabric.bumpMap, bumpScale: 0.45, roughness: armor ? 0.45 : 0.64, metalness: armor ? 0.28 : 0.04 });
-    const skin = this._mat(fur ? pal.body : pal.skin, { roughness: 0.62 });
+    const main = this._mat(id === 'wonky-kong' ? '#2c3348' : id === 'shriek' ? '#1c2344' : pal.body, { roughness: armor ? 0.41 : 0.61, metalness: armor ? 0.30 : 0.03 });
+    const pants = this._mat(id === 'wonky-kong' ? '#232838' : id === 'shriek' ? '#161a30' : pal.outfit, { bumpMap: fabric.bumpMap, bumpScale: 0.45, roughness: armor ? 0.45 : 0.64, metalness: armor ? 0.28 : 0.04 });
+    const skinTint = id === 'wonky-kong' ? '#3a4258' : id === 'shriek' ? '#242a48' : id === 'sourzer' ? '#e7a04a' : (fur ? pal.body : pal.skin);
+    const skin = this._mat(skinTint, { roughness: 0.62 });
     const gold = this._mat('#e7aa4c', { roughness: 0.32, metalness: 0.44 });
     const detail = this._mat(pal.accent, { emissive: pal.accent, emissiveIntensity: 0.13, metalness: 0.17, roughness: 0.43 });
     const dark = this._mat('#20192b', { roughness: 0.65 });
@@ -2175,8 +2259,9 @@ export class GameRenderer3D {
         this._shape(pelvis, 'ball', pants, 0, -h * 0.020, 0, chestRx * 0.87, h * 0.104, breadth * 0.94);
         this._shape(torso, 'ball', detail, chestRx * 0.81, chestSz * 0.14, 0, 2.2, h * 0.039, breadth * 0.27);
       }
-      const rx = puff ? chestRx : Math.min(h * (fur || sil === 'kid' ? 0.255 : 0.23), w * 0.51);
-      const ry = puff ? chestSz * 0.48 : h * (sil === 'stout' ? 0.225 : 0.212);
+      const sleek = id === 'screech' ? 0.78 : id === 'squeegi' ? 0.86 : (!puff && !fur ? 0.89 : fur ? 0.94 : 1);
+      const rx = puff ? chestRx : Math.min(h * (fur || sil === 'kid' ? 0.255 : 0.23) * sleek, w * 0.51);
+      const ry = puff ? chestSz * 0.48 : h * (sil === 'stout' ? 0.225 : 0.212) * sleek;
       const rz = puff ? breadth : rx * (isFlat ? 0.43 : 1.09);
       const jaw = puff || fur || armor ? 0 : sil === 'stout' ? 0.10 : 0.25;
       const neckY = puff ? chestSz * 0.49 : chestSz * (sil === 'dress' ? 0.92 : 0.93);
@@ -2187,8 +2272,8 @@ export class GameRenderer3D {
         const neckBand = this._shape(torso, 'ball', armor || style.prop === 'scarf' ? detail : pants, 0, neckY + 1, 0, rx * 0.66, h * 0.065, rz * 0.70);
         neckBand.rotation.z = 0.17;
         this._sculptHead(head, style.hat === 'visorHelm' ? pants : skin, rx, ry, rz, jaw);
-        if (!isFlat && !fur && !armor) for (const s of [-1, 1]) {
-          this._shape(head, 'smallBall', skin, -rx * 0.14, -ry * 0.06, s * rz * 0.92, rx * 0.32, ry * 0.39, rz * 0.21);
+        if (!isFlat && !fur && !armor && id !== 'wonky-kong') for (const s of [-1, 1]) {
+          this._shape(head, 'smallBall', skin, -rx * 0.14, -ry * 0.06, s * rz * 0.92, rx * 0.24, ry * 0.30, rz * 0.16);
         }
       }
       const mantle = { main, pants, detail, dark, gold, skin, light };
@@ -2237,24 +2322,34 @@ export class GameRenderer3D {
           }
         }
       }
-      if (style.cape || style.prop === 'scarf') {
-        const scarf = style.prop === 'scarf', apron = style.cape === 'apron';
-        const cape = this._bone(torso, 'cloth', chestRx * (apron ? 1.02 : -0.86),
-          scarf ? neckY : apron ? chestSz * 0.59 : shoulders, scarf ? breadth * 0.70 : 0);
-        const cloth = style.cape === 'labcoat' ? '#edf2ff' : apron || style.cape === 'nda' ? pal.outfit : pal.accent;
-        rig.cloth = this._makeCloth(cape, style, chestSz * (apron ? 0.94 : scarf ? 1.19 : 1.47),
-          breadth * (scarf ? 0.32 : 0.91), cloth, pal.outfit);
+      if ((style.cape && id !== 'bario') || style.prop === 'scarf' || id === 'velda') {
+        const scarf = style.prop === 'scarf', apron = style.cape === 'apron', cloak = id === 'velda';
+        const cape = this._bone(torso, 'cloth', chestRx * (apron ? 0.58 : cloak ? -0.7 : -0.86),
+          scarf ? neckY : apron ? chestSz * 0.62 : shoulders, scarf ? breadth * 0.70 : 0);
+        const cloth = id === 'garth' ? '#9f1d32' : id === 'troy' ? '#e8b84a' : cloak ? '#4c1d95'
+          : id === 'shriek' ? '#14182c' : style.cape === 'labcoat' ? '#edf2ff' : apron ? pal.outfit : pal.accent;
+        const lining = id === 'garth' ? '#facc15' : id === 'troy' ? '#fff1c2' : cloak ? '#c4b5fd' : pal.outfit;
+        rig.cloth = this._makeCloth(cape, style, chestSz * (apron ? 0.72 : scarf ? 1.19 : cloak ? 1.35 : 1.47),
+          breadth * (scarf ? 0.32 : apron ? 0.52 : 0.91), cloth, lining);
       }
       if (style.tail) {
         const tail = this._bone(pelvis, 'tail', -chestRx * 0.77, h * 0.09, 0);
         const bush = style.tail === 'bushy', jagged = style.tail === 'jagged';
         const length = h * (bush ? 0.46 : jagged ? 0.37 : 0.58);
         const thick = h * (bush ? 0.119 : jagged ? 0.063 : 0.079);
-        this._shape(tail, jagged ? 'box' : 'ball', jagged ? detail : main, -length * 0.32, 0, 0, length * 0.51, thick, thick * 0.91);
-        const tip = this._bone(tail, 'tail tip', -length * 0.60, 0, 0);
-        this._shape(tip, jagged ? 'box' : 'ball', bush ? light : jagged ? detail : main, -length * 0.26, 0, 0, length * 0.39, thick * 0.79, thick * 0.73);
+        const bolt = id === 'chikapu' && this._model('characters', 'Part_BoltTail', { CharGold: '#ffe14a', CharCyan: '#fff4a8' });
+        if (bolt) {
+          bolt.scale.set(length * 0.62, thick * 3.4, thick * 2.6);
+          bolt.position.set(-length * 0.15, thick * 0.2, 0);
+          tail.add(bolt);
+        } else {
+          this._shape(tail, jagged ? 'box' : 'ball', jagged ? detail : main, -length * 0.32, 0, 0, length * 0.51, thick, thick * 0.91);
+          const tip = this._bone(tail, 'tail tip', -length * 0.60, 0, 0);
+          this._shape(tip, jagged ? 'box' : 'ball', bush ? light : jagged ? detail : main, -length * 0.26, 0, 0, length * 0.39, thick * 0.79, thick * 0.73);
+          rig.tailTip = tip;
+        }
         rig.tail = tail;
-        rig.tailTip = tip;
+        if (!rig.tailTip) rig.tailTip = tail;
       }
       this._articulate(rig, f, { puff, depth, breadth, chestRx, shoulders, build, ...mantle });
       this._portraitExtras(rig, f, style, sil, { rx, ry, rz, chestRx, chestSz, breadth });
@@ -2325,19 +2420,25 @@ export class GameRenderer3D {
   }
 
   _dressHead(rig, f, style, sil, { rx, ry, rz, jaw, main, pants, detail, dark, gold, skin, light }) {
-    const T = this.T, head = rig.head, pal = rig.pal, hatKey = HATS[style.hat];
+    const T = this.T, head = rig.head, pal = rig.pal, id = f.def.id, hatKey = HATS[style.hat];
     const helmet = style.hat === 'visorHelm' || style.hat === 'birdHelmet';
-    const cap = hatKey === 'Hat_Cap';
-    const hat = hatKey && this._model('characters', hatKey,
-      { NeutralTint: pal.outfit, CharGreen: pal.body, CharOrange: sil === 'fox' ? pal.body : '#ff982d',
-        CharRed: cap || helmet ? pal.outfit : pal.body, CharCyan: pal.accent,
-        CharTeal: style.hat === 'glasses' ? '#1aa8b8' : pal.accent });
+    const cap = hatKey === 'Hat_Cap' && id !== 'squeegi';
+    const hatName = id === 'squeegi' ? 'Hat_TopHat' : hatKey;
+    const hat = hatName && this._model('characters', hatName,
+      { NeutralTint: pal.outfit, CharGreen: pal.body, CharLime: id === 'squeegi' ? '#7CFF3A' : pal.outfit,
+        CharOrange: sil === 'fox' ? pal.body : '#ff982d',
+        CharRed: id === 'mess' ? pal.body : (cap || helmet ? pal.outfit : pal.body),
+        CharBlue: id === 'mess' ? pal.outfit : pal.outfit,
+        CharCyan: pal.accent,
+        CharTeal: style.hat === 'glasses' ? '#d5dbe6' : pal.accent });
     if (hat) {
       let x = 0, y = ry * 0.64, sx = rx, sy = ry * 0.71, sz = rz;
       if (cap) {
         sx *= 1.04; sy *= style.hat === 'capTall' ? 1.12 : 0.82; sz *= 1.06;
-        if (style.hat === 'backCap' || style.hat === 'snapback') hat.rotation.y = Math.PI;
+        if (id === 'mess') { hat.rotation.y = 0.65; hat.rotation.z = 0.35; }
+        else if (style.hat === 'backCap' || style.hat === 'snapback') hat.rotation.y = Math.PI;
       }
+      if (id === 'squeegi') { y = ry * 1.05; sx = rx * 0.78; sy = ry * 1.45; sz = rz * 0.82; }
       if (style.hat === 'bowler') { y = ry * 0.69; sy *= 1.05; }
       if (style.hat === 'headmirror') { y = ry * 0.75; sx *= 0.87; sy *= 0.72; sz *= 0.86; }
       if (style.hat === 'elfCap') { y = ry * 0.94; sx *= 0.81; sy *= 0.93; sz *= 0.91; }
@@ -2346,7 +2447,7 @@ export class GameRenderer3D {
       if (style.hat === 'foxEars') { x = -rx * 0.05; y = -ry * 0.02; sx = rx * 0.92; sy = ry * 0.95; sz = rz * 0.92; }
       if (style.hat === 'toucanBeak') { x = -rx * 0.02; y = -ry * 0.06; sx = rx * 1.08; sy = ry * 1.02; sz = rz * 1.02; }
       if (style.hat === 'visorHelm') { x = -rx * 0.18; y = ry * 0.02; sx = rx * 1.08; sy = ry * 1.06; sz = rz * 1.08; }
-      if (style.hat === 'glasses') { x = rx * 0.12; y = ry * 0.06; sx = rx * 0.92; sy = ry * 0.78; sz = rz * 0.9; }
+      if (style.hat === 'glasses') { x = rx * 0.08; y = ry * 0.02; sx = rx * 1.08; sy = ry * 0.95; sz = rz * 1.04; }
       hat.position.set(x, y, 0);
       hat.scale.set(sx, sy, sz);
       head.add(hat);
@@ -2373,12 +2474,20 @@ export class GameRenderer3D {
         this._shape(head, 'disk', detail, rx * 0.23, ry * 0.61, 0, rx * 0.91, ry * 0.13, rz * 1.11);
       }
     }
-    if (['elfCap', 'tiaraHair', 'tiara', 'headband', 'mysticCrown'].includes(style.hat) && sil !== 'flat2d') {
-      const hair = this._mat(sil === 'dress' || style.hat === 'elfCap' ? '#b76d36' : style.hat === 'headband' ? '#b84b46' : '#524387');
+    if (['elfCap', 'tiaraHair', 'tiara', 'headband', 'mysticCrown'].includes(style.hat) && sil !== 'flat2d' && id !== 'troy') {
+      const hairColor = id === 'velda' ? '#f6e2a8' : id === 'garth' ? '#6a3b22'
+        : (id === 'zink' || id === 'tiny-zink') ? '#f0d078'
+        : (sil === 'dress' || style.hat === 'elfCap') ? '#b76d36'
+        : style.hat === 'headband' ? '#b84b46' : '#524387';
+      const hair = this._mat(hairColor);
+      const bangs = id === 'zink' || id === 'tiny-zink';
       rig.hair = [];
       for (const s of [-1, 1]) {
-        const lock = this._bone(head, 'hair lock', -rx * 0.46, ry * 0.43, s * rz * 0.77);
-        this._shape(lock, 'ball', hair, -rx * 0.08, -ry * 0.46, 0, rx * 0.46, ry * (sil === 'dress' ? 0.94 : 0.63), rz * 0.23);
+        const lock = this._bone(head, 'hair lock',
+          bangs ? rx * 0.12 : -rx * 0.46, bangs ? ry * 0.78 : ry * 0.43, bangs ? s * rz * 0.26 : s * rz * 0.77);
+        this._shape(lock, 'ball', hair, bangs ? rx * 0.04 : -rx * 0.08, bangs ? -ry * 0.12 : -ry * 0.46, 0,
+          rx * (bangs ? 0.32 : 0.46), ry * (bangs ? 0.26 : sil === 'dress' ? 0.94 : id === 'garth' ? 0.88 : 0.63),
+          rz * (bangs ? 0.16 : 0.23));
         rig.hair.push(lock);
       }
     }
@@ -2401,14 +2510,24 @@ export class GameRenderer3D {
       }
     }
     if (style.hat === 'hood' || style.hat === 'ninjaWrap') {
-      this._shape(head, 'ball', main, -rx * 0.28, 0, 0, rx * 1.04, ry * 1.18, rz * 1.13);
+      const cowl = id === 'shriek' ? this._mat('#1a2040', { roughness: 0.55 }) : main;
+      this._shape(head, 'ball', cowl, -rx * 0.28, 0, 0, rx * 1.04, ry * 1.18, rz * 1.13);
       if (style.hat === 'hood') {
         const rim = this._shape(head, 'ring', light, rx * 0.43, 0, 0, rz * 1.01, ry * 0.95, 1.95);
         rim.rotation.y = Math.PI / 2;
       } else {
         const band = this._shape(head, 'ball', detail, -rx * 0.01, ry * 0.69, 0, rx * 0.99, ry * 0.18, rz * 0.94);
         band.rotation.z = 0.13;
+        if (id === 'shriek') for (const s of [-1, 1]) {
+          const tail = this._shape(head, 'box', detail, -rx * 1.05, ry * 0.35, s * rz * 0.15, rx * 0.7, ry * 0.07, rz * 0.07);
+          tail.rotation.z = s * 0.55;
+        }
       }
+    }
+    if (id === 'troy') {
+      const blue = this._mat('#2563eb');
+      const band = this._shape(head, 'ball', blue, -rx * 0.02, ry * 0.86, 0, rx * 0.72, ry * 0.09, rz * 0.74);
+      band.rotation.z = 0.08;
     }
     const sleepMask = style.hat === 'sleepMask' && this._model('characters', 'Hat_SleepMask',
       { CharCyan: { color: new T.Color(pal.accent).lerp(new T.Color('#f9dfff'), 0.56), roughness: 0.58 } });
@@ -2446,8 +2565,10 @@ export class GameRenderer3D {
     if (style.eyes !== 'none') {
       const faceRx = style.hat === 'birdHelmet' ? rx * 1.16 : style.hat === 'hood' || style.hat === 'ninjaWrap' ? rx * 1.07 : rx;
       const faceRz = style.hat === 'birdHelmet' ? rz * 1.05 : rz;
+      const glowEyes = id === 'shriek';
       const material = this._mat(0xffffff, { map: getFaceTexture(f.def, pal, 'normal', T, this), transparent: true, depthWrite: false,
-        roughness: 0.88, alphaTest: 0.03, emissive: helmet ? pal.accent : 0xffffff, emissiveIntensity: helmet ? 0.24 : 0.02 });
+        roughness: 0.88, alphaTest: 0.03, emissive: glowEyes ? '#9af6ff' : helmet ? pal.accent : 0xffffff,
+        emissiveIntensity: glowEyes ? 0.42 : helmet ? 0.24 : 0.07 });
       if (helmet) material.emissiveMap = material.map;
       rig.face = this._add(head, this._featurePatch(faceRx, ry, faceRz, jaw), material, 0, 0, 0, false);
       rig.face.renderOrder = 1;
@@ -2483,24 +2604,48 @@ export class GameRenderer3D {
       if (snout && rig.muzzle) { rig.muzzle.removeFromParent(); rig.muzzle = null; }
       this._pinPart(rig.torso, 'Part_Spines', -chestRx * 0.15, chestSz * 0.72, 0, chestRx * 0.55, chestSz * 0.4, rz * 0.7);
     }
-    if (id === 'wonky-kong' || id === 'mess' || id === 'troy') {
-      this._pinPart(head, 'Part_HairCrest', 0, ry * 0.62, 0, rx * 0.9, ry * 0.75, rz * 0.85);
+    if (id === 'wonky-kong') {
+      this._shape(head, 'ball', this._mat('#8d95aa'), rx * 0.46, -ry * 0.38, 0, rx * 0.36, ry * 0.24, rz * 0.34);
+    }
+    if (id === 'troy') {
+      this._pinPart(head, 'Part_HairCrest', -rx * 0.02, ry * 0.48, 0, rx * 1.28, ry * 1.2, rz * 1.05,
+        { CharOrange: '#ff5a1f', CharRed: '#ffb03a', CharGold: '#ffe14a' });
+    }
+    if (id === 'garth') {
+      this._pinPart(head, 'Part_HairCrest', -rx * 0.04, ry * 0.58, 0, rx * 1.05, ry * 0.82, rz * 0.95,
+        { CharOrange: '#6a3b22', CharRed: '#4a2815', CharGold: '#8a5a32' });
+    }
+    if (id === 'mess') {
+      this._pinPart(head, 'Hat_Glasses', rx * 0.08, ry * 0.02, 0, rx * 0.82, ry * 0.7, rz * 0.82);
+      this._pinPart(rig.torso, 'Part_Backpack', -chestRx * 0.72, chestSz * 0.42, 0, chestRx * 0.62, chestSz * 0.48, rz * 0.7);
     }
     if (id === 'spitzu') {
-      if (this._pinPart(head, 'Part_MouseEars', 0, ry * 0.35, 0, rx * 1.15, ry * 1.05, rz * 1.2)) dropEars();
+      if (this._pinPart(head, 'Part_MouseEars', 0, ry * 0.42, 0, rx * 1.35, ry * 1.2, rz * 1.35)) dropEars();
+      this._pinPart(rig.torso, 'Part_Battery', -chestRx * 0.85, chestSz * 0.48, 0, chestRx * 0.7, chestSz * 0.42, rz * 0.75);
     }
     if (id === 'chikapu') {
-      if (this._pinPart(head, 'Part_BoltEars', 0, ry * 0.42, 0, rx * 1.1, ry * 1.0, rz * 1.05)) dropEars();
-      this._pinPart(head, 'Hat_Cap', 0, ry * 0.58, 0, rx * 0.82, ry * 0.52, rz * 0.88, { NeutralTint: '#e23b3b' });
+      if (this._pinPart(head, 'Part_BoltEars', 0, ry * 0.55, 0, rx * 1.2, ry * 1.35, rz * 1.15, { CharGold: '#ffe14a' })) dropEars();
+      this._pinPart(head, 'Hat_Cap', 0, ry * 0.62, 0, rx * 0.78, ry * 0.42, rz * 0.82,
+        { CharRed: '#e23b3b', CharBlue: '#e23b3b', CharWhite: '#fff6e8' });
     }
     if (id === 'gigglefluff') {
       this._pinPart(head, 'Part_CatEars', 0, ry * 0.28, 0, rx * 0.85, ry * 0.7, rz * 0.8);
       this._pinPart(head, 'Part_HairSwirl', rx * 0.02, ry * 0.48, 0, rx * 0.65, ry * 0.55, rz * 0.65);
     }
-    if (id === 'velda') this._pinPart(head, 'Hat_Hood', -rx * 0.08, ry * 0.05, 0, rx * 1.08, ry * 1.02, rz * 1.05, { NeutralTint: rig.pal.body });
+    if (id === 'velda') this._pinPart(head, 'Hat_Hood', -rx * 0.42, ry * 0.22, 0, rx * 1.2, ry * 1.18, rz * 1.12, { NeutralTint: '#4c1d95' });
     if (id === 'bario' || style.prop === 'monocle') this._pinPart(head, 'Part_Monocle', rx * 0.08, ry * 0.02, 0, rx * 0.9, ry * 0.82, rz * 0.85);
+    if (id === 'sourzer') {
+      this._pinPart(head, 'Part_Snout', rx * 0.18, -ry * 0.22, 0, rx * 1.05, ry * 0.95, rz * 0.9);
+      this._pinPart(head, 'Part_Mohawk', -rx * 0.05, ry * 0.45, 0, rx * 0.85, ry * 0.8, rz * 0.65);
+      this._pinPart(rig.torso, 'Part_Collar', chestRx * 0.05, chestSz * 0.86, 0, chestRx * 0.5, chestSz * 0.2, rz * 0.65);
+    }
+    if (id === 'shriek' && rig.torso) {
+      const kunai = this._pinPart(rig.torso, 'Part_Kunai', chestRx * 0.15, chestSz * 0.15, rz * 0.85, 9, 9, 9);
+      if (kunai) kunai.rotation.z = -0.7;
+    }
     if (id === 'zink' || id === 'tiny-zink' || id === 'dadondorf') {
-      this._pinPart(head, 'Part_ElfEars', rx * 0.05, -ry * 0.02, 0, rx * 0.85, ry * 0.75, rz * 0.95);
+      this._pinPart(head, 'Part_ElfEars', rx * 0.05, -ry * 0.02, 0, rx * 0.85, ry * 0.75, rz * 0.95,
+        { CharCream: id === 'dadondorf' ? rig.pal.skin : '#f3d7b5' });
     }
     if (id === 'mewtooth' && rig.turn) {
       const orb = this._shape(rig.turn, 'smallBall', this._mat('#7eefff', { emissive: '#7eefff', emissiveIntensity: 0.8 }),
@@ -2534,15 +2679,15 @@ export class GameRenderer3D {
       const arm = this._bone(shoulder, label + ' upperArm');
       const fore = this._bone(arm, label + ' forearm', 0, -u, 0);
       const grip = this._bone(fore, label + ' grip', 0, -l, 0);
-      const pauldron = style.silhouette === 'armor';
+      const pauldron = style.silhouette === 'armor' || f.def.id === 'garth';
       this._shape(arm, 'ball', main, 0, -u * 0.44, 0, girth * 0.121, u * 0.67, girth * 0.113 * depth);
       this._shape(arm, 'ball', pauldron ? detail : main, 0, -u * 0.08, s * w * 0.029 * depth,
         girth * (pauldron ? 0.17 : 0.139), w * 0.145, girth * (pauldron ? 0.20 : 0.141) * depth);
       this._shape(fore, 'smallBall', pauldron ? dark : main, 0, 0, 0, w * 0.098, w * 0.093, w * 0.099 * depth);
-      this._shape(fore, 'ball', style.stache || style.silhouette === 'parka' ? main : skin, 0, -l * 0.48, 0, girth * 0.106, l * 0.73, girth * 0.093 * depth);
+      this._shape(fore, 'ball', f.def.id === 'wonky-kong' || style.stache || style.silhouette === 'parka' ? main : skin, 0, -l * 0.48, 0, girth * 0.106, l * 0.73, girth * 0.093 * depth);
       this._shape(fore, 'disk', style.silhouette === 'armor' ? gold : pants, 0, -l * 0.76, 0, gloveSize * 0.91, l * 0.21, gloveSize * depth);
       const glove = this._model('characters', 'Part_Glove',
-        { CharWhite: style.silhouette === 'armor' ? pal.outfit : style.stache ? '#f3f3ff' : style.silhouette === 'parka' ? pal.accent : pal.skin });
+        { CharWhite: f.def.id === 'wonky-kong' ? '#3a4258' : style.silhouette === 'armor' ? pal.outfit : style.stache ? '#f3f3ff' : style.silhouette === 'parka' ? pal.accent : pal.skin });
       if (glove) {
         glove.scale.set(gloveSize * 2.26, gloveSize * 2.05, gloveSize * 2.0 * depth);
         glove.position.x = -gloveSize * 0.17;
@@ -2597,7 +2742,7 @@ export class GameRenderer3D {
       const model = this._model(spec[3] || 'weapons', spec[0]);
       if (model) {
         model.scale.setScalar(spec[1]);
-        if (style.prop === 'crystal') model.position.x = -8;
+        if (style.prop === 'crystal') model.position.set(-2, 4, 16);
         rig.tool.add(model);
       } else {
         const shaft = this._shape(rig.tool, 'rod', dark, tip * 0.32, 0, 0, 2.2, tip * 0.88, 2.2);
@@ -2627,7 +2772,7 @@ export class GameRenderer3D {
 
   _buildBuddy(rig, pants, detail, light, dark) {
     const h = rig.h;
-    const buddy = this._bone(rig.turn, 'Nana-Bot', -29, 0, -22);
+    const buddy = this._bone(rig.turn, 'Nana-Bot', -24, 0, -10);
     const bot = this._model('characters', 'Buddy_NanaBot');
     if (bot) {
       bot.scale.setScalar(h * 0.42);
@@ -4259,6 +4404,63 @@ export class GameRenderer3D {
       this._particle('ring', x, cy, 22, '#fff6c8', 12, 10, 0, 0, 0, t, { end: 64, tilt: 0.5 });
       this._particle('impactStar', x, cy, 40, '#ffe9a0', 48, 8, 0, 0, 0, t, { angle: 0.4, aspect: 0.7, alpha: 0.95 });
       this._flash('#ffe08a', x, cy, 90000, t, 10);
+      return;
+    }
+    if (e.type === 'tech' && e.tech === 'WAVELAND') {
+      const dir = e.dir || 1;
+      for (let i = 0; i < 7; i++) {
+        this._particle('dustPuff', x - dir * i * 6, y + 3, 3 + (i % 3) * 2, i % 2 ? '#d8f6ff' : '#ffffff',
+          7 + i * 0.4, 12 + i, -dir * (2.4 + i * 0.65), 0.55, (i - 3) * 0.18, t);
+      }
+      this._particle('shockwave', x, y + 2, 3, '#b7f3ff', 9, 11, -dir * 1.2, 0, 0, t, { tilt: Math.PI / 2 });
+      return;
+    }
+    if (e.type === 'tech' && e.tech === 'LEDGEDASH') {
+      this._particle('ring', x, y + 18, 16, '#7cfaff', 16, 14, 0, 0, 0, t, { end: 88, yaw: 0.2 });
+      this._particle('ring', x, y + 16, 12, '#ffffff', 10, 10, 0, 0, 0, t, { end: 52, tilt: 0.45 });
+      this._particle('core', x, y + 20, 14, '#e8ffff', 22, 6, 0, 0, 0, t);
+      for (let i = 0; i < 8; i++) {
+        const a = i * TAU / 8;
+        this._particle('spark', x + Math.cos(a) * 14, y + 16 + Math.sin(a) * 10, 12, i % 2 ? '#7cfaff' : '#ffffff',
+          4, 12, Math.cos(a) * 5, Math.sin(a) * 3.5, 0, t);
+        if (i % 2 === 0) this._particle('lightning', x + Math.cos(a) * 8, y + 18, 14, '#9af6ff', 12, 5, 0, 0, 0, t, { variant: i % 2 });
+      }
+      this._flash('#b6fbff', x, y + 18, 70000, t, 8);
+      return;
+    }
+    if (e.type === 'tech' && (e.tech === 'TECH' || e.tech === 'TECH ROLL' || e.tech === 'WALL TECH' || e.tech === 'WALL TECH JUMP')) {
+      const wall = String(e.tech).startsWith('WALL');
+      const cy = wall ? y + 30 : y + 3;
+      this._particle('shockwave', x, cy, wall ? 16 : 4, '#5dffb0', wall ? 14 : 18, 14, 0, 0, 0, t, { tilt: wall ? 0.2 : Math.PI / 2 });
+      this._particle('ring', x, cy, wall ? 12 : 6, '#9af6ff', 10, 12, 0, 0, 0, t, { end: 66, tilt: wall ? 0.15 : Math.PI / 2 });
+      for (let i = 0; i < 8; i++) {
+        const a = i * TAU / 8;
+        this._particle('spark', x + Math.cos(a) * 8, cy + Math.sin(a) * (wall ? 12 : 4), 8,
+          i % 2 ? '#eaffff' : '#7dffc3', 4, 12, Math.cos(a) * 2.6, Math.sin(a) * 2.2, 0, t);
+      }
+      return;
+    }
+    if (e.type === 'tech' && e.tech === 'SHIELD POKE') {
+      for (let i = 0; i < 8; i++) {
+        const a = i * TAU / 8;
+        this._particle('impactSpark', x + Math.cos(a) * 6, y + 22 + Math.sin(a) * 6, 12, '#ff3355',
+          5, 10, Math.cos(a) * 5.5, Math.sin(a) * 4, 0, t);
+      }
+      return;
+    }
+    if (e.type === 'tech' && e.tech === 'PIVOT') {
+      this._bounceDust(e.port, x, y, t);
+      return;
+    }
+    if (e.type === 'absorb') {
+      const cy = y + 26;
+      this._particle('ring', x, cy, 18, '#c084fc', 20, 16, 0, 0, 0, t, { end: 8, tilt: 0.55 });
+      this._particle('ring', x + 6, cy - 2, 12, '#67e8f9', 14, 14, 0, 0, 0, t, { end: 6, tilt: -0.35 });
+      for (let i = 0; i < 10; i++) {
+        const a = i * TAU / 10;
+        this._particle('spark', x + Math.cos(a) * 30, cy + Math.sin(a) * 16, 14,
+          i % 2 ? '#c084fc' : '#67e8f9', 4, 14, -Math.cos(a) * 3.4, -Math.sin(a) * 1.7, -0.3, t);
+      }
       return;
     }
     if (e.type === 'tech' && (e.wall || !e.tech)) {

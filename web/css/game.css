@@ -854,6 +854,51 @@ html, body {
   font-weight: 900;
   color: var(--gold);
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hud-combo.hot {
+  color: #ffde59;
+  text-shadow: 0 0 8px rgba(255, 196, 46, 0.75);
+}
+.hud-resource {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  background: rgba(56, 245, 255, 0.14);
+  border: 1px solid rgba(56, 245, 255, 0.42);
+  color: #9bf6ff;
+  white-space: nowrap;
+}
+.hud-resource.ready {
+  background: rgba(255, 214, 51, 0.24);
+  border-color: var(--gold);
+  color: #fff3b0;
+  box-shadow: 0 0 10px rgba(255, 214, 51, 0.45);
+}
+.train-telemetry {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 800;
+  background: rgba(12, 14, 34, 0.85);
+  border: 1px solid rgba(124, 232, 255, 0.32);
+  color: #d7f6ff;
+  white-space: nowrap;
+}
+.train-telemetry.pos {
+  border-color: rgba(66, 230, 149, 0.7);
+  color: #6ef7b2;
+}
+.train-telemetry.neg {
+  border-color: rgba(255, 92, 122, 0.7);
+  color: #ff94a8;
 }
 
 /* PAUSE, RESULTS, SETTINGS, ONLINE, RECORDS */

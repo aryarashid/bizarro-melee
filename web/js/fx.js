@@ -605,10 +605,84 @@ export class FxSystem {
             life: 58, maxLife: 58, scale: 1.35,
           });
           break;
+        case 'absorb': {
+          const bx = e.x + 10, by = e.y + 30;
+          this.rings.push({ x: bx, y: by, r: 58, maxR: 12, life: 16, maxLife: 16, color: '#c084fc', lineWidth: 4 });
+          this.rings.push({ x: bx, y: by, r: 40, maxR: 8, life: 14, maxLife: 14, color: '#67e8f9', lineWidth: 3 });
+          for (let i = 0; i < 10; i++) {
+            const a = (i / 10) * Math.PI * 2;
+            this.particles.push({
+              x: bx + Math.cos(a) * 34, y: by + Math.sin(a) * 18,
+              vx: -Math.cos(a) * 2.6, vy: -Math.sin(a) * 1.5,
+              life: 14, maxLife: 14, size: 4, color: i % 2 ? '#c084fc' : '#67e8f9', back: false,
+            });
+          }
+          break;
+        }
         case 'tech':
           if (e.tech === 'PARRY') {
             this.rings.push({ x: e.x, y: e.y + 28, r: 12, maxR: 78, life: 14, maxLife: 14, color: '#ffd56a', lineWidth: 5 });
             this.callouts.push({ x: e.x, y: e.y + 70, text: 'PARRY!', color: '#ffd56a', bg: 'rgba(40,28,8,0.9)', life: 28, maxLife: 28, scale: 1.15 });
+            break;
+          }
+          if (e.tech === 'WAVELAND') {
+            const dir = e.dir || 1;
+            for (let i = 0; i < 8; i++) {
+              this.particles.push({
+                x: e.x, y: e.y + 3,
+                vx: -dir * (4 + Math.random() * 6),
+                vy: 0.3 + Math.random() * 1.5,
+                life: 14, maxLife: 14, size: 5 + Math.random() * 5,
+                color: i % 2 ? 'rgba(184, 244, 255, 0.9)' : 'rgba(255,255,255,0.88)', back: true,
+              });
+            }
+            break;
+          }
+          if (e.tech === 'LEDGEDASH') {
+            this.rings.push({ x: e.x, y: e.y + 20, r: 8, maxR: 72, life: 12, maxLife: 12, color: '#7cfaff', lineWidth: 5 });
+            this.rings.push({ x: e.x, y: e.y + 20, r: 4, maxR: 40, life: 8, maxLife: 8, color: '#ffffff', lineWidth: 3 });
+            for (let i = 0; i < 8; i++) {
+              const a = (i / 8) * Math.PI * 2;
+              this.particles.push({
+                x: e.x, y: e.y + 18, vx: Math.cos(a) * 6, vy: Math.sin(a) * 4,
+                life: 12, maxLife: 12, size: 4, color: i % 2 ? '#7cfaff' : '#ffffff', back: false,
+              });
+            }
+            break;
+          }
+          if (e.tech === 'TECH' || e.tech === 'TECH ROLL' || e.tech === 'WALL TECH' || e.tech === 'WALL TECH JUMP') {
+            const wall = String(e.tech).startsWith('WALL');
+            const py = e.y + (wall ? 28 : 6);
+            this.rings.push({ x: e.x, y: py, r: 8, maxR: wall ? 52 : 64, life: 12, maxLife: 12, color: '#5dffb0', lineWidth: 5 });
+            this.rings.push({ x: e.x, y: py, r: 5, maxR: 34, life: 10, maxLife: 10, color: '#9af6ff', lineWidth: 3 });
+            for (let i = 0; i < 6; i++) {
+              const a = (i / 6) * Math.PI * 2;
+              this.particles.push({
+                x: e.x + Math.cos(a) * 6, y: py + Math.sin(a) * 6,
+                vx: Math.cos(a) * 2.2, vy: Math.sin(a) * 2.2,
+                life: 10, maxLife: 10, size: 3, color: '#eaffff', back: false,
+              });
+            }
+            break;
+          }
+          if (e.tech === 'SHIELD POKE') {
+            for (let i = 0; i < 7; i++) {
+              const a = (i / 7) * Math.PI * 2;
+              this.particles.push({
+                x: e.x, y: e.y + 24,
+                vx: Math.cos(a) * (4 + Math.random() * 3), vy: Math.sin(a) * 3,
+                life: 10, maxLife: 10, size: 3, color: '#ff3355', back: false,
+              });
+            }
+            break;
+          }
+          if (e.tech === 'PIVOT') {
+            for (const side of [-1, 1]) {
+              this.particles.push({
+                x: e.x, y: e.y + 3, vx: side * 2.6, vy: 1.2,
+                life: 10, maxLife: 10, size: 5, color: 'rgba(255,255,255,0.78)', back: true,
+              });
+            }
             break;
           }
           if (e.tech === 'SHIELD DROP' || e.tech === 'EDGE CANCEL' || e.tech === 'SHFFL' || e.tech === 'JC GRAB' || e.tech === 'JC UPSMASH' || e.tech === 'B-REVERSE') {

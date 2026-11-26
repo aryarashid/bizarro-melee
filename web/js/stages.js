@@ -117,7 +117,7 @@ export const STAGES = [
     id: 'critter-arena', name: 'Critter Arena', parodyOf: 'Pokémon Stadium', category: 'tourney',
     tagline: 'Live transforming stadium: morphs between Normal, Fire Pit, Rock Quarry, Water Mill & Grass!',
     theme: 'stadium',
-    props: [{ mesh: 'Prop_Jumbotron', x: 0, y: 270, z: -280, s: 95 }, { mesh: 'Prop_Floodlight', x: -440, y: 60, z: -210, s: 90 }, { mesh: 'Prop_Floodlight', x: 440, y: 60, z: -210, s: 90 }],
+    props: [{ mesh: 'Prop_Jumbotron', x: 0, y: 168, z: -560, s: 46 }, { mesh: 'Prop_Floodlight', x: -440, y: 60, z: -210, s: 90 }, { mesh: 'Prop_Floodlight', x: 440, y: 60, z: -210, s: 90 }],
     palette: { skyTop: '#101c33', skyMid: '#1e3a5f', skyBottom: '#2d6a6b', accent: '#59ff9e', deckTop: '#56c77a', deckBody: '#2b3847', deckTrim: '#63ffa8', platColor: '#dbe8f5' },
     blastzones: { left: -1260, right: 1260, top: 900, bottom: -660 },
     cameraBounds: { left: -920, right: 920, top: 660, bottom: -380 },

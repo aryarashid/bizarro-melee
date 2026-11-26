@@ -50,7 +50,7 @@ const INPUT_AXES = ['moveX', 'moveY', 'rawMoveX', 'rawMoveY', 'cStickX', 'cStick
 const INPUT_BUTTONS = ['jump', 'attack', 'special', 'shield', 'grab'];
 
 const TECH_EVENTS = { wavedash: 'WAVEDASH', lCancel: 'L-CANCEL', powershield: 'POWER SHIELD', walljump: 'WALL JUMP', meteorCancel: 'METEOR CANCEL' };
-const isLightShield = (input) => !!input.lightShield || (input.shieldAnalog >= 0.18 && input.shieldAnalog < 0.78);
+const isLightShield = (input) => !!input.lightShield || (input.shieldAnalog > 0.15 && input.shieldAnalog < 0.72);
 
 function onlineInput(frame) {
   const input = { tauntPressed: frame.tauntPressed === true, shortHopPressed: frame.shortHopPressed === true,
@@ -190,7 +190,7 @@ function event(match, type, f, data = {}) {
   if (TECH_EVENTS[type]) event(match, 'tech', f, { tech: TECH_EVENTS[type] });
 }
 
-function drawRng(match) {
+export function drawRng(match) {
   // Match-local RNG keeps identical input streams deterministic.
   match.rng = (Math.imul(match.rng, 1664525) + 1013904223) >>> 0;
   return match.rng / 4294967296;
@@ -238,7 +238,7 @@ function makeState(match, player, stocks) {
     set maxHp(value) { this.bossMaxHp = value; },
     recentKoFrames: [], stockDamageOwner: null, stockStartSequence: match.damageSequence, meteorByPort: null, meteorTimer: 0, warpCooldown: 0,
     permanentGiant: match.giantPorts.includes(port),
-    maxCombo: 0, comboCount: 0, comboTimer: 0, jumpsUsed: 0, fastFalling: false,
+    maxCombo: 0, comboCount: 0, comboTimer: 0, comboDamage: 0, lastFrameAdv: 0, jumpsUsed: 0, fastFalling: false,
     hitlag: 0, hitstun: 0, invulnFrames: 0, ledgeCooldown: 0, ledgeId: null, ledgeSide: 0,
     ledgeDropFrame: null, ledgeDoubleJump: false, ledgeRollFrames: 0, upBUsed: false, sideBUsed: false,
     get hitstunFrames() { return this.hitstun; },
@@ -249,7 +249,11 @@ function makeState(match, player, stocks) {
     chargeFrames: 0, judgeNum: 0, moveKey: null, moveData: null, moveFrame: 0, hitTargets: new Set(),
     grabbedBy: null, grabbing: null, cargo: false, pummelTimer: 0, staleQueue: [], staleMultipliers: [...MELEE.STALE_WEIGHTS],
     lastHitBy: null, lastHitTimer: 0, animPhase: 0, squashX: 1, squashY: 1, activeHitboxes: [],
-    shieldStun: 0, shieldDrop: 0, techLock: 0, dropTimer: 0, dropId: null, landingLag: 0,
+    get techWindow() { return this.techTimer; },
+    set techWindow(value) { this.techTimer = value; },
+    get techLockout() { return this.techLock; },
+    set techLockout(value) { this.techLock = value; },
+    wavelandLag: 0, shieldStun: 0, shieldDrop: 0, techLock: 0, dropTimer: 0, dropId: null, landingLag: 0,
     dodgeDir: 0, specialAimX: 0, specialAimY: 0, launchAngle: null, launchSpeed: 0,
     lastSweetspot: false, ledgeX: 0, ledgeY: 0, shortHop: false, sleepTimer: 0, sleepImmuneFrames: 0,
     heldItemId: null, scale: 1, giantTimer: 0, tinyTimer: 0, starTimer: 0, hammerTimer: 0,
@@ -353,8 +357,14 @@ export function createMatch(config = {}) {
     }
   }
   if (mode === MODE.TRAINING) {
-    match.trainingConfig = { ...config, mode, giantPorts: [], startPercent: 0, introFrames: 0,
+    match.trainingConfig = { ...config, cpuBehavior: config.cpuBehavior ?? config.trainingCpuMode ?? 'stand', cpuDi: config.cpuDi ?? 'none', ...config.trainingConfig, mode, giantPorts: [], startPercent: 0, introFrames: 0,
       players: [...unique.values()].map((p) => ({ ...p })) };
+    // Keep the original Training UI field in sync with the public config.
+    Object.defineProperty(match, 'trainingCpuMode', {
+      enumerable: true, configurable: true,
+      get() { return this.trainingConfig.cpuBehavior; },
+      set(value) { this.trainingConfig.cpuBehavior = value; },
+    });
   }
   return match;
 }
@@ -632,11 +642,8 @@ function selectAttack(match, f, input) {
   } else if (cStick?.tilt) {
     key = vertical ? ay > 0 ? M.UTILT : M.DTILT : M.FTILT;
     if (!vertical) faceInput(f, ax);
-  } else if (!cStick && f.state === S.DASH && f.stateFrame <= DASH_FRAMES && input.attackPressed &&
-      (x * f.facing < -0.32 || match.frame === f.pivotFrame + 1 && Math.abs(x) > 0.32)) {
-    faceInput(f, x);
-    key = Math.abs(x) >= SMASH ? M.FSMASH : M.FTILT;
-    event(match, 'tech', f, { tech: 'PIVOT' });
+  } else if (!cStick && f.state === S.DASH && match.frame - f.pivotFrame < 2 && input.attackPressed) {
+    key = vertical ? ay > 0 ? M.UTILT : M.DTILT : M.FTILT;
   } else if (cStick || (vertical ? flickY : flickX) || (Math.abs(x) >= SMASH && Math.abs(y) >= SMASH)) {
     key = vertical ? ay > 0 ? M.USMASH : M.DSMASH : M.FSMASH;
     if (!vertical) faceInput(f, ax);
@@ -710,7 +717,7 @@ function ledgeAction(match, f, input) {
   const id = f.ledgeId;
   f.ledgeId = null;
   if (input.specialPressed || drop) {
-    f.invulnFrames = 8;
+    if (input.specialPressed) f.invulnFrames = 8;
     f.vx = (input.moveX || 0) * 2;
     f.vy = -2;
     f.jumpsUsed = 0;
@@ -724,7 +731,6 @@ function ledgeAction(match, f, input) {
     return;
   }
   if (hop) {
-    f.invulnFrames = 10;
     f.vx = inland * 4.8;
     f.vy = f.def.stats.fullHopVel * 1.05;
     f.jumpsUsed = 1;
@@ -749,6 +755,7 @@ function ledgeAction(match, f, input) {
   } else {
     f.landingLag = heavy ? 26 : 16;
     f.invulnFrames = heavy ? 14 : 18;
+    f.ledgeId = id;
     transition(f, S.LEDGE_CLIMB);
   }
 }
@@ -771,7 +778,6 @@ function groundMove(match, f, x, y) {
       transition(f, S.TURN);
       f.vx = approach(f.vx, 0, traction * 3);
     } else if ((f.state === S.DASH && dir !== f.facing) || (f.state !== S.DASH && f.state !== S.RUN)) {
-      if (f.state === S.DASH) f.pivotFrame = match.frame;
       f.facing = dir;
       f.vx = dir * dashSpeed * 0.78;
       transition(f, S.DASH, true);
@@ -803,7 +809,7 @@ function dropThrough(f) {
 
 function shieldPressure(f, input) {
   f.lightShielding = isLightShield(input);
-  f.shieldScale = f.lightShielding ? 1.34 : 1;
+  f.shieldScale = f.lightShielding ? MELEE.LIGHT_SHIELD_RADIUS : 1;
 }
 
 function neutral(match, f, input) {
@@ -830,6 +836,21 @@ function neutral(match, f, input) {
     }
     return;
   }
+  if (f.grounded && f.state === S.DASH && f.stateFrame <= 14 && x * f.facing < -0.32) {
+    f.facing = Math.sign(x);
+    f.pivotFrame = match.frame;
+    f.vx = 0;
+    transition(f, S.DASH, true);
+  }
+  const pivot = f.grounded && f.state === S.DASH && match.frame - f.pivotFrame < 2;
+  if (pivot && !input.specialPressed && (input.attackPressed || input.grabPressed || f.inputBuffer.cStick)) {
+    f.vx = 0;
+    if (input.grabPressed) transition(f, S.GRAB);
+    else selectAttack(match, f, input);
+    event(match, 'tech', f, { tech: 'PIVOT' });
+    return;
+  }
+  if (pivot && match.frame === f.pivotFrame && !input.shield && !input.specialPressed) return;
   if (itemAction(match, f, input)) return;
   if (f.grounded && input.grabPressed) {
     faceInput(f, x);
@@ -1345,7 +1366,7 @@ function tickGrabHold(match, f, input) {
     recordDamage(match, victim, f, damage);
     victim.percent = roundDamage(victim.percent + damage);
     f.damageDealt = roundDamage(f.damageDealt + damage);
-    recordCombo(match, f, victim, 'pummel');
+    recordCombo(match, f, victim, 'pummel', false, damage);
     markHit(match, f, victim, { damage, moveKey: 'pummel' });
     return;
   }
@@ -1385,9 +1406,9 @@ function updateState(match, f, input) {
   if (input.shieldPressed || input.grabPressed) {
     f.lCancelTimer = MELEE.LCANCEL_WINDOW + 1;
   }
-  if (input.shieldPressed && f.techLock <= 0) {
-    f.techTimer = MELEE.TECH_WINDOW + 1;
-    f.techLock = 40;
+  if (input.shieldPressed) {
+    f.techTimer = !f.techLock && (f.state === S.TUMBLE || f.state === S.HITSTUN) ? MELEE.TECH_WINDOW : 0;
+    f.techLock = MELEE.TECH_LOCKOUT;
   }
   if (f.sleepImmuneFrames > 0) f.sleepImmuneFrames--;
   if (f.sleepTimer > 0 && --f.sleepTimer === 0) wakeFromSleep(match, f);
@@ -1402,7 +1423,7 @@ function updateState(match, f, input) {
   f.stateFrame++;
   if (f.doubleJumping) f.doubleJumpFrame++;
   for (const timer of ['invulnFrames', 'ledgeCooldown', 'shieldDrop', 'pummelTimer',
-    'dropTimer', 'comboTimer', 'lastHitTimer', 'wallJumpCooldown']) {
+    'dropTimer', 'wavelandLag', 'lastHitTimer', 'wallJumpCooldown']) {
     if (f[timer] > 0) f[timer]--;
   }
   if (!isShield(f) && !f.shieldBroken) f.shieldHp = Math.min(MELEE.SHIELD_MAX, f.shieldHp + MELEE.SHIELD_REGEN);
@@ -1446,6 +1467,7 @@ function updateState(match, f, input) {
     case S.LANDING:
     case S.LEDGE_CLIMB:
       if (f.stateFrame >= f.landingLag) {
+        if (f.state === S.LEDGE_CLIMB) f.ledgeId = null;
         transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
         neutral(match, f, input);
       }
@@ -1542,7 +1564,7 @@ function updateState(match, f, input) {
       break;
     case S.TECH:
       if (f.grounded && f.dodgeDir) f.vx = f.dodgeDir * 9.5 * detSin(Math.PI * f.stateFrame / 26);
-      if (f.stateFrame >= (f.grounded && f.dodgeDir ? 26 : 22)) {
+      if (f.stateFrame >= (f.grounded ? 26 : 22)) {
         transition(f, f.grounded ? S.IDLE : S.AIRBORNE);
         neutral(match, f, input);
       }
@@ -1584,6 +1606,9 @@ function updateState(match, f, input) {
 
 function land(match, f, surface, input, velocity) {
   const prior = f.state;
+  const ledgedash = f.ledgeDropFrame != null && f.ledgeDoubleJump && f.invulnFrames > 0 && f.ledgeDropId === ledgeKey(surface, f.ledgeSide);
+  f.ledgeDropFrame = null;
+  f.ledgeDoubleJump = false;
   const shffl = f.didShortHop && f.didFastFall && f.didAerial;
   f.didShortHop = f.didFastFall = f.didAerial = false;
   const activeAerial = prior === S.ATTACK && AIR_ATTACKS.has(f.moveKey);
@@ -1612,12 +1637,12 @@ function land(match, f, surface, input, velocity) {
       f.techTimer = 0;
       f.hitstun = 0;
       f.kbVx = 0;
-      f.dodgeDir = Math.abs(input.moveX || 0) > 0.45 ? Math.sign(input.moveX) : 0;
+      f.dodgeDir = Math.abs(input.moveX || 0) >= 0.45 ? Math.sign(input.moveX) : 0;
       f.vx = 0;
       delete f.inputBuffer.shield;
-      f.invulnFrames = Math.max(f.invulnFrames, 18);
+      f.invulnFrames = Math.max(f.invulnFrames, 20);
       transition(f, S.TECH);
-      event(match, 'tech', f, { dir: f.dodgeDir });
+      event(match, 'tech', f, { dir: f.dodgeDir, tech: f.dodgeDir ? 'TECH ROLL' : 'TECH' });
     } else if (velocity < -3 && f.def !== SAGGING_BAG) {
       f.hitstun = 0;
       f.kbVx *= 0.42;
@@ -1635,20 +1660,15 @@ function land(match, f, surface, input, velocity) {
     return;
   }
   if (prior === S.AIRDODGE) {
-    f.landingLag = 10;
+    f.landingLag = f.wavelandLag = 10;
     const cap = MELEE.WAVEDASH_LANDING_SPEED * Math.sqrt(80 / f.def.stats.weight);
     f.vx = clamp(f.vx, -cap, cap);
     const dir = Math.sign(f.vx);
-    if (dir) {
-      f.wavedashCount++;
-      event(match, 'wavedash', f, { dir });
-      if (f.ledgeDropFrame != null && match.frame - f.ledgeDropFrame <= 26 && f.ledgeDoubleJump &&
-          f.ledgeDropId === ledgeKey(surface, f.ledgeSide) && dir === -f.ledgeSide) {
-        f.invulnFrames += 10;
-        event(match, 'tech', f, { tech: 'LEDGEDASH' });
-      }
-      if (f.shineJump) event(match, 'tech', f, { tech: 'WAVESHINE' });
-    }
+    if (dir) f.wavedashCount++;
+    event(match, 'wavedash', f, { dir });
+    event(match, 'tech', f, { tech: 'WAVELAND' });
+    if (ledgedash) event(match, 'tech', f, { tech: 'LEDGEDASH' });
+    if (dir && f.shineJump) event(match, 'tech', f, { tech: 'WAVESHINE' });
   } else if (activeAerial && !f.moveData.bossTell) {
     const m = f.moveData;
     const lag = m.landingLag ?? 12;
@@ -1725,7 +1745,7 @@ function tryLedge(match, f, input, oldX, oldY) {
       });
       if (covered) continue;
       const id = ledgeKey(deck, side);
-      if (match.fighters.some((other) => other !== f && other.state === S.LEDGE_HANG &&
+      if (match.fighters.some((other) => other !== f && [S.LEDGE_HANG, S.LEDGE_CLIMB].includes(other.state) &&
           other.ledgeId === id && other.ledgeSide === side)) continue;
       if (f.vanished) {
         // Finish the seven invisible frames at the lip before snapping on reappearance.
@@ -1747,6 +1767,8 @@ function tryLedge(match, f, input, oldX, oldY) {
       f.upBUsed = f.sideBUsed = f.floatUsed = false;
       f.inputBuffer = {};
       f.floatFrames = 0;
+      f.ledgeDropFrame = null;
+      f.ledgeDoubleJump = false;
       f.ledgeId = id;
       f.ledgeSide = side;
       f.invulnFrames = Math.max(f.invulnFrames, MELEE.LEDGE_INVINCIBILITY);
@@ -1759,17 +1781,20 @@ function tryLedge(match, f, input, oldX, oldY) {
 
 function wallAction(match, f, input, side, touching) {
   if (f.def === SAGGING_BAG) return false;
-  if (HURT.has(f.state) && f.hitstun > 0 && f.techTimer > 0 && (touching || input.shieldPressed)) {
+  if ((f.state === S.TUMBLE || f.state === S.HITSTUN) && f.techTimer > 0 && touching) {
     f.techTimer = f.hitstun = f.kbVx = f.kbVy = 0;
     f.dodgeDir = 0;
     delete f.inputBuffer.shield;
-    f.vx = side * 5;
-    f.vy = 5;
+    const jump = input.jump || input.jumpPressed || input.moveY > 0.55;
+    f.vx = jump ? side * MELEE.WALL_JUMP_VX : 0;
+    f.vy = jump ? MELEE.WALL_JUMP_VY : 0;
+    f.fastFalling = false;
     f.launchAngle = null;
     clearMeteor(f);
-    f.invulnFrames = Math.max(f.invulnFrames, 18);
-    transition(f, S.TECH);
-    event(match, 'tech', f, { wall: true });
+    f.invulnFrames = Math.max(f.invulnFrames, 14);
+    if (jump && f.grounded) leaveFloor(f);
+    transition(f, jump ? S.AIRBORNE : S.TECH);
+    event(match, 'tech', f, { wall: true, tech: jump ? 'WALL TECH JUMP' : 'WALL TECH' });
     return true;
   }
   const away = (input.moveX ?? 0) * side;
@@ -2185,6 +2210,8 @@ function integrate(match, f, input, priorTerrain) {
       const feet = getSurfaceY(floor, edge);
       if (feet + 1 >= getSurfaceY(deck, edge) || feet + height <= deck.y - deck.h) continue;
       f.x = edge;
+      if ((f.state === S.TUMBLE || f.state === S.HITSTUN) &&
+          wallAction(match, f, input, -Math.sign(deltaX), true)) break;
       f.vx = 0;
       f.kbVx *= -0.4;
     }
@@ -2247,7 +2274,6 @@ function integrate(match, f, input, priorTerrain) {
     if (!f.floating) {
       for (const surface of [...match.surfaces, ...match.platforms]) {
         if (surface === floor || f.dropTimer > 0 && surface.id === f.dropId) continue;
-        if (f.state === S.AIRDODGE && input.moveY < -0.8 && surface.h == null && Math.abs(deltaX) < 5) continue;
         const previous = priorTerrain.find((p) => p.id === surface.id) ?? surface;
         const crossing = topCrossing(previous, surface, oldX, oldY, f.x, f.y);
         if (crossing == null) continue;
@@ -2298,12 +2324,18 @@ function circleHits(b, rect) {
   return dx * dx + dy * dy <= b.r * b.r;
 }
 
+function shieldRadius(f) {
+  return f.def.stats.shieldRadius * f.scale * f.shieldScale * (0.35 + 0.65 * f.shieldHp / MELEE.SHIELD_MAX);
+}
+
+function shieldOffset(b, f) {
+  return detHypot(b.x - (f.x + f.facing * 5), b.y - (f.y + f.def.stats.height * f.scale * 0.48));
+}
+
 function shieldHits(b, f) {
   if (!isShield(f) || f.shieldHp <= 0) return false;
   if (f.fighterId === 'broshee' && circleHits(b, f.hurtbox)) return true;
-  const s = f.def.stats;
-  const r = s.shieldRadius * f.scale * f.shieldScale * (0.35 + 0.65 * f.shieldHp / MELEE.SHIELD_MAX);
-  return detHypot(b.x - (f.x + f.facing * 5), b.y - (f.y + s.height * f.scale * 0.48)) <= b.r + r;
+  return shieldOffset(b, f) <= b.r + shieldRadius(f);
 }
 
 const eggParry = (f) => f.fighterId === 'broshee' && f.state === S.SHIELD && f.shieldAge < 6;
@@ -2389,7 +2421,7 @@ function applyDI(f, input) {
 }
 
 function comboLocked(v) {
-  return HURT.has(v.state) && v.hitstun > 0 || v.state === S.GRABBED;
+  return [S.HITSTUN, S.TUMBLE, S.KNOCKDOWN, S.GRABBED].includes(v.state);
 }
 
 function comboName(id, last, key, sweet) {
@@ -2401,11 +2433,13 @@ function comboName(id, last, key, sweet) {
   if (id === 'gigglefluff' && [M.UTHROW, M.UAIR, M.UTILT].includes(last) && key === M.DOWN_B) return 'NAPTIME SETUP!';
 }
 
-function recordCombo(match, a, v, key, sweet = false) {
+function recordCombo(match, a, v, key, sweet = false, damage = 0) {
   const previous = comboLocked(v) && v.receivedCombo?.port === a.port ? v.receivedCombo : null;
   const count = (previous?.count ?? 0) + 1;
   const moves = [...(previous?.moves ?? []).slice(-7), key];
-  v.receivedCombo = { port: a.port, count, moves };
+  a.comboDamage = roundDamage((previous?.damage ?? 0) + damage);
+  a.comboTimer = 0;
+  v.receivedCombo = { port: a.port, count, moves, damage: a.comboDamage };
   a.trueComboVictim = v.port;
   a.comboCount = a.trueComboCount = count;
   a.comboVictim = v.port;
@@ -2444,7 +2478,6 @@ function markHit(match, a, v, hit) {
   if (a && a !== v) {
     v.lastHitBy = a.port;
     v.lastHitTimer = 360;
-    a.comboTimer = Math.max(34, v.hitstun + 12);
   }
   v.lastSweetspot = !!(a && a !== v && hit.sweetspot);
   impactEvent(match, a, v, hit);
@@ -2465,13 +2498,21 @@ function recordDamage(match, victim, attacker, damage) {
   else if (victim.stockDamageOwner !== source) victim.stockDamageOwner = -1;
 }
 
+function moveRemaining(f) {
+  const m = f?.moveData;
+  return m ? Math.max(0, m.startup + m.active + m.endlag - f.moveFrame) : (f?.landingLag && f.state === S.LANDING ? Math.max(0, f.landingLag - f.stateFrame) : 0);
+}
+
 function strike(match, a, v, m, info) {
   const { mult = 1, key, box, projectile, unblockable, counterResponse, sweetspot = !!m.sweetspot } = info;
   if (m.airMeteor && !v.grounded) m = { ...m, angle: 270, meteor: true };
   const meteor = !!m.meteor && !v.grounded;
   const damage = roundDamage((info.damage ?? m.damage) * mult * (a?.permanentGiant ? 1.48 : 1));
   const direction = info.facing ?? a?.facing ?? 1;
-  if (!unblockable && box && shieldHits(box, v)) {
+  const poke = !unblockable && box && v.state === S.SHIELD && v.shieldHp < 38 &&
+    !powerShield(v) && !eggParry(v) && circleHits(box, v.hurtbox) && shieldOffset(box, v) > shieldRadius(v) * 0.82;
+  const remaining = info.remaining ?? moveRemaining(a);
+  if (!poke && !unblockable && box && shieldHits(box, v)) {
     if (eggParry(v)) {
       event(match, 'tech', v, { tech: 'PARRY' });
       return false;
@@ -2480,10 +2521,11 @@ function strike(match, a, v, m, info) {
       event(match, 'powershield', v);
       return false;
     }
-    v.shieldHp = Math.max(0, v.shieldHp - (damage * (m.shieldDamageMult ?? 1) + 0.6));
+    v.shieldHp = Math.max(0, v.shieldHp - ((damage * (m.shieldDamageMult ?? 1) + 0.6) * (v.lightShielding ? MELEE.LIGHT_SHIELD_DAMAGE : 1)));
     v.hitlag = Math.max(v.hitlag, Math.floor(damage * 0.2 + 2));
     if (a && !projectile) a.hitlag = Math.max(a.hitlag, v.hitlag);
     v.shieldStun = Math.ceil(damage * MELEE.SHIELD_STUN_MULT + MELEE.SHIELD_STUN_BASE);
+    if (a && a !== v) a.lastFrameAdv = clamp(v.shieldStun - remaining, -40, 40);
     v.vx += (Math.sign(v.x - (projectile ? box.x : a?.x ?? box.x)) || direction) * Math.min(9, 1 + damage * 0.32) * (v.lightShielding ? 1.6 : 1);
     if (!projectile && a?.grounded) a.vx -= direction * Math.min(4, damage * 0.2);
     transition(v, S.SHIELD_STUN, true);
@@ -2513,7 +2555,8 @@ function strike(match, a, v, m, info) {
     if (holder) holder.grabbing = null;
     v.grabbedBy = null;
   }
-  if (a && a !== v) recordCombo(match, a, v, key, sweetspot);
+  if (poke) event(match, 'tech', v, { tech: 'SHIELD POKE' });
+  if (a && a !== v) recordCombo(match, a, v, key, sweetspot, damage);
   else v.receivedCombo = null;
   const priorPercent = v.percent;
   recordDamage(match, v, a, damage);
@@ -2612,6 +2655,7 @@ function strike(match, a, v, m, info) {
     v.squashX = 1.16;
     v.squashY = 0.85;
   }
+  if (a && a !== v) a.lastFrameAdv = clamp((!armored && (!m.noFlinch || jabReset) ? v.hitstun : 0) - remaining, -40, 40);
   if (match.mode === MODE.HOMERUN && v.def === SAGGING_BAG && kb > 0) {
     v.derbyKnockback = kb;
     v.derbyHitFrame = match.frame;
@@ -2712,11 +2756,11 @@ function meleeCollisions(match, movable) {
     for (const v of match.fighters) {
       if (!rivals(a, v) || hits.has(v.port) || intangible(v)) continue;
       const b = boxes.find((box) => circleHits(box, v.hurtbox) || (!box.grab && shieldHits(box, v)));
-      if (b) queue.push({ a, v, b, hits, key: a.moveKey, mult: a.moveStale, facing: b.facing ?? a.facing });
+      if (b) queue.push({ a, v, b, hits, remaining: moveRemaining(a), key: a.moveKey, mult: a.moveStale, facing: b.facing ?? a.facing });
     }
   }
   // An already-active strike can trade even if its owner is hit on this tick.
-  for (const { a, v, b, hits, key, mult, facing } of queue) {
+  for (const { a, v, b, hits, key, mult, facing, remaining } of queue) {
     if (a.state === S.GRABBED || intangible(v) || hits.has(v.port)) continue;
     if (b.grab) {
       if (v.grabbedBy != null || v.state === S.LEDGE_HANG || a.grabbing != null) continue;
@@ -2731,7 +2775,7 @@ function meleeCollisions(match, movable) {
     }
     hits.add(v.port);
     const landed = strike(match, a, v, b.data, { key, mult, facing, box: b, charge: b.charge,
-      damage: b.damage, sweetspot: b.sweetspot, unblockable: b.grab });
+      remaining, damage: b.damage, sweetspot: b.sweetspot, unblockable: b.grab });
     if (landed && key === M.DAIR && a.moveData?.pogo && !a.grounded && !a.moveRecorded) {
       a.vy = Math.max(a.vy, 9);
       a.fastFalling = false;
@@ -3083,7 +3127,7 @@ function swingItem(match, f, item, input) {
   const tilt = !!c || detHypot(x, y) > 0.32;
   const plunger = def.id === 'plunger_bat';
   const homerun = plunger && smash;
-  const reach = hammer ? 98 : plunger ? (smash ? 115 : 77) : (smash ? 114 : tilt ? def.swingReach : 65);
+  const reach = hammer ? 98 : smash ? def.smashReach : tilt || plunger ? def.swingReach : 65;
   const damage = hammer ? (item.headless ? 0 : def.swingDamage) :
     plunger ? (smash ? def.swingDamage : def.pokeDamage) : smash ? def.swingDamage : tilt ? 12 : 8;
   const tip = { offsetX: reach * 0.82, radius: reach * 0.19, priority: 1, sweetspot: true, homerun: true };
@@ -3514,7 +3558,7 @@ function updateItems(match, priorTerrain) {
         item.vx = (drawRng(match) < 0.5 ? -1 : 1) * def.walkSpeed;
       } else item.vx = approach(item.vx, 0, 0.65);
     }
-    if (item.state === 'walking' && item.age % 10 === 0) {
+    if (item.state === 'walking' && item.age % def.steerInterval === 0) {
       const target = match.fighters.filter((f) => f.state !== S.DEAD && f.state !== S.RESPAWN && distance(item, f) <= 300)
         .sort((a, b) => distance(a, item) - distance(b, item))[0];
       if (target && Math.abs(target.x - item.x) > 4) item.vx = Math.sign(target.x - item.x) * def.walkSpeed;
@@ -4157,9 +4201,9 @@ export function stepMatch(match, inputsByPort = []) {
     positions.set(f, { x: f.x, y: f.y });
     const input = inputsByPort[f.port] ?? EMPTY;
     let allowed = derbyExpired && f.def !== SAGGING_BAG ? EMPTY : match.mode === MODE.ONLINE ? onlineInput(input) : input;
-    if (allowed.shortHopPressed || !allowed.shield && (isLightShield(allowed) || allowed.shieldAnalog >= 0.78)) {
+    if (allowed.shortHopPressed || !allowed.shield && (isLightShield(allowed) || allowed.shieldAnalog >= 0.72)) {
       allowed = { ...allowed, jumpPressed: !!(allowed.jumpPressed || allowed.shortHopPressed),
-        shield: !!(allowed.shield || isLightShield(allowed) || allowed.shieldAnalog >= 0.78) };
+        shield: !!(allowed.shield || isLightShield(allowed) || allowed.shieldAnalog >= 0.72) };
     }
     allowed = stickPresses(match, f, allowed);
     rememberPresses(match, f, allowed);
@@ -4207,8 +4251,10 @@ export function stepMatch(match, inputsByPort = []) {
       if (v?.receivedCombo?.port !== f.port || !comboLocked(v)) {
         f.comboCount = f.trueComboCount = 0;
         f.comboMoves = [];
+        f.comboTimer = 90;
       }
     }
+    else if (f.comboTimer > 0 && --f.comboTimer === 0) f.comboDamage = 0;
     if (f.lCancelTimer > 0) f.lCancelTimer--;
     if (f.techTimer > 0) f.techTimer--;
     if (f.techLock > 0) f.techLock--;

@@ -674,7 +674,79 @@ async function runUnitTests() {
       if (st > maxDbStage) maxDbStage = st;
     }
     assert.ok(maxDbStage >= 2, `Garth Side-B should advance Dancing Blade chain (maxStage=${maxDbStage})`);
-    console.log('PASS: SSBM mechanics validated (Crouch Cancel, Jab Reset, Broshee Parry, Screech Float Cancel, Shriek Needles, Garth Dancing Blade)');
+
+    // Round 2 SSBM mechanics: Waveland onto platform, Ground Tech Roll, Ledge-Hogging, Training CPU/DI & Frame Advantage
+    const mWl = createMatch({
+      mode: MODE.VS_STOCK, stageId: 'arguefield', stocks: 4, seed: 2027,
+      players: [
+        { port: 0, fighterId: 'faux', paletteIndex: 0, isCpu: false },
+        { port: 1, fighterId: 'garth', paletteIndex: 0, isCpu: false },
+      ],
+    });
+    mWl.status = 'playing'; mWl.introTimer = 0;
+    const plat = mWl.platforms[0];
+    mWl.fighters[0].x = plat.x + plat.w * 0.5;
+    mWl.fighters[0].y = plat.y + 14;
+    mWl.fighters[0].vy = -2;
+    mWl.fighters[0].grounded = false;
+    mWl.fighters[0].state = STATE.AIRBORNE;
+    let sawWaveland = false;
+    for (let t = 0; t < 18; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.moveX = 0.85; i0.moveY = -0.55; i0.shield = i0.shieldPressed = true; }
+      stepMatch(mWl, [i0, createEmptyInput()]);
+      if (mWl.events.some((e) => e.type === 'tech' && e.tech === 'WAVELAND')) sawWaveland = true;
+    }
+    assert.ok(sawWaveland, 'Diagonal airdodge onto a platform must trigger WAVELAND');
+
+    // Ground Tech Roll in tumble
+    const mTr = mkDuel('faux', 'garth');
+    mTr.fighters[0].y = 14; mTr.fighters[0].vy = -6; mTr.fighters[0].grounded = false;
+    mTr.fighters[0].state = STATE.TUMBLE; mTr.fighters[0].hitstun = 10;
+    let sawTechRoll = false;
+    for (let t = 0; t < 15; t++) {
+      const i0 = createEmptyInput();
+      if (t === 0) { i0.shield = i0.shieldPressed = true; i0.moveX = 0.9; }
+      else { i0.moveX = 0.9; }
+      stepMatch(mTr, [i0, createEmptyInput()]);
+      if (mTr.events.some((e) => e.type === 'tech' && e.tech === 'TECH ROLL')) sawTechRoll = true;
+    }
+    assert.ok(sawTechRoll, 'Pressing Shield + horizontal stick before landing in tumble must trigger TECH ROLL');
+
+    // Ledge-Hogging: second fighter cannot steal an occupied ledge
+    const mLh = mkDuel('faux', 'garth');
+    const deck = mLh.surfaces[0];
+    mLh.fighters[0].x = deck.x - 6; mLh.fighters[0].y = deck.y - 6;
+    mLh.fighters[0].vy = -2; mLh.fighters[0].grounded = false; mLh.fighters[0].state = STATE.AIRBORNE;
+    stepMatch(mLh, [createEmptyInput(), createEmptyInput()]);
+    assert.equal(mLh.fighters[0].state, STATE.LEDGE_HANG, 'P1 should grab left ledge');
+    mLh.fighters[1].x = deck.x - 6; mLh.fighters[1].y = deck.y - 6;
+    mLh.fighters[1].vy = -2; mLh.fighters[1].grounded = false; mLh.fighters[1].state = STATE.AIRBORNE;
+    stepMatch(mLh, [createEmptyInput(), createEmptyInput()]);
+    assert.notEqual(mLh.fighters[1].state, STATE.LEDGE_HANG, 'P2 must be denied an already occupied ledge (ledge-hogging)');
+
+    // Training Lab CPU behavior ('shield' / 'crouch') + Frame Advantage telemetry
+    const mTrain = createMatch({
+      mode: MODE.TRAINING, stageId: 'final-obligation', stocks: 4, seed: 2028,
+      players: [
+        { port: 0, fighterId: 'faux', paletteIndex: 0, isCpu: false },
+        { port: 1, fighterId: 'garth', paletteIndex: 0, isCpu: true, cpuLevel: 5 },
+      ],
+    });
+    mTrain.status = 'playing'; mTrain.introTimer = 0;
+    mTrain.trainingConfig = { cpuBehavior: 'shield', cpuDi: 'survival' };
+    mTrain.fighters[0].x = -24; mTrain.fighters[0].y = 0; mTrain.fighters[0].grounded = true; mTrain.fighters[0].facing = 1;
+    mTrain.fighters[1].x = 24; mTrain.fighters[1].y = 0; mTrain.fighters[1].grounded = true; mTrain.fighters[1].facing = -1;
+    for (let t = 0; t < 16; t++) {
+      const i0 = createEmptyInput();
+      if (t === 3) { i0.attack = i0.attackPressed = true; }
+      const i1 = computeCpuInput(mTrain, mTrain.fighters[1]);
+      stepMatch(mTrain, [i0, i1]);
+    }
+    assert.ok(Number.isFinite(mTrain.fighters[0].lastFrameAdv),
+      `Hitting shielding Training CPU must record finite lastFrameAdv (got ${mTrain.fighters[0].lastFrameAdv})`);
+
+    console.log('PASS: SSBM mechanics validated (Crouch Cancel, Jab Reset, Parry, Float Cancel, Needles, Dancing Blade, Waveland, Tech Roll, Ledge-Hog, Frame Adv)');
   }
 
   // Master Mitt 380 HP, Phase 2 transition, and multi-attack tells
@@ -1029,14 +1101,25 @@ async function runBrowserProof() {
     await desk.page.screenshot({ path: path.join(OUT_DIR, '06-targets.png') });
     console.log('PASS: Break the Targets mode renders cleanly');
 
-    // Verify Training Lab toolbar + on-demand item spawning
+    // Verify Training Lab toolbar + on-demand item spawning + CPU/DI selectors + telemetry
     await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.startMode('training', 'puddle-of-insomnia'));
     await desk.frame.waitForFunction(() => window.__BIZARRO_MELEE__.getMatch()?.status === 'playing', { timeout: 6000 });
     const spawned = await desk.frame.evaluate(() => Boolean(window.__BIZARRO_MELEE__.spawnTrainingItem('alarm_omb')));
     assert.ok(spawned, 'Training Lab should spawn items on demand');
+    const trainUi = await desk.frame.evaluate(() => {
+      window.__BIZARRO_MELEE__.setTrainingConfig({ cpuBehavior: 'shield', cpuDi: 'survival' });
+      const m = window.__BIZARRO_MELEE__.getMatch();
+      return {
+        cfg: m?.trainingConfig,
+        telText: document.getElementById('train-telemetry')?.textContent || '',
+      };
+    });
+    assert.equal(trainUi.cfg?.cpuBehavior, 'shield', 'Training Lab CPU behavior selector must update match.trainingConfig');
+    assert.equal(trainUi.cfg?.cpuDi, 'survival', 'Training Lab CPU DI selector must update match.trainingConfig');
+    assert.ok(trainUi.telText.includes('ADV'), `Training Lab telemetry pill should display ADV, got "${trainUi.telText}"`);
     await desk.page.waitForTimeout(400);
     await desk.page.screenshot({ path: path.join(OUT_DIR, '10-training.png') });
-    console.log('PASS: Training Lab toolbar & on-demand item spawn verified');
+    console.log('PASS: Training Lab toolbar, CPU/DI controls, telemetry & on-demand item spawn verified');
 
     // Event 8 (3P Boss HUD specificity) check: ALL 3 cards must have 0px name overflow at 1280x720
     await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.startEvent('ev-final-audit'));
@@ -1508,6 +1591,17 @@ async function runBrowserProof() {
     await mpPage.evaluate(() => { window.__mockGamepads[0].buttons[9] = { pressed: false, value: 0 }; });
     const stageAfterStart = await mpPage.evaluate(() => window.__BIZARRO_MELEE__.getState().screen);
     assert.equal(stageAfterStart, 'stage', `Pressing Start with all 4 pads ready must advance to Stage Select, got "${stageAfterStart}"`);
+    // Returning from Stage Select to CSS must preserve all 4 players' chosen fighters while unlocking tokens
+    await mpPage.locator('#btn-stage-back').click();
+    await mpPage.waitForTimeout(100);
+    const backCssPicks = await mpPage.evaluate(() => ({
+      screen: window.__BIZARRO_MELEE__.getState().screen,
+      names: Array.from(document.querySelectorAll('#css-ports .port-card .port-fighter')).map((el) => el.textContent),
+      lockedCount: document.querySelectorAll('#css-ports .port-card.locked').length,
+    }));
+    assert.equal(backCssPicks.screen, 'css', 'Stage Select Back must return to CSS');
+    assert.deepEqual(backCssPicks.names, afterPickIds, `Stage Select Back must preserve all 4 players' chosen fighters: ${JSON.stringify(backCssPicks)}`);
+    assert.equal(backCssPicks.lockedCount, 0, 'Stage Select Back should unlock tokens for quick adjustments');
 
     // Launch 4P match on Final Obligation and drive all 4 heterogeneous controllers simultaneously
     await mpPage.evaluate(() => {

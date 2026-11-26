@@ -1,4 +1,5 @@
-import { MELEE, MODE, MOVE, STATE, detHypot } from './constants.js';
+import { MELEE, MODE, MOVE, STATE, detCos, detHypot, detSin } from './constants.js';
+import { drawRng } from './physics.js';
 import { getSurfaceY } from './stages.js';
 import { createEmptyInput } from './input.js';
 
@@ -457,17 +458,43 @@ function crossGap(input, match, f, target, floor, level, hazardY) {
 }
 
 export function computeCpuInput(match, f) {
+  const lab = match.mode === MODE.TRAINING && f?.isCpu ? match.trainingConfig : null;
+  const behavior = lab ? (lab.cpuBehavior ?? match.trainingCpuMode ?? 'stand') : null;
+  const input = decideCpuInput(match, f, behavior);
+  if (!lab || !(f.hitlag && HURT.has(f.state) || f.hitstun > 0)) return input;
+  if (lab.cpuDi === 'random') {
+    const angle = drawRng(match) * 2 * Math.PI;
+    input.moveX = detCos(angle);
+    input.moveY = detSin(angle);
+  } else if (lab.cpuDi === 'survival') {
+    const deck = match.surfaces[0];
+    const inward = sign((deck ? deck.x + deck.w / 2 : 0) - f.x);
+    const length = detHypot(f.kbVx, f.kbVy);
+    const turn = sign(-f.kbVy * inward, 1);
+    input.moveX = length && f.kbVy ? -f.kbVy * turn / length : inward;
+    input.moveY = length ? f.kbVx * turn / length : 0;
+  } else if (lab.cpuDi === 'combo') {
+    input.moveX = -sign(f.kbVx) * 0.55;
+    input.moveY = -0.83;
+  } else {
+    input.moveX = input.moveY = 0;
+  }
+  return input;
+}
+
+function decideCpuInput(match, f, lab) {
   const input = createEmptyInput();
   if (!f || f.state === S.DEAD || f.fighterId === 'sagging-bag' || match.status === 'ended') return input;
-  const lab = match.mode === MODE.TRAINING ? match.trainingCpuMode ?? 'stand' : null;
   if (lab === 'stand') return input;
+  if (lab === 'crouch') { input.moveY = -1; return input; }
+  if (lab === 'shield') { input.shield = true; return input; }
   if (lab === 'jump') return f.grounded && match.frame % 45 === 0 ? tap(input, 'jump') : input;
   const hazardY = Math.max(match.stage.hotFloorY ?? -Infinity, match.stage.riverFlow?.y ?? -Infinity);
   const terrain = [...match.surfaces, ...match.platforms].filter((s) => getSurfaceY(s, f.x) > hazardY);
   const deck = terrain.find((s) => f.grounded && f.onPlatformId === s.id) ??
     terrain.reduce((best, s) => !best || deckDistance(s, f) < deckDistance(best, f) ? s : best, null);
   if (!deck) return input;
-  const level = clamp(Math.trunc(f.cpuLevel) || 5, 1, 9);
+  const level = lab === 'fight' ? 7 : clamp(Math.trunc(f.cpuLevel) || 5, 1, 9);
   const target = nearestOpponent(match, f);
   if (!target) return input;
   const dy = target.y - f.y;
@@ -477,6 +504,11 @@ export function computeCpuInput(match, f) {
   const offstage = !terrain.some((s) => f.x >= s.x - 5 && f.x <= s.x + s.w + 5 && f.y >= getSurfaceY(s, f.x) - 12);
   if (lab === 'evade') {
     if (f.state === S.LEDGE_HANG) return tap(input, 'jump', -f.ledgeSide);
+    if (f.state === S.TUMBLE || f.state === S.HITSTUN) {
+      if (!f.techLock && f.vy + f.kbVy < -2 && f.y - getSurfaceY(deck, f.x) < 35) return tap(input, 'shield', -dir);
+      return input;
+    }
+    if (!f.grounded && d < 85 && f.jumpsUsed < f.def.stats.maxJumps) return tap(input, 'jump', -dir);
     if (offstage && !f.grounded) return recover(input, match, f, deck, 7);
     if (evadeHazard(input, match, f, deck)) return input;
     const room = f.x - dir * 90 > deck.x && f.x - dir * 90 < deck.x + deck.w;
@@ -520,6 +552,15 @@ export function computeCpuInput(match, f) {
     if (f.y >= f.ledgeY + 5) return tap(input, 'shield', inland * 0.95, -0.52);
     input.moveX = inland;
     return input;
+  }
+  if (level >= 7 && !offstage && !f.hitlag && !f.hitstun && f.state === S.ATTACK) {
+    const m = f.moveData;
+    if (m?.kind === 'dancingBlade' && (m.bladeStage ?? 1) < 4 && !f.bladeInput &&
+        d < 105 && Math.abs(dy) < 70 && f.moveFrame >= m.startup - 3) return tap(input, 'special', dir);
+    if (m?.kind === 'needles') {
+      input.special = d > 165 && target.grounded && f.needleCount < 6;
+      return input;
+    }
   }
   if ((!offstage && climbSolidShelf(input, match, f, target, terrain)) ||
       crossGap(input, match, f, target, deck, level, hazardY)) {
@@ -634,8 +675,10 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
       if (f.jumpsUsed < stats.maxJumps) return tap(input, 'jump', dir * 0.65);
       return tap(input, 'special', dir * 0.45, 1);
     }
-    if (level >= 5 && f.state === S.TUMBLE && f.y < 80 && f.kbVy + f.vy < -2 && f.techLock <= 0) {
-      return tap(input, 'shield', input.moveX, input.moveY);
+    if (level >= 5 && !f.hitlag && f.state === S.TUMBLE && f.y - getSurfaceY(deck, f.x) < 35 &&
+        f.kbVy + f.vy < -2 && f.techLock <= 0) {
+      const escape = f.x - dir * 95 > deck.x && f.x - dir * 95 < deck.x + deck.w ? -dir : dir;
+      return tap(input, 'shield', level >= 7 ? escape : input.moveX, input.moveY);
     }
     return input;
   }
@@ -859,6 +902,52 @@ function fight(input, match, f, target, { terrain, deck, level, offstage, phase,
       Math.abs(target.x - f.x + (target.vx + target.kbVx) * 4) < 46) {
     input.cStickY = 1;
     return input;
+  }
+  if (level >= 7 && !offstage) {
+    const ready = f.grounded && GROUND_APPROACH.has(f.state);
+    if (f.fighterId === 'captain-pigeon' && target.jabReset && d < 80 &&
+        (f.state === S.JUMPSQUAT || f.state === S.AIRBORNE)) {
+      input.cStickX = dir;
+      input.moveX = dir;
+      return input;
+    }
+    if (ready && Math.abs(dy) < 35 && d < 65 && f.facing === dir) {
+      if (target.state === S.KNOCKDOWN && ![S.RUN, S.DASH].includes(f.state)) return tap(input, 'attack');
+      if (target.jabReset && target.hitstun > 3) {
+        if (f.fighterId === 'gigglefluff' && d < 30) return tap(input, 'special', 0, -1);
+        if (f.fighterId === 'captain-pigeon') return tap(input, 'jump', dir);
+        input.cStickX = dir;
+        return input;
+      }
+    }
+    if (ready && f.def.moves[M.SIDE_B].kind === 'dancingBlade' && d >= 55 && d < 98 && Math.abs(dy) < 40) {
+      return tap(input, 'special', dir);
+    }
+    if (ready && f.def.moves[M.NEUTRAL_B].kind === 'needles' && Math.abs(dy) < 65 &&
+        (f.needleCount === 0 && d > 205 && target.grounded ||
+         f.needleCount > 0 && (d > 115 || !target.grounded && d > 70))) {
+      return tap(input, 'special', dir * 0.35);
+    }
+    if (ready && f.def.moves[M.DOWN_B].kind === 'bucket') {
+      const incoming = match.projectiles.some((p) => p.ownerPort !== f.port && p.vx &&
+        ['fireball', 'greenFire', 'flame', 'bolt', 'laser', 'orb', 'chargeOrb', 'shadowOrb'].includes(p.style) &&
+        (p.x - f.x) * f.facing > 0 && (f.x - p.x) / p.vx > 0 &&
+        (f.x - p.x) / p.vx < 15 && Math.abs(p.y - f.y - 31) < 45);
+      if (f.bucketCount === 3 ? d < 110 && Math.abs(dy) < 45 && f.facing === dir : incoming) {
+        return tap(input, 'special', 0, -1);
+      }
+    }
+    if (ready && f.fighterId === 'broshee' && danger(match, f, level)?.eta <= 4) return tap(input, 'shield');
+    if (ready && f.percent < 45 && d < 85 && [M.JAB, M.FTILT, M.DTILT].includes(target.moveKey) &&
+        danger(match, f, level)?.eta <= 4) {
+      input.moveY = -1;
+      return input;
+    }
+    if (f.state === S.AIRBORNE && f.vy < -2 && d > 105 && dy < -35 &&
+        match.platforms.some((p) => f.x > p.x + 40 && f.x < p.x + p.w - 40 &&
+          f.y - getSurfaceY(p, f.x) > 0 && f.y - getSurfaceY(p, f.x) < 20)) {
+      return tap(input, 'shield', dir * 0.65, -0.7);
+    }
   }
   if (navPlatform(input, match, f, target)) return input;
 

@@ -457,6 +457,20 @@ export class SoundEngine {
             this._tone(180, 115, 0.08, 'triangle', 0.15);
           } else if (e.tech === 'FLOAT CANCEL') {
             this._tone(1180, 1620, 0.06, 'sine', 0.10);
+          } else if (e.tech === 'WAVELAND') {
+            this._noise(0.065, 2250, 1.3, 0.13);
+            this._tone(420, 240, 0.06, 'sine', 0.09);
+          } else if (e.tech === 'LEDGEDASH') {
+            this._tone(880, 1760, 0.085, 'triangle', 0.15);
+            this._noise(0.055, 2600, 1.2, 0.12);
+          } else if (e.tech === 'TECH' || e.tech === 'TECH ROLL' || e.tech === 'WALL TECH' || e.tech === 'WALL TECH JUMP') {
+            this._tone(740, 1480, 0.095, 'triangle', 0.17);
+            this._tone(1110, 2220, 0.09, 'sine', 0.12, 0.02);
+          } else if (e.tech === 'SHIELD POKE') {
+            this._noise(0.03, 3400, 1.0, 0.20);
+            this._tone(540, 190, 0.08, 'sawtooth', 0.15);
+          } else if (e.tech === 'PIVOT') {
+            this._noise(0.024, 2900, 1.6, 0.075);
           } else {
             this._noise(0.018, 3400, 1.8, 0.045);
             this._tone(1050, 1330, 0.045, 'sine', 0.055);
@@ -471,6 +485,7 @@ export class SoundEngine {
           for (const [i, ratio] of [1, 1.25, 1.5, 2].entries()) {
             this._tone(root * ratio, root * ratio * 1.025, 0.16, 'triangle', 0.085, 0.035 * i);
           }
+          if ((e.count || 0) >= 4) this._crowdCheer(Math.min(1, (e.count - 2) / 5));
           break;
         }
         case 'stageTransform':

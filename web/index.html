@@ -401,9 +401,20 @@
           <span>CPU</span>
           <select id="sel-train-cpu">
             <option value="stand" selected>Stand</option>
+            <option value="crouch">Crouch (CC)</option>
+            <option value="shield">Shield</option>
             <option value="jump">Jump</option>
             <option value="evade">Evade</option>
-            <option value="attack">Attack</option>
+            <option value="fight">Fight</option>
+          </select>
+        </label>
+        <label class="train-chip">
+          <span>DI</span>
+          <select id="sel-train-di">
+            <option value="none" selected>Neutral</option>
+            <option value="survival">Survival</option>
+            <option value="combo">Combo</option>
+            <option value="random">Random</option>
           </select>
         </label>
         <label class="train-chip">
@@ -412,6 +423,7 @@
         </label>
         <button id="btn-train-spawn" class="btn btn-accent btn-xs" type="button">Spawn Item</button>
         <button id="btn-train-focus" class="btn btn-ghost btn-xs" type="button">Playfield</button>
+        <span id="train-telemetry" class="train-telemetry">ADV -- &bull; 0 HIT</span>
       </div>
 
       <div id="hud-banner" class="hud-banner" hidden>READY</div>
@@ -454,9 +466,20 @@
               <span>CPU</span>
               <select id="sel-pause-train-cpu">
                 <option value="stand" selected>Stand</option>
+                <option value="crouch">Crouch (CC)</option>
+                <option value="shield">Shield</option>
                 <option value="jump">Jump</option>
                 <option value="evade">Evade</option>
-                <option value="attack">Attack</option>
+                <option value="fight">Fight</option>
+              </select>
+            </label>
+            <label class="train-chip">
+              <span>DI</span>
+              <select id="sel-pause-train-di">
+                <option value="none" selected>Neutral</option>
+                <option value="survival">Survival</option>
+                <option value="combo">Combo</option>
+                <option value="random">Random</option>
               </select>
             </label>
           </div>

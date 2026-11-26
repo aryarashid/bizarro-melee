@@ -981,7 +981,7 @@ export class GameRenderer {
     if (rig.buddy) {
       const bob = Math.sin(t * 1.4) * 4;
       ctx.save();
-      ctx.translate(-34, -h * 0.35 + bob);
+      ctx.translate(-24, -h * 0.62 + bob);
       ctx.fillStyle = '#ff4b8a';
       ctx.strokeStyle = '#111122';
       ctx.lineWidth = 2;
@@ -1117,9 +1117,10 @@ export class GameRenderer {
       ctx.stroke();
     }
 
-    // Cape behind body
-    if (rig.cape) {
-      ctx.fillStyle = rig.cape === 'labcoat' ? '#ffffff' : (rig.cape === 'nda' ? '#e2e8f0' : pal.accent);
+    // Cape behind body. Bario's nda flag is not a cape.
+    const whoEarly = f?.def?.id;
+    if ((rig.cape && whoEarly !== 'bario') || whoEarly === 'velda') {
+      ctx.fillStyle = whoEarly === 'velda' ? '#4c1d95' : whoEarly === 'garth' ? '#9f1d32' : whoEarly === 'troy' ? '#e8b84a' : rig.cape === 'labcoat' ? '#ffffff' : (rig.cape === 'nda' ? '#e2e8f0' : pal.accent);
       ctx.strokeStyle = outline; ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(-6, -h * 0.72);
@@ -1155,7 +1156,8 @@ export class GameRenderer {
     // Standard articulated limbs + torso + head
     const bodyW = sil.includes('brute') ? w * 0.78 : (sil === 'stout' || sil === 'parka' ? w * 0.68 : w * 0.56);
     const bodyH = h * 0.44;
-    const headR = sil.includes('tiny') ? 13 : (sil === 'kid' || sil === 'rodent' ? 15 : 17);
+    const whoId = f?.def?.id;
+    const headR = whoId === 'screech' ? 13 : whoId === 'squeegi' ? 14 : sil.includes('tiny') ? 13 : (sil === 'kid' || sil === 'rodent' ? 14 : 15);
     const hipY = -h * 0.28;
     const shoulderY = hipY - bodyH;
     const headY = shoulderY - headR + 3;
@@ -1169,7 +1171,7 @@ export class GameRenderer {
     ctx.fill(); ctx.stroke();
 
     // Torso / Dress
-    ctx.fillStyle = pal.body;
+    ctx.fillStyle = whoId === 'wonky-kong' ? '#2c3348' : whoId === 'shriek' ? '#1c2344' : whoId === 'velda' ? '#4c1d95' : pal.body;
     ctx.beginPath();
     if (sil === 'dress') {
       ctx.moveTo(-bodyW * 0.4, shoulderY);
@@ -1183,7 +1185,25 @@ export class GameRenderer {
     ctx.fill(); ctx.stroke();
 
     // Outfit stripe / tie / overalls / shell spikes
-    if (rig.prop === 'tie') {
+    if (whoId === 'wonky-kong') {
+      ctx.fillStyle = '#f4f1ea';
+      ctx.beginPath();
+      ctx.moveTo(-8, shoulderY + 4); ctx.lineTo(8, shoulderY + 4); ctx.lineTo(0, shoulderY + 18); ctx.fill();
+      ctx.fillStyle = '#e11d48';
+      ctx.beginPath();
+      ctx.moveTo(-3, shoulderY + 8); ctx.lineTo(3, shoulderY + 8); ctx.lineTo(4, shoulderY + 28); ctx.lineTo(0, shoulderY + 34); ctx.lineTo(-4, shoulderY + 28);
+      ctx.closePath(); ctx.fill();
+    } else if (whoId === 'dr-bario') {
+      ctx.fillStyle = '#f7f8ff';
+      ctx.fillRect(-bodyW * 0.46, shoulderY + 2, bodyW * 0.92, bodyH);
+      ctx.strokeStyle = '#9aa3b8'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, shoulderY + 16, 7, 0.2, Math.PI - 0.2); ctx.stroke();
+    } else if (whoId === 'squeegi') {
+      ctx.fillStyle = pal.body;
+      ctx.fillRect(-bodyW * 0.46, shoulderY + 2, bodyW * 0.92, bodyH * 0.48);
+      ctx.fillStyle = pal.outfit;
+      ctx.fillRect(-bodyW * 0.4, shoulderY + bodyH * 0.5, bodyW * 0.8, bodyH * 0.4);
+    } else if (rig.prop === 'tie') {
       ctx.fillStyle = pal.outfit;
       ctx.beginPath();
       ctx.moveTo(4, shoulderY + 6); ctx.lineTo(9, shoulderY + 26); ctx.lineTo(4, shoulderY + 32); ctx.lineTo(-1, shoulderY + 26);
@@ -1204,7 +1224,8 @@ export class GameRenderer {
     }
 
     // Head
-    ctx.fillStyle = (sil === 'flat2d' || sil === 'rodent' || sil === 'tinyRodent' || sil === 'fox' || sil === 'bird' || sil === 'dino' || sil === 'armor' || sil === 'tallCat')
+    ctx.fillStyle = whoId === 'wonky-kong' ? '#3a4258' : whoId === 'sourzer' ? '#e7a04a' : whoId === 'shriek' ? '#1c2344'
+      : (sil === 'flat2d' || sil === 'rodent' || sil === 'tinyRodent' || sil === 'fox' || sil === 'bird' || sil === 'dino' || sil === 'armor' || sil === 'tallCat')
       ? pal.body : pal.skin;
     ctx.beginPath();
     ctx.arc(0, headY, headR, 0, Math.PI * 2);
@@ -1266,6 +1287,22 @@ export class GameRenderer {
       case 'backCap':
       case 'snapback':
       case 'grillCap':
+        if (f?.def?.id === 'squeegi') {
+          ctx.fillStyle = '#7CFF3A';
+          ctx.fillRect(-r * 0.45, -r * 2.1, r * 0.9, r * 1.35);
+          ctx.fillRect(-r * 1.15, -r * 0.8, r * 2.3, 5);
+          break;
+        }
+        if (f?.def?.id === 'mess') {
+          ctx.save();
+          ctx.rotate(-0.45);
+          ctx.fillStyle = pal.body;
+          ctx.beginPath(); ctx.arc(-2, -r * 0.45, r * 0.8, Math.PI, 0); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = pal.outfit;
+          ctx.fillRect(-4, -r * 0.5, r * 1.5, 5);
+          ctx.restore();
+          break;
+        }
         ctx.fillStyle = pal.outfit;
         ctx.beginPath(); ctx.arc(0, -r * 0.5, r * 0.92, Math.PI, 0); ctx.fill(); ctx.stroke();
         ctx.fillRect(rig.hat === 'backCap' || rig.hat === 'snapback' ? -r * 1.35 : -2, -r * 0.55, r * 1.4, 5);
@@ -1320,6 +1357,10 @@ export class GameRenderer {
       case 'tiara':
       case 'mysticCrown':
       case 'tiaraHair':
+        if (f?.def?.id === 'velda') {
+          ctx.fillStyle = '#4c1d95';
+          ctx.beginPath(); ctx.arc(0, 6, r + 3, Math.PI * 1.2, Math.PI * 1.8); ctx.fill();
+        }
         ctx.fillStyle = '#ffdf4d';
         ctx.beginPath();
         ctx.moveTo(-10, -r + 2); ctx.lineTo(-6, -r - 9); ctx.lineTo(0, -r - 2); ctx.lineTo(6, -r - 10); ctx.lineTo(10, -r + 2);

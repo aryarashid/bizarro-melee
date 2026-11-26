@@ -64,6 +64,7 @@ const app = {
   stageFilterCat: 'all',
   trainingSpeed: 1,
   trainingCpuMode: 'stand',
+  trainingDi: 'none',
   suddenDeathBannerFrames: 0,
   stocks: 4,
   timeSeconds: 300,
@@ -844,6 +845,7 @@ function launchConfiguredMatch(onlineCfg = null) {
   if (app.selectedMode === MODE.TRAINING) {
     app.match.timeScale = app.trainingSpeed;
     app.match.trainingCpuMode = app.trainingCpuMode;
+    app.match.trainingConfig = { cpuBehavior: app.trainingCpuMode, cpuDi: app.trainingDi };
   }
 
   renderer3d.reset(app.match.stage);
@@ -879,6 +881,11 @@ function buildMatchHud(match) {
   if (isTraining) {
     if ($('sel-train-speed')) $('sel-train-speed').value = String(app.trainingSpeed);
     if ($('sel-train-cpu')) $('sel-train-cpu').value = app.trainingCpuMode;
+    if ($('sel-train-di')) $('sel-train-di').value = app.trainingDi;
+    if ($('train-telemetry')) {
+      $('train-telemetry').textContent = 'ADV -- • 0 HIT';
+      $('train-telemetry').className = 'train-telemetry';
+    }
   }
   $('btn-hud-hitboxes').textContent = `Hitboxes: ${app.hitboxesVisible ? 'On' : 'Off'}`;
 
@@ -953,9 +960,12 @@ function buildMatchHud(match) {
         stockPips.push(pip);
       }
     }
+    const resEl = document.createElement('div');
+    resEl.className = 'hud-resource';
+    resEl.hidden = true;
     const comboEl = document.createElement('div');
     comboEl.className = 'hud-combo';
-    meta.append(nameEl, stocksEl, comboEl);
+    meta.append(nameEl, stocksEl, resEl, comboEl);
 
     const pctEl = document.createElement('div');
     pctEl.className = isBoss ? 'hud-pct hud-boss-hp' : 'hud-pct';
@@ -967,9 +977,9 @@ function buildMatchHud(match) {
     container.appendChild(card);
 
     app.hudRefs.push({
-      port: f.port, card, canvas: c, stocksEl, pctEl, comboEl,
+      port: f.port, card, canvas: c, stocksEl, pctEl, resEl, comboEl,
       bossBar, bossFill, scorePill, stockPips,
-      lastPct: Math.floor(f.percent || 0), lastHp: -1, lastStocks: -1, lastScore: null, lastCombo: '',
+      lastPct: Math.floor(f.percent || 0), lastHp: -1, lastStocks: -1, lastScore: null, lastCombo: '', lastRes: '',
       shake: 0, pipColor: borderCol, isBoss,
     });
   }
@@ -1150,16 +1160,60 @@ function updateMatchHud(match) {
       }
     }
 
+    // Character-specific resource meter (Shriek needles, Mr. Beep Oil Panic, Charge Shot, Nana-Bot)
+    let resText = '';
+    let resReady = false;
+    if (f.fighterId === 'shriek' && (f.needleCount || 0) > 0) {
+      resText = f.needleCount >= 6 ? 'NEEDLES 6/6 MAX' : `NEEDLES ${f.needleCount}/6`;
+      resReady = f.needleCount >= 6;
+    } else if (f.fighterId === 'mr-beep-blob' && (f.bucketCount || 0) > 0) {
+      resText = f.bucketCount >= 3 ? 'OIL 3/3 READY!' : `OIL ${f.bucketCount}/3`;
+      resReady = f.bucketCount >= 3;
+    } else if ((f.chargeShotLevel || 0) > 0.08 && f.fighterId !== 'shriek') {
+      const pctCharge = Math.round(Math.min(1, f.chargeShotLevel) * 100);
+      resText = pctCharge >= 98 ? 'CHARGE MAX!' : `CHARGE ${pctCharge}%`;
+      resReady = pctCharge >= 98;
+    } else if (f.fighterId === 'slush-shovelers') {
+      resText = f.partnerKo ? 'NANA-BOT KO' : 'NANA-BOT ON';
+      resReady = !f.partnerKo;
+    }
+    const resKey = `${resText}|${resReady ? 1 : 0}`;
+    if (ref.resEl && resKey !== ref.lastRes) {
+      ref.lastRes = resKey;
+      ref.resEl.hidden = !resText;
+      if (resText) {
+        ref.resEl.textContent = resText;
+        ref.resEl.className = resReady ? 'hud-resource ready' : 'hud-resource';
+      }
+    }
+
     const heldItem = f.heldItemId != null ? match.items?.find((it) => it.id === f.heldItemId) : null;
     const heldText = heldItem?.def?.name
       ? (heldItem.ammo != null
           ? `HOLD: ${heldItem.def.name} (${heldItem.ammo > 0 ? heldItem.ammo : 'EMPTY'})`
           : `HOLD: ${heldItem.def.name}`)
       : null;
-    const comboText = heldText || (f.comboCount >= 2 ? `${f.comboCount} HIT COMBO!` : '');
+    const comboDmg = Math.round(f.comboDamage || 0);
+    const comboText = heldText || (f.comboCount >= 2 ? (comboDmg > 0 ? `${f.comboCount} HIT • ${comboDmg}%` : `${f.comboCount} HIT COMBO!`) : '');
     if (comboText !== ref.lastCombo) {
       ref.lastCombo = comboText;
       ref.comboEl.textContent = comboText;
+      ref.comboEl.className = (!heldText && f.comboCount >= 3) ? 'hud-combo hot' : 'hud-combo';
+    }
+  }
+
+  if (match.mode === MODE.TRAINING) {
+    const tel = $('train-telemetry');
+    const p1 = match.fighters[0];
+    if (tel && p1) {
+      const adv = Number.isFinite(p1.lastFrameAdv) ? Math.round(p1.lastFrameAdv) : null;
+      const advStr = adv == null ? 'ADV --' : `ADV ${adv > 0 ? '+' : ''}${adv}f`;
+      const hits = p1.comboCount || 0;
+      const dmg = Math.round(p1.comboDamage || 0);
+      const nextText = hits >= 2 ? `${advStr} • ${hits} HIT (${dmg}%)` : `${advStr} • ${hits} HIT`;
+      setStableText(tel, nextText);
+      const nextCls = adv == null ? 'train-telemetry' : (adv >= 0 ? 'train-telemetry pos' : 'train-telemetry neg');
+      if (tel.className !== nextCls) tel.className = nextCls;
     }
   }
 }
@@ -2452,9 +2506,20 @@ function wireUi() {
   };
   const setTrainingCpu = (val) => {
     app.trainingCpuMode = val || 'stand';
-    if (app.match) app.match.trainingCpuMode = app.trainingCpuMode;
+    if (app.match) {
+      app.match.trainingCpuMode = app.trainingCpuMode;
+      app.match.trainingConfig = { ...(app.match.trainingConfig || {}), cpuBehavior: app.trainingCpuMode, cpuDi: app.trainingDi };
+    }
     if ($('sel-train-cpu')) $('sel-train-cpu').value = app.trainingCpuMode;
     if ($('sel-pause-train-cpu')) $('sel-pause-train-cpu').value = app.trainingCpuMode;
+  };
+  const setTrainingDi = (val) => {
+    app.trainingDi = val || 'none';
+    if (app.match) {
+      app.match.trainingConfig = { ...(app.match.trainingConfig || {}), cpuBehavior: app.trainingCpuMode, cpuDi: app.trainingDi };
+    }
+    if ($('sel-train-di')) $('sel-train-di').value = app.trainingDi;
+    if ($('sel-pause-train-di')) $('sel-pause-train-di').value = app.trainingDi;
   };
   const spawnTrainingSelectedItem = (fromPause = false) => {
     if (!app.match || app.match.mode !== MODE.TRAINING) return;
@@ -2495,6 +2560,8 @@ function wireUi() {
   $('sel-pause-train-speed')?.addEventListener('change', (e) => setTrainingSpeed(e.target.value));
   $('sel-train-cpu')?.addEventListener('change', (e) => { setTrainingCpu(e.target.value); returnFocusToArena(); });
   $('sel-pause-train-cpu')?.addEventListener('change', (e) => setTrainingCpu(e.target.value));
+  $('sel-train-di')?.addEventListener('change', (e) => { setTrainingDi(e.target.value); returnFocusToArena(); });
+  $('sel-pause-train-di')?.addEventListener('change', (e) => setTrainingDi(e.target.value));
   $('sel-train-item')?.addEventListener('change', (e) => {
     if ($('sel-pause-train-item')) $('sel-pause-train-item').value = e.target.value;
     returnFocusToArena();
@@ -2530,8 +2597,13 @@ function wireUi() {
     if (btn && !btn.disabled) btn.click();
   });
 
-  // Stage Select
-  $('btn-stage-back').addEventListener('click', () => { sound.playUi('back'); showScreen('css'); });
+  // Stage Select (returning to CSS preserves all players' fighter picks and unlocks tokens for quick edits)
+  $('btn-stage-back').addEventListener('click', () => {
+    sound.playUi('back');
+    for (const c of app.cssCursors) if (c) c.locked = false;
+    syncCssSelection();
+    showScreen('css');
+  });
   for (const b of document.querySelectorAll('[data-stage-cat]')) {
     b.addEventListener('click', () => { sound.playUi('move'); buildStageGrid(b.dataset.stageCat); });
   }
@@ -2983,6 +3055,22 @@ async function boot() {
     setHitboxes: (on) => {
       app.hitboxesVisible = Boolean(on);
       $('inp-hitboxes').checked = app.hitboxesVisible;
+    },
+    setTrainingConfig: ({ cpuBehavior, cpuDi } = {}) => {
+      if (cpuBehavior) {
+        app.trainingCpuMode = cpuBehavior;
+        if ($('sel-train-cpu')) $('sel-train-cpu').value = cpuBehavior;
+        if ($('sel-pause-train-cpu')) $('sel-pause-train-cpu').value = cpuBehavior;
+      }
+      if (cpuDi) {
+        app.trainingDi = cpuDi;
+        if ($('sel-train-di')) $('sel-train-di').value = cpuDi;
+        if ($('sel-pause-train-di')) $('sel-pause-train-di').value = cpuDi;
+      }
+      if (app.match) {
+        app.match.trainingCpuMode = app.trainingCpuMode;
+        app.match.trainingConfig = { cpuBehavior: app.trainingCpuMode, cpuDi: app.trainingDi };
+      }
     },
   };
 

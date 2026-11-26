@@ -338,8 +338,8 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
     }
     for (const side of [-1, 1]) {
       const x = 128 + side * spacing;
-      const ry = impact ? 29 : squint && !taunt && !victory ? 18 : big ? 29 : 23;
-      const rx = big ? 34 : 31;
+      const ry = impact ? 34 : squint && !taunt && !victory ? 20 : big ? 34 : 27;
+      const rx = big ? 38 : 35;
       const tilt = intense ? side * -0.24 : side * 0.10;
       if (!tech) {
         ellipse(c, x + side * 13, 143, 23, 10, '#ef6c7259', side * 0.13);
@@ -447,13 +447,17 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
         c.fillStyle = ink; c.fill();
         stroke(c, (p) => { p.moveTo(x - 16, y + 6); p.quadraticCurveTo(x + 6, y + 9, x + 22, y - 4); }, ivory, 4);
       } else {
-        stroke(c, (p) => { p.moveTo(105, y - 2); p.quadraticCurveTo(129, y + (squint ? 2 : 16), 155, y - (squint ? 5 : 0)); }, ink, 6.5);
+        stroke(c, (p) => { p.moveTo(96, y - 2); p.quadraticCurveTo(128, y + (squint ? 4 : 22), 164, y - (squint ? 6 : 0)); }, ink, 8);
       }
     }
     if (rig.hat === 'ninjaWrap') {
-      c.fillStyle = '#29304c';
-      c.beginPath(); c.moveTo(0, 155); c.quadraticCurveTo(128, 131, 256, 154); c.lineTo(256, 232); c.lineTo(0, 232); c.closePath(); c.fill();
-      for (let t = 0; t < 3; t++) stroke(c, (p) => { p.moveTo(0, 176 + t * 21); p.quadraticCurveTo(110, 190 + t * 15, 256, 168 + t * 18); }, '#61648b', 3);
+      const scarf = c.createLinearGradient(0, 150, 0, 236);
+      scarf.addColorStop(0, '#1a1e3300');
+      scarf.addColorStop(0.18, '#1c2144');
+      scarf.addColorStop(1, '#10142a');
+      c.fillStyle = scarf;
+      c.beginPath(); c.moveTo(0, 172); c.quadraticCurveTo(128, 156, 256, 172); c.lineTo(256, 240); c.lineTo(0, 240); c.closePath(); c.fill();
+      for (let t = 0; t < 2; t++) stroke(c, (p) => { p.moveTo(16, 188 + t * 18); p.quadraticCurveTo(128, 198 + t * 10, 240, 182 + t * 16); }, '#3a4270', 2);
     }
     const id = def.id;
     if (id === 'screech' && !blink && !hurt) {
@@ -467,8 +471,21 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
       for (let i = -2; i <= 2; i++) c.fillRect(116 + i * 9, 166, 5, 11);
     }
     if (id === 'wonky-kong') {
-      ellipse(c, 90, 126, 4, 9, '#7ee7f2');
-      ellipse(c, 170, 132, 3.5, 8, '#7ee7f2');
+      ellipse(c, 128, 154, 30, 18, '#8d95aa');
+      ellipse(c, 116, 150, 5, 4, '#2c3348');
+      ellipse(c, 142, 150, 5, 4, '#2c3348');
+      ellipse(c, 90, 118, 5, 11, '#7ee7f2');
+      ellipse(c, 170, 122, 5, 11, '#7ee7f2');
+    }
+    if (id === 'shriek' && !hurt && !blink && !impact) {
+      for (const side of [-1, 1]) {
+        const x = 128 + side * spacing;
+        ellipse(c, x + 4, ey + 2, 12, 9, '#9af6ff');
+        ellipse(c, x + 6, ey + 1, 4, 4, '#ffffff');
+      }
+    }
+    if (id === 'sourzer') {
+      stroke(c, (p) => { p.moveTo(58, 58); p.lineTo(114, 86); p.moveTo(198, 58); p.lineTo(142, 86); }, '#3a2416', 9);
     }
     if (id === 'dadondorf') {
       stroke(c, (p) => { p.moveTo(68, 58); p.lineTo(116, 78); p.moveTo(188, 58); p.lineTo(140, 78); }, ink, 8);
@@ -501,6 +518,8 @@ export function getFaceTexture(def, palette, expression = 'normal', T = globalTh
       }
     }
     if (id === 'spitzu' && !hurt && !blink) {
+      ellipse(c, 68, 138, 18, 12, '#ff4d6a');
+      ellipse(c, 188, 138, 18, 12, '#ff4d6a');
       c.fillStyle = '#fffaf2';
       for (let i = -3; i <= 3; i++) c.fillRect(108 + i * 8, 164, 4, 10);
     }
@@ -518,11 +537,13 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
   const key = ['fabric', def.id, pal.body, pal.outfit, pal.accent].join(':');
   return cached(owner, key, () => {
     const c = canvas(256), b = canvas(256);
+    const id = def.id;
     const armoured = rig.silhouette === 'armor' || rig.prop === 'shellSpikes';
     const quilt = ['parka', 'ovenMitt', 'sandbag'].includes(rig.silhouette);
-    const overalls = !!rig.stache;
+    const doctor = id === 'dr-bario', plumber = id === 'squeegi';
+    const overalls = !!rig.stache && !doctor && !plumber;
     const random = rng(key);
-    c.fillStyle = pal.body;
+    c.fillStyle = id === 'wonky-kong' ? '#2c3348' : id === 'shriek' ? '#1c2344' : id === 'velda' ? '#4c1d95' : pal.body;
     c.fillRect(0, 0, 256, 256);
     b.fillStyle = '#858585';
     b.fillRect(0, 0, 256, 256);
@@ -556,7 +577,51 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
       p.strokeStyle = line; p.lineWidth = 3; p.stroke();
     };
     for (const x of [64, 192]) {
-      if (armoured) {
+      if (id === 'wonky-kong') {
+        for (const side of [-1, 1]) {
+          c.beginPath();
+          c.moveTo(x + side * 4, 22); c.lineTo(x + side * 38, 40); c.lineTo(x + side * 12, 82); c.closePath();
+          c.fillStyle = '#f4f1ea'; c.fill();
+        }
+        c.fillStyle = '#3a4258';
+        c.fillRect(x - 20, 96, 40, 70);
+      } else if (id === 'dr-bario') {
+        c.fillStyle = '#f7f8ff';
+        c.fillRect(x - 48, 16, 96, 210);
+        c.fillStyle = pal.body;
+        c.beginPath();
+        c.moveTo(x - 8, 20); c.lineTo(x + 8, 20); c.lineTo(x + 5, 68); c.lineTo(x - 5, 68); c.closePath(); c.fill();
+        for (const side of [-1, 1]) {
+          c.beginPath();
+          c.moveTo(x + side * 6, 24); c.lineTo(x + side * 36, 28); c.lineTo(x + side * 14, 96); c.closePath();
+          c.fillStyle = '#e7ebf8'; c.fill();
+          c.strokeStyle = '#c5cce0'; c.lineWidth = 2; c.stroke();
+        }
+        c.strokeStyle = '#9aa3b8'; c.lineWidth = 4;
+        c.beginPath(); c.arc(x, 78, 16, 0.2, Math.PI - 0.2); c.stroke();
+        c.fillStyle = '#d7deea';
+        c.beginPath(); c.arc(x - 14, 92, 5, 0, Math.PI * 2); c.arc(x + 14, 92, 5, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#c9a24a';
+        c.beginPath(); c.arc(x, 118, 4, 0, Math.PI * 2); c.fill();
+      } else if (id === 'squeegi') {
+        c.fillStyle = pal.body;
+        c.fillRect(x - 46, 14, 92, 108);
+        for (const side of [-1, 1]) {
+          c.beginPath();
+          c.moveTo(x + side * 4, 18); c.lineTo(x + side * 30, 24); c.lineTo(x + side * 10, 78); c.closePath();
+          c.fillStyle = '#c4b5fd'; c.fill();
+        }
+        c.fillStyle = pal.outfit;
+        c.fillRect(x - 40, 112, 80, 130);
+        ellipse(c, x, 118, 6, 7, '#f6e27a');
+      } else if (id === 'dadondorf') {
+        c.fillStyle = '#f6f1e8';
+        c.fillRect(x - 18, 28, 8, 48);
+        c.fillRect(x + 10, 28, 8, 48);
+        c.fillStyle = pal.outfit;
+        c.beginPath();
+        c.moveTo(x - 22, 62); c.lineTo(x + 22, 62); c.lineTo(x + 26, 168); c.lineTo(x - 26, 168); c.closePath(); c.fill();
+      } else if (armoured) {
         panels(c, x, pal.outfit, '#202438'); panels(b, x, '#b4b4b4', '#484848');
         stroke(c, (p) => { p.moveTo(x - 23, 86); p.lineTo(x, 97); p.lineTo(x + 23, 86); }, pal.accent, 4);
       } else if (overalls) {
@@ -568,11 +633,6 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
           ellipse(b, x + side * 18, 113, 5, 6, '#dedede');
         }
         stroke(c, (p) => { p.moveTo(x - 13, 132); p.lineTo(x - 12, 157); p.lineTo(x + 12, 157); p.lineTo(x + 13, 132); p.closePath(); }, '#f5e4b9aa', 1.8);
-        if (def.id === 'squeegi') {
-          c.fillStyle = '#7c3aed';
-          c.fillRect(x - 52, 34, 24, 30);
-          c.fillRect(x + 28, 34, 24, 30);
-        }
       } else if (rig.prop === 'tie' || rig.cape === 'labcoat' || rig.cape === 'apron' || rig.cape === 'nda') {
         panels(c, x, pal.outfit, '#19182945');
         for (const side of [-1, 1]) {
@@ -597,13 +657,47 @@ export function getOutfitTextures(def, pal, T = globalThis.THREE, owner = T) {
           c.fillRect(x - 52, 34, 24, 30);
           c.fillRect(x + 28, 34, 24, 30);
         }
-        if (def.id === 'broshee') ellipse(c, x, 118, 18, 30, '#f6edd8');
-        if (def.id === 'chikapu') ellipse(c, x, 128, 20, 28, '#fffaf2');
-        if (def.id === 'shriek') { c.fillStyle = '#c5c8d4'; c.fillRect(x - 8, 36, 18, 96); }
+        if (id === 'broshee') {
+          ellipse(c, x, 108, 28, 38, '#ffe56a');
+          ellipse(c, x, 108, 16, 22, '#fff4c4');
+        }
+        if (id === 'chikapu') ellipse(c, x, 128, 20, 28, '#fffaf2');
+        if (id === 'shriek') {
+          for (let band = 30; band < 180; band += 22) {
+            c.fillStyle = band % 44 ? '#14182e' : '#2a3158';
+            c.fillRect(x - 34, band, 68, 7);
+          }
+        }
+        if (id === 'mess') {
+          for (let band = 22; band < 188; band += 16) {
+            c.fillStyle = (Math.floor(band / 16) % 2) ? pal.body : pal.outfit;
+            c.fillRect(x - 42, band, 84, 8);
+          }
+        }
+        if (id === 'zink' || id === 'tiny-zink') {
+          c.fillStyle = '#6b3e22';
+          c.fillRect(x - 38, 148, 76, 14);
+          ellipse(c, x, 155, 6, 7, '#e6c36a');
+        }
+        if (id === 'garth') {
+          c.fillStyle = '#facc15';
+          c.fillRect(x - 44, 26, 24, 12);
+          c.fillRect(x + 20, 26, 24, 12);
+        }
+        if (id === 'troy') {
+          c.fillStyle = '#facc15';
+          c.fillRect(x - 20, 34, 40, 10);
+        }
         stroke(c, (p) => { p.moveTo(x - 22, 21); p.lineTo(x - 15, 68); p.lineTo(x + 15, 68); p.lineTo(x + 22, 21); }, '#17152975', 3);
         ellipse(c, x, 103, 9, 13, pal.outfit);
         ellipse(c, x, 102, 4, 7, pal.accent);
       }
+    }
+    if (id === 'screech') {
+      c.fillStyle = '#ffd0ea';
+      c.fillRect(0, 148, 256, 16);
+      c.fillStyle = '#ff4fa3';
+      c.fillRect(0, 172, 256, 14);
     }
     stroke(c, (p) => { p.moveTo(0, 207); p.lineTo(256, 207); }, '#120d2660', 6);
     stroke(b, (p) => { p.moveTo(0, 207); p.lineTo(256, 207); }, '#575757', 3);
