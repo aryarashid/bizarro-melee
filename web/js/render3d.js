@@ -5277,17 +5277,17 @@ export class GameRenderer3D {
     const tx = mix(clamp((minX + maxX) * 0.5, bounds.left, bounds.right), this.finish?.x ?? 0, reveal * 0.90);
     const ty = mix(clamp((minY + maxY) * 0.5, bounds.bottom + 48, bounds.top), this.finish?.y ?? 0, reveal * 0.84);
     const halfFov = Math.tan(this.camera.fov * Math.PI / 360);
-    const zForY = Math.max(closeDeck ? 300 : 425, maxY - minY) * 0.55 / halfFov;
-    const zForX = Math.max(closeDeck ? 160 : portrait ? 280 : 570, maxX - minX) * 0.55 / (halfFov * aspect);
-    const zoom = mix(1, 0.65, reveal);
+    const zForY = Math.max(closeDeck ? 290 : 350, maxY - minY) * 0.54 / halfFov;
+    const zForX = Math.max(closeDeck ? 160 : portrait ? 280 : 465, maxX - minX) * 0.54 / (halfFov * aspect);
+    const zoom = mix(1, 0.64, reveal);
     const maxZ = portrait ? 5600 : 4100;
-    const minZ = closeDeck ? 595 : match.stage.id === 'sandbag-yard' ? 685 : 755;
-    const tz = clamp(Math.max(zForX, zForY) * zoom, mix(minZ, 555, reveal), maxZ);
+    const minZ = closeDeck ? 560 : match.stage.id === 'sandbag-yard' ? 640 : 595;
+    const tz = clamp(Math.max(zForX, zForY) * zoom, mix(minZ, 505, reveal), maxZ);
     const step = finishActive && finishAge !== this.lastFinishAge ? Math.max(1, delta) : delta;
     this.lastFinishAge = finishAge;
-    this.camX = mix(this.camX, tx, 1 - Math.exp(-step * (finishActive || fighters.length === 1 && match.homerun?.launched ? 0.28 : 0.145)));
-    this.camY = mix(this.camY, ty, 1 - Math.exp(-step * (finishActive ? 0.24 : 0.12)));
-    this.camZ = mix(this.camZ, tz, 1 - Math.exp(-step * (finishActive ? 0.23 : 0.12)));
+    this.camX = mix(this.camX, tx, 1 - Math.exp(-step * (finishActive || fighters.length === 1 && match.homerun?.launched ? 0.28 : 0.165)));
+    this.camY = mix(this.camY, ty, 1 - Math.exp(-step * (finishActive ? 0.24 : 0.14)));
+    this.camZ = mix(this.camZ, tz, 1 - Math.exp(-step * (finishActive ? 0.23 : 0.135)));
     if (portrait && !finishActive) {
       // Let the camera ease inward, but pull out immediately if the smoothed pan would clip a fighter.
       const usableWidth = 1 - Math.min(0.15, 36 / this.width);
@@ -5303,7 +5303,7 @@ export class GameRenderer3D {
     const shake = cinematic ? (match.screenShake || 0) * (1 - decay * .50) : 0;
     const dx = shake * Math.sin(match.frame * 2.71) * .64 + (kick ? kick.x * impulse : 0);
     const dy = shake * Math.cos(match.frame * 3.51) * .47 + (kick ? kick.y * impulse : 0);
-    this.camera.position.set(this.camX + dx, this.camY + 103 + dy, this.camZ * (1 - (kick?.zoom ?? 0) * decay));
+    this.camera.position.set(this.camX + dx, this.camY + 86 + dy, this.camZ * (1 - (kick?.zoom ?? 0) * decay));
     this.camera.lookAt(this.camX + (kick ? kick.x * impulse * .82 : 0),
       this.camY + (kick ? kick.y * impulse * .82 : 0), 0);
     this.camera.updateMatrixWorld();

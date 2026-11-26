@@ -1108,15 +1108,24 @@ function updateMatchHud(match) {
 
     const isBoss = ref.isBoss || f.def.id === MASTER_MITT.id || (f.bossMaxHp || 0) > 0;
     const pct = Math.floor(f.percent);
-    if (pct > ref.lastPct) ref.shake = (app.shakeEnabled && !isReducedMotion()) ? 10 : 0;
+    const dmgDelta = pct - ref.lastPct;
+    if (dmgDelta > 0) {
+      ref.shake = (app.shakeEnabled && !isReducedMotion())
+        ? Math.min(22, Math.max(6, Math.round(5 + dmgDelta * 0.85)))
+        : 0;
+      ref.pctFlash = 4;
+    }
     ref.lastPct = pct;
 
     if (ref.shake > 0 && app.shakeEnabled && !isReducedMotion()) {
       ref.shake--;
-      ref.card.style.transform = `translate(${(Math.random() - 0.5) * ref.shake * 1.4}px, ${(Math.random() - 0.5) * ref.shake * 1.4}px)`;
+      const pop = 1 + Math.min(0.34, ref.shake * 0.017);
+      ref.card.style.transform = `translate(${(Math.random() - 0.5) * ref.shake * 1.6}px, ${(Math.random() - 0.5) * ref.shake * 1.6}px)`;
+      ref.pctEl.style.transform = `scale(${pop.toFixed(2)})`;
     } else {
       ref.shake = 0;
       if (ref.card.style.transform) ref.card.style.transform = '';
+      if (ref.pctEl.style.transform) ref.pctEl.style.transform = '';
     }
 
     if (isBoss) {
@@ -1131,13 +1140,19 @@ function updateMatchHud(match) {
       }
     } else {
       const pctText = `${pct}%`;
-      if (ref.pctEl.textContent !== pctText) {
+      const flashNow = (ref.pctFlash || 0) > 0;
+      if (flashNow) ref.pctFlash--;
+      if (ref.pctEl.textContent !== pctText || flashNow || ref.pctFlash === 0) {
         let col = '#ffffff';
-        if (pct >= 140) col = '#ff2e4c';
-        else if (pct >= 90) col = '#ff7b36';
-        else if (pct >= 45) col = '#ffe15a';
+        if (!flashNow) {
+          if (pct >= 140) col = '#ff1f44';
+          else if (pct >= 100) col = '#ff4d36';
+          else if (pct >= 65) col = '#ff9636';
+          else if (pct >= 35) col = '#ffe15a';
+        }
         ref.pctEl.style.color = col;
         ref.pctEl.textContent = pctText;
+        if (ref.pctFlash === 0) ref.pctFlash = -1;
       }
 
       if (match.mode === MODE.VS_TIME && ref.scorePill) {

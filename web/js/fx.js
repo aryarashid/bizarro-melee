@@ -329,15 +329,15 @@ export class DynamicCamera {
     const cx = Math.max(bounds.left, Math.min(bounds.right, (minX + maxX) * 0.5));
     const cy = Math.max(bounds.bottom + 120, Math.min(bounds.top - 80, (minY + maxY) * 0.5));
 
-    const spanX = Math.max(540, maxX - minX);
-    const spanY = Math.max(380, maxY - minY);
+    const spanX = Math.max(450, maxX - minX);
+    const spanY = Math.max(320, maxY - minY);
     const zx = (viewportW * 0.86) / spanX;
     const zy = (viewportH * 0.72) / spanY;
-    const targetZoom = Math.max(0.36, Math.min(1.18, Math.min(zx, zy)));
+    const targetZoom = Math.max(0.36, Math.min(1.28, Math.min(zx, zy)));
 
-    this.x += (cx - this.x) * 0.14;
-    this.y += (cy - this.y) * 0.14;
-    this.zoom += (targetZoom - this.zoom) * 0.12;
+    this.x += (cx - this.x) * 0.16;
+    this.y += (cy - this.y) * 0.16;
+    this.zoom += (targetZoom - this.zoom) * 0.14;
   }
 
   worldToScreen(wx, wy, viewportW, viewportH) {
@@ -848,12 +848,12 @@ export class FxSystem {
         legacySpecialEvents(f, special, this.specialSamples.get(f.port), (e) => this._specialEvent(e, match));
         this.specialSamples.set(f.port, { special, x: f.x, y: f.y });
         const speed = Math.hypot(f.kbVx || 0, f.kbVy || 0);
-        if (speed >= 14 && !f.grounded && !f.hitlag && hurt.has(f.state) && match.frame % 2 === 0) {
+        if (speed >= 11 && !f.grounded && !f.hitlag && hurt.has(f.state) && match.frame % 2 === 0) {
           const angle = Math.atan2(f.kbVy || 0, f.kbVx || 0);
-          const x = f.x - Math.cos(angle) * 32, cy = f.y + f.def.stats.height * (f.scale || 1) * .52 - Math.sin(angle) * 32;
-          this._cue({ type: 'launchTrail', x, cy, angle, reach: Math.min(112, speed * 2.8),
-            rim: this.hitColors.get(f.port) ? '#58e8ff' : '#ffae59' }, 11);
-          this.spawnTrail(x, cy, '#f2e5e2', Math.min(46, 22 + speed * .42));
+          const x = f.x - Math.cos(angle) * 28, cy = f.y + f.def.stats.height * (f.scale || 1) * .52 - Math.sin(angle) * 28;
+          this._cue({ type: 'launchTrail', x, cy, angle, reach: Math.min(126, speed * 3.1),
+            rim: this.hitColors.get(f.port) ? '#58e8ff' : (speed >= 22 ? '#ff5978' : '#ffae59') }, 12);
+          this.spawnTrail(x, cy, speed >= 22 ? 'rgba(255,244,236,0.92)' : '#f2e5e2', Math.min(52, 24 + speed * .48));
         }
       }
     }

@@ -30,6 +30,7 @@ const C_GROUND = 0.55;
 const C_AIR = 0.40;
 const DASH_FRAMES = 13;
 const MOVE_PACE = 0.76;
+const IASA_NORMALS = new Set([M.JAB, M.JAB2, M.FTILT, M.UTILT, M.DTILT, M.NAIR, M.FAIR, M.BAIR, M.UAIR]);
 const GETUP_ATTACK = { kind: 'strike', startup: 15, active: 3, endlag: 12,
   damage: 6, bkb: 48, kbg: 48, angle: 35, offsetX: 36, offsetY: 17, radius: 31, bothSides: true };
 const LASER_USERS = new Set(['faux', 'falcont']);
@@ -891,6 +892,7 @@ function neutral(match, f, input) {
   if (f.grounded && input.grabPressed) {
     faceInput(f, x);
     transition(f, S.GRAB);
+    event(match, 'grabSwing', f);
     return;
   }
   if (f.grounded && f.shieldDrop <= 0 && (input.shield || input.shieldPressed)) {
@@ -1320,13 +1322,41 @@ function tickAttack(match, f, input) {
         if (!f.moveRecorded) stale(f, f.moveKey);
         f.moveRecorded = true;
       }
-    } else activateSpecial(match, f, m);
+    } else {
+      activateSpecial(match, f, m);
+      // Grounded Melee micro-lunge / forward commitment on active frame 0 (stops safely before ledges).
+      if (f.grounded && (!m.kind || m.kind === 'strike')) {
+        const floor = [...match.surfaces, ...match.platforms].find((p) => p.id === f.onPlatformId);
+        const edgeDist = floor ? (f.facing > 0 ? floor.x + floor.w - f.x : f.x - floor.x) : 999;
+        if (edgeDist > 42) {
+          if (f.moveKey === M.DASH_ATTACK) f.vx = f.facing * Math.max(Math.abs(f.vx), f.def.stats.dashSpeed * MOVE_PACE * 0.78);
+          else if (f.moveKey === M.FSMASH) f.vx += f.facing * 2.6;
+          else if (f.moveKey === M.FTILT || f.moveKey === M.DTILT) f.vx += f.facing * 1.4;
+          else if (JABS.includes(f.moveKey)) f.vx += f.facing * 1.1;
+        }
+      }
+      // Emit tactile weight-graded attack swing whoosh audio on every melee swing.
+      if (!['projectile', 'chargeShot', 'needles', 'needleBurst', 'turnipPull', 'bucket', 'reflector'].includes(m.kind)) {
+        const mat = hitMaterial(f.fighterId, f.moveKey, m, !!m.sweetspot);
+        const dmg = m.damage || 6;
+        const swingTier = SMASH_MOVES.has(f.moveKey) || dmg >= 15 ? 'heavy' : dmg >= 9 ? 'medium' : 'light';
+        event(match, 'attackSwing', f, {
+          weightTier: swingTier, slash: mat.slash, electric: mat.electric,
+          fire: m.element === 'fire' || m.style === 'fire', moveKey: f.moveKey,
+        });
+      }
+    }
   }
   if (m.shotInterval && activeFrame > 0 && activeFrame < m.active && activeFrame % m.shotInterval === 0) {
     if (m.kind === 'itemStream') fireItem(match, f, m);
     else spawnProjectile(match, f, m);
   }
-  if (f.moveFrame >= m.startup + m.active + m.endlag) {
+  // Authentic SSBM IASA: hit-confirmed normals can cancel their last 3 endlag frames on buffered input for fluid combos.
+  const totalFrames = m.startup + m.active + m.endlag;
+  const iasaReady = f.hitTargets.size > 0 && IASA_NORMALS.has(f.moveKey) && m.endlag >= 6 &&
+    f.moveFrame >= totalFrames - 3 && (f.inputBuffer.cStick || f.inputBuffer.attack || f.inputBuffer.special ||
+      f.inputBuffer.grab || f.inputBuffer.jump || f.inputBuffer.shield);
+  if (f.moveFrame >= totalFrames || iasaReady) {
     stopMove(f);
     const helpless = m.kind === 'recovery' || m.kind === 'teleport' || m.technique === 'illusion';
     transition(f, f.grounded ? S.IDLE : helpless ? S.FREEFALL : S.AIRBORNE);
@@ -2574,6 +2604,9 @@ function impactEvent(match, a, v, hit) {
   const weightRatio = clamp((a?.def?.stats?.weight || 100) / Math.max(55, v?.def?.stats?.weight || 100), 0.75, 1.35);
   match.screenShake = Math.max(match.screenShake, Math.min(22, (2.0 + tierShake + kb * 0.082 + (sweetspot ? 4.5 : 0) + (electric ? 2.5 : 0)) * weightRatio));
   if (weightTier === 'colossal' || sweetspot || electric || kb >= 120) match.screenFlash = Math.max(match.screenFlash, weightTier === 'colossal' ? 6 : heavy ? 4 : 2);
+  if (weightTier === 'colossal' && !match.dramaticFinish && kb >= 145) {
+    match.slowMoFrames = Math.max(match.slowMoFrames, 4);
+  }
   match.events.push({
     type: 'hit', x: v.x, y: v.y + v.def.stats.height * v.scale * 0.52, ...hit,
     kb, sweetspot, meteor, trueSpike, electric, slash, angle, heavy, weightTier, hitWeight,

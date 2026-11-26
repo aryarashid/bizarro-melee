@@ -494,6 +494,33 @@ export class SoundEngine {
         case 'hit':
           this.playHit(e);
           break;
+        case 'attackSwing': {
+          const tier = e.weightTier || 'medium';
+          if (e.slash) {
+            this._noise(tier === 'heavy' ? 0.12 : 0.075, tier === 'heavy' ? 2800 : 3800, 1.8, tier === 'heavy' ? 0.15 : 0.10, 0, null, 0.006);
+            this._tone(tier === 'heavy' ? 1980 : 2840, tier === 'heavy' ? 760 : 1240, tier === 'heavy' ? 0.11 : 0.065, 'triangle', 0.065);
+          } else if (e.fire) {
+            this._noise(0.12, 740, 0.75, 0.15, 0, null, 0.01);
+            this._tone(240, 95, 0.11, 'sawtooth', 0.07);
+          } else if (e.electric) {
+            this._noise(0.06, 4600, 2.2, 0.11);
+            this._tone(1420, 680, 0.065, 'square', 0.055);
+          } else if (tier === 'heavy') {
+            this._noise(0.14, 720, 0.8, 0.17, 0, null, 0.014);
+            this._tone(210, 68, 0.13, 'triangle', 0.095);
+          } else if (tier === 'medium') {
+            this._noise(0.085, 1380, 1.0, 0.12, 0, null, 0.008);
+            this._tone(340, 145, 0.075, 'triangle', 0.06);
+          } else {
+            this._noise(0.048, 2550, 1.2, 0.085, 0, null, 0.004);
+            this._tone(520, 240, 0.045, 'sine', 0.042);
+          }
+          break;
+        }
+        case 'grabSwing':
+          this._noise(0.065, 1650, 1.1, 0.10, 0, null, 0.008);
+          this._tone(420, 210, 0.06, 'triangle', 0.055);
+          break;
         case 'clank':
           this._noise(0.032, 4800, 1.8, 0.22);
           this._tone(1520, 1180, 0.14, 'triangle', 0.18);
