@@ -36,9 +36,9 @@ async function runUnitTests() {
   const { computeCpuInput } = await import('../web/js/ai.js');
   const { createEmptyInput } = await import('../web/js/input.js');
 
-  assert.equal(ROSTER.length, 26, 'Expected all 26 playable Bizarro Melee fighters');
+  assert.equal(ROSTER.length, 28, 'Expected all 28 playable Bizarro Melee fighters');
   const ids = new Set(ROSTER.map((f) => f.id));
-  assert.equal(ids.size, 26, 'All 26 fighter IDs must be unique');
+  assert.equal(ids.size, 28, 'All 28 fighter IDs must be unique');
   for (const f of ROSTER) {
     assert.ok(f.name && f.parodyOf && f.name.toLowerCase() !== f.parodyOf.toLowerCase(),
       `Fighter ${f.id} must have distinct parody name`);
@@ -52,7 +52,7 @@ async function runUnitTests() {
         `Fighter ${f.id} ${coreKey} must have multi-region sweet/sour hitboxes`);
     }
   }
-  console.log('PASS: All 26 Bizarro fighters + 130 sweet/sour normal frame-data snapshots validated');
+  console.log('PASS: All 28 Bizarro fighters + 140 sweet/sour normal frame-data snapshots validated');
 
   const { ITEM_DEF, ITEM_LIST, CRITTER_SUMMONS } = await import('../web/js/items.js');
   const { EVENTS } = await import('../web/js/events.js');
@@ -777,6 +777,52 @@ async function runUnitTests() {
     }
     assert.ok(sawFloatCancel, 'Screech landing during float aerial must trigger FLOAT CANCEL');
 
+    // Despot DLC: Sadaam's WMD Side-B announces its roll, Spider Hole counters, Khomeini's "Nothing." shrugs off a hit
+    const wmdLabels = new Set();
+    for (let seed = 0; seed < 24 && wmdLabels.size < 3; seed++) {
+      const mW = mkDuel('sadaam-insane', 'faux');
+      mW.rng = ((mW.rng ?? 0) + seed * 7919) >>> 0;
+      if (seed) for (let s = 0; s < seed; s++) stepMatch(mW, [createEmptyInput(), createEmptyInput()]);
+      for (let t = 0; t < 8; t++) {
+        const i0 = createEmptyInput();
+        if (t === 0) { i0.moveX = 0.9; i0.special = i0.specialPressed = true; }
+        stepMatch(mW, [i0, createEmptyInput()]);
+        for (const e of mW.events) if (e.type === 'judge') wmdLabels.add(e.label);
+      }
+    }
+    assert.ok(wmdLabels.size >= 1 && [...wmdLabels].every((l) => /^WMD: /.test(l)),
+      `Sadaam WMD Side-B must announce a WMD roll (got ${[...wmdLabels].join(', ')})`);
+
+    const mHole = mkDuel('faux', 'sadaam-insane');
+    let holeCountered = false;
+    for (let t = 0; t < 30; t++) {
+      const i0 = createEmptyInput(), i1 = createEmptyInput();
+      if (t === 0) { i1.moveY = -0.9; i1.special = i1.specialPressed = true; }
+      if (t === 6) { i0.attack = i0.attackPressed = true; }
+      stepMatch(mHole, [i0, i1]);
+      if (mHole.fighters[1].counterTriggered) holeCountered = true;
+    }
+    assert.ok(holeCountered && mHole.fighters[1].percent === 0, 'Sadaam Spider Hole must counter a jab without taking damage');
+
+    // Atticus fires a cassette at a second Atticus; the target either stands still or uses "Nothing." stone armor.
+    const cassetteDuel = (useStone) => {
+      const m = mkDuel('atticus-khomeini', 'atticus-khomeini');
+      m.fighters[0].x = -110; m.fighters[1].x = 110;
+      let hitstun = false;
+      for (let t = 0; t < 60; t++) {
+        const i0 = createEmptyInput(), i1 = createEmptyInput();
+        if (t === 0) i0.special = i0.specialPressed = true;
+        if (useStone && t === 8) { i1.moveY = -0.9; i1.special = i1.specialPressed = true; }
+        stepMatch(m, [i0, i1]);
+        if (m.fighters[1].state === STATE.HITSTUN) hitstun = true;
+      }
+      return { hitstun, percent: m.fighters[1].percent };
+    };
+    const bare = cassetteDuel(false), stone = cassetteDuel(true);
+    assert.ok(bare.hitstun && bare.percent > 0, `Mixtape From Paris must flinch an idle target (${JSON.stringify(bare)})`);
+    assert.ok(!stone.hitstun && stone.percent > 0, `"Nothing." must take the cassette's damage without flinching (${JSON.stringify(stone)})`);
+    console.log(`PASS: Despot DLC specials (${[...wmdLabels].join(' / ')}, Spider Hole counter, "Nothing." stone armor)`);
+
     // Shriek chargeable Needles store up to 6
     const mShriek = mkDuel('shriek', 'faux');
     mShriek.fighters[0].x = -120;
@@ -1098,7 +1144,7 @@ async function runUnitTests() {
   assert.ok(sawPhase2 || bossMatch.fighters[1].bossPhase === 2, 'Master Mitt must enter Phase 2 below half HP');
   assert.ok(seenTells.size >= 4, `Expected Master Mitt to use diverse attacks (got ${[...seenTells].join(', ')})`);
 
-  // AI Ladder monotonicity check (Lv7 > Lv5, Lv9 > Lv7) + all 26/26 Lv9 Lowrule cave reconnect with 0 SDs
+  // AI Ladder monotonicity check (Lv7 > Lv5, Lv9 > Lv7) + all 28/28 Lv9 Lowrule cave reconnect with 0 SDs
   for (const [lo, hi] of [[5, 7], [7, 9]]) {
     let advSum = 0;
     for (let i = 0; i < 8; i++) {
@@ -1140,7 +1186,7 @@ async function runUnitTests() {
     }
     assert.ok(rejoined, `Lv9 ${def.id} failed to rejoin upper-right terrace from Lowrule Temple cave within 8s`);
   }
-  console.log(`PASS: Home-Run Derby, Master Mitt (380 HP, Phase 2, ${seenTells.size} tells), AI Ladder & 26/26 Lowrule cave validated`);
+  console.log(`PASS: Home-Run Derby, Master Mitt (380 HP, Phase 2, ${seenTells.size} tells), AI Ladder & 28/28 Lowrule cave validated`);
 }
 
 function loadPlaywright() {
@@ -1263,7 +1309,7 @@ async function runBrowserProof() {
   }
 
   try {
-    // A. Desktop 1280x720 flow: Title -> CSS (26 fighters) -> Match -> Controls -> Pause -> Training Hitboxes
+    // A. Desktop 1280x720 flow: Title -> CSS (28 fighters) -> Match -> Controls -> Pause -> Training Hitboxes
     const desk = await openFrame();
     await desk.page.waitForTimeout(500);
     await desk.page.screenshot({ path: path.join(OUT_DIR, '01-title.png') });
@@ -1360,13 +1406,13 @@ async function runBrowserProof() {
     assert.equal(kbBack, 'title', `Keyboard Escape on CSS should return to Title, got "${kbBack}"`);
     console.log('PASS: Keyboard menu navigation (Arrows + Enter + Escape) verified');
 
-    // Open CSS and check 26 fighter cards
+    // Open CSS and check 28 fighter cards
     await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.openScreen('css'));
     await desk.page.waitForTimeout(400);
     const cssTiles = await desk.frame.locator('[data-fighter-id]').count();
-    assert.equal(cssTiles, 26, `Expected 26 fighter tiles in CSS, found ${cssTiles}`);
+    assert.equal(cssTiles, 28, `Expected 28 fighter tiles in CSS, found ${cssTiles}`);
     await desk.page.screenshot({ path: path.join(OUT_DIR, '02-css.png') });
-    console.log('PASS: Character Select renders all 26 Bizarro fighters');
+    console.log('PASS: Character Select renders all 28 Bizarro fighters');
 
     // Open Controller & Combo Lab modal and verify live diagnostics canvas
     await desk.frame.evaluate(() => window.__BIZARRO_MELEE__.openScreen('controller'));

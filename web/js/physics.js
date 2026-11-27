@@ -626,7 +626,7 @@ function startMove(match, f, key, input = EMPTY, data = moveData(f, key)) {
       recordDamage(match, f, null, roll.selfDamage);
       f.percent = Math.min(999, f.percent + roll.selfDamage);
     }
-    event(match, 'judge', f, { num: f.judgeNum });
+    event(match, 'judge', f, { num: f.judgeNum, label: data.judgeLabels?.[f.judgeNum - 1] });
   }
   if (f.moveData.damage >= 14 || SMASH_MOVES.has(key)) event(match, 'heavyAttack', f, voice(f));
 }
@@ -2808,7 +2808,9 @@ function strike(match, a, v, m, info) {
   const shattersIce = v.freezeFrames > 0 && damage >= MELEE.FREEZE_SHATTER_DAMAGE;
   if (shattersIce) v.freezeFrames = 0;
   const armored = v.metalFrames > 0 && kb < MELEE.METAL_ARMOR_KB ||
-    doubleJumpArmorActive(v) && kb < v.def.doubleJumpArmor && !unblockable;
+    doubleJumpArmorActive(v) && kb < v.def.doubleJumpArmor && !unblockable ||
+    // Opt-in stone armor (Atticus's "Nothing."): shrugs off hits below the threshold while active.
+    v.state === S.ATTACK && v.moveData?.stoneArmor && activeMove(v) && kb < v.moveData.stoneArmor && !unblockable;
   const jabReset = v.state === S.KNOCKDOWN && !unblockable && (damage <= 7 || m.hitstunOnly || m.noFlinch);
   const appliesFlinch = (!m.noFlinch || jabReset) && !armored;
   if (a && a !== v && (appliesFlinch || (!armored && comboLocked(v)))) recordCombo(match, a, v, key, sweetspot, damage);
