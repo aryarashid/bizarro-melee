@@ -1,7 +1,7 @@
 /**
  * Bizarro Melee 2D Canvas Renderer.
  * Composes DynamicCamera & FxSystem from ./fx.js with bespoke procedural Bizarro art
- * for all 26 playable fighters (+ Sagging Bag & Master Mitt) and all 6 stages + Sandbag Yard.
+ * for all 28 playable fighters (+ Sagging Bag & Master Mitt) and all 6 stages + Sandbag Yard.
  */
 
 import { MELEE, MODE, STATE, PLAYER_COLORS, WORLD_SCALE } from './constants.js';
@@ -924,6 +924,14 @@ export class GameRenderer {
           ctx.fillStyle = '#ffffff';
           ctx.beginPath(); ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2); ctx.fill();
           break;
+        case 'cassette':
+          ctx.fillStyle = '#2b2b33';
+          ctx.fillRect(-12, -8, 24, 16);
+          ctx.fillStyle = '#f1e6c8';
+          ctx.fillRect(-9, -5, 18, 7);
+          ctx.fillStyle = '#111118';
+          ctx.beginPath(); ctx.arc(-5, -1.5, 2.2, 0, Math.PI * 2); ctx.arc(5, -1.5, 2.2, 0, Math.PI * 2); ctx.fill();
+          break;
         case 'pancake':
           ctx.rotate(match.frame * 0.25);
           ctx.fillStyle = '#111827';
@@ -1302,7 +1310,7 @@ export class GameRenderer {
     // Cape behind body. Bario's nda flag is not a cape.
     const whoEarly = f?.def?.id;
     if ((rig.cape && whoEarly !== 'bario') || whoEarly === 'velda') {
-      ctx.fillStyle = whoEarly === 'velda' ? '#4c1d95' : whoEarly === 'garth' ? '#9f1d32' : whoEarly === 'troy' ? '#e8b84a' : rig.cape === 'labcoat' ? '#ffffff' : (rig.cape === 'nda' ? '#e2e8f0' : pal.accent);
+      ctx.fillStyle = whoEarly === 'velda' ? '#4c1d95' : whoEarly === 'garth' ? '#9f1d32' : whoEarly === 'troy' ? '#e8b84a' : rig.cape === 'labcoat' ? '#ffffff' : rig.cape === 'robe' ? pal.body : (rig.cape === 'nda' ? '#e2e8f0' : pal.accent);
       ctx.strokeStyle = outline; ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(-6, -h * 0.72);
@@ -1561,6 +1569,11 @@ export class GameRenderer {
         ctx.fillStyle = pal.body;
         ctx.fillRect(r * 0.7, -3, 10, 6);
         break;
+      case 'wrap':
+        ctx.fillStyle = pal.outfit === '#57534e' ? '#1c1917' : pal.outfit;
+        ctx.beginPath(); ctx.ellipse(0, -r * 0.62, r * 1.02, r * 0.62, 0, Math.PI, 0); ctx.fill(); ctx.stroke();
+        ctx.fillRect(-r, -r * 0.66, r * 2, 6);
+        break;
     }
 
     // Eyes / Expression
@@ -1595,6 +1608,12 @@ export class GameRenderer {
           ctx.beginPath(); ctx.moveTo(2, -8); ctx.lineTo(13, -5); ctx.stroke();
         }
       }
+    }
+
+    if (rig.beard) {
+      ctx.fillStyle = '#e9e4da'; ctx.strokeStyle = '#111'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(-2, 3); ctx.quadraticCurveTo(7, r * 1.9, 17, 3); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillRect(1, -9, 6, 2.5); ctx.fillRect(10, -9, 6, 2.5);
     }
 
     // Mustache

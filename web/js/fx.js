@@ -652,7 +652,7 @@ export class FxSystem {
         case 'judge':
           this.callouts.push({
             x: e.x, y: e.y + 84,
-            text: e.num === 9 ? 'JUDGE 9!!' : `JUDGE ${e.num}`,
+            text: e.label || (e.num === 9 ? 'JUDGE 9!!' : `JUDGE ${e.num}`),
             color: e.num === 9 ? '#ffdf4d' : '#ffffff',
             bg: e.num === 9 ? '#ff2e4c' : '#111827',
             life: 45, maxLife: 45, scale: e.num === 9 ? 1.5 : 1.05,

@@ -135,6 +135,22 @@ function flurry(hits, interval, linkDamage, finalDamage, finalAngle, finalBkb, f
     multiHit: { hits, interval, linkDamage, finalDamage, finalAngle, finalBkb, finalKbg } };
 }
 
+// Sadaam Insane's Side-B: eight rolls turn up nothing, one turns up everything.
+const wmdRolls = [
+  { damage: 1, bkb: 4, kbg: 8, angle: 80 },
+  { damage: 1, bkb: 4, kbg: 8, angle: 80, selfDamage: 6 },
+  { damage: 2, bkb: 10, kbg: 20, angle: 45 },
+  { damage: 0, bkb: 0, kbg: 0, angle: 45, dropItem: 'cold_pizza' },
+  { damage: 3, bkb: 14, kbg: 30, angle: 60, element: 'fire' },
+  { damage: 2, bkb: 8, kbg: 16, angle: 90 },
+  { damage: 4, bkb: 18, kbg: 34, angle: 38, shieldDamageMult: 2 },
+  { damage: 1, bkb: 4, kbg: 8, angle: 80, freezeFrames: 24, element: 'ice' },
+  { damage: 34, bkb: 150, kbg: 190, angle: 40, sweetspot: true, element: 'fire' },
+];
+const wmdLabels = ['WMD: NOT FOUND', 'WMD: STILL LOOKING', 'WMD: CHECK THE OTHER PALACE',
+  'WMD: IT WAS A PIZZA', 'WMD: SPARKLER', 'WMD: EMPTY BOX', 'WMD: STRONGLY WORDED LETTER',
+  'WMD: FREEZER BURN', 'WMD: FOUND IT!!'];
+
 const judgeRolls = [
   { damage: 2, bkb: 2, kbg: 12, angle: 12, selfDamage: 12 },
   { damage: 4, bkb: 16, kbg: 40, angle: 30 },
@@ -555,7 +571,7 @@ function makeFighter(cfg) {
 }
 
 /*
- * ALL 26 PLAYABLE BIZARRO MELEE FIGHTERS
+ * ALL 28 PLAYABLE BIZARRO MELEE FIGHTERS
  * Ordered in authentic Melee CSS layout!
  */
 export const ROSTER = [
@@ -1235,6 +1251,87 @@ export const ROSTER = [
       [MOVE.SIDE_B]: { name: 'Duct-Tape Whip', startup: 10, active: 6, endlag: 16, damage: 10, offsetX: 74, radius: 26 },
       [MOVE.UP_B]: { name: 'Smoke-Bomb Vanish', ...warp('dark', 10, 32, 14), sweetspot: true },
       [MOVE.DOWN_B]: { name: 'Shadow Dropkick', kind: 'dashBurst', damage: 11, burstX: 15, burstY: -2 },
+    },
+  }),
+
+  // Row 4: Bizarro Despot DLC
+  makeFighter({
+    id: 'sadaam-insane', name: 'Sadaam Insane', parodyOf: 'Saddam Hussein',
+    voiceType: 'heavy', voicePitch: 0.78,
+    epithet: 'Self-Elected Employee of the Month',
+    bio: 'Owns 78 palaces, 40 gold toilets and one very nice hole. Won his last election with 100% of the vote and sends a body double to his own matches. Swears the weapons are around here somewhere.',
+    taunt: '"There are no tanks. Everything is fine."',
+    stats: { weight: 108, gravity: 0.70, fallSpeed: 13.2, fastFallSpeed: 18.4, runSpeed: 9.8, dashSpeed: 10.8, traction: 0.74, airSpeed: 7.6, jumpSquat: 5, fullHopVel: 16.4, doubleJumpVel: 15.2, width: 50, height: 80 },
+    moveScale: { dmg: 1.22, reach: 1.08, spd: 0.92 },
+    palettes: [
+      { body: '#556b2f', outfit: '#2f3a1a', accent: '#e8b923', skin: '#d9a27a' },
+      { body: '#1f2a44', outfit: '#0f172a', accent: '#f8fafc', skin: '#d9a27a' },
+      { body: '#e8b923', outfit: '#9a6b00', accent: '#fff7cc', skin: '#d9a27a' },
+      { body: '#f5f1e6', outfit: '#8a7f68', accent: '#b91c1c', skin: '#d9a27a' },
+    ],
+    rig: { silhouette: 'brute', hat: 'bowler', stache: 'wide', prop: 'tie', eyes: 'smug' },
+    moves: {
+      [MOVE.JAB]: { name: 'Rubber Stamp' },
+      [MOVE.FTILT]: { name: 'Palace Tour Point' },
+      [MOVE.UTILT]: { name: 'Fedora Tip' },
+      [MOVE.DTILT]: { name: 'Mustache Sweep' },
+      [MOVE.DASH_ATTACK]: { name: 'Motorcade' },
+      [MOVE.FSMASH]: { name: 'Statue Topple', startup: 17, active: 4, endlag: 26, damage: 24, bkb: 54, kbg: 122, angle: 34, offsetX: 58, radius: 36, sweetspot: true, chargeable: true },
+      [MOVE.USMASH]: { name: 'Balcony Salute', damage: 17 },
+      [MOVE.DSMASH]: { name: 'Palace Sweep' },
+      [MOVE.NAIR]: { name: 'Mustache Twirl' },
+      [MOVE.FAIR]: { name: 'Gold-Plated Backhand', damage: 15, bkb: 40, kbg: 104, angle: 38, startup: 10, sweetspot: true },
+      [MOVE.BAIR]: { name: 'Body Double Backfist' },
+      [MOVE.UAIR]: { name: 'Fedora Flip' },
+      [MOVE.DAIR]: { name: 'Golden Toilet Drop', startup: 13, active: 5, endlag: 20, landingLag: 20, damage: 18, bkb: 42, kbg: 112, angle: 270, meteor: true, sweetspot: true },
+      [MOVE.NEUTRAL_B]: { name: 'Celebratory Volley', kind: 'projectile', startup: 12, damage: 8, projSpeed: 14, projLife: 70, projGravity: 0.42, projAngle: 72, projBounce: false, projStyle: 'needle' },
+      [MOVE.SIDE_B]: { name: 'WMD (Not Found)', kind: 'judge', rolls: wmdRolls, judgeLabels: wmdLabels, startup: 14, active: 5, endlag: 20, damage: 4, bkb: 18, kbg: 34, angle: 40, offsetX: 48, offsetY: 34, radius: 36 },
+      [MOVE.UP_B]: { name: 'Golden Toilet Rocket', kind: 'recovery', damage: 12, recoveryX: 8.2, recoveryY: 19.2 },
+      [MOVE.DOWN_B]: { name: 'Spider Hole', kind: 'counter', startup: 5, active: 22, endlag: 20, damage: 16, bkb: 52, kbg: 104, angle: 40 },
+      [MOVE.FTHROW]: { name: 'Exile to Tikrit' },
+      [MOVE.BTHROW]: { name: 'Body Double Swap' },
+      [MOVE.UTHROW]: { name: 'Statue Hoist' },
+      [MOVE.DTHROW]: { name: 'Referendum (100% Yes)' },
+    },
+  }),
+
+  makeFighter({
+    id: 'atticus-khomeini', name: 'Atticus Khomeini', parodyOf: 'Ruhollah Khomeini',
+    voiceType: 'heavy', voicePitch: 0.70,
+    epithet: 'Feels Nothing, Professionally',
+    bio: 'Asked how he felt flying home after 14 years in exile, he said "Nothing." Ran an entire revolution from a Paris suburb by mailing cassette tapes. Has not blinked since 1979.',
+    taunt: '"Nothing."',
+    stats: { weight: 104, gravity: 0.58, fallSpeed: 11.6, fastFallSpeed: 16.8, runSpeed: 8.8, dashSpeed: 9.8, traction: 0.82, airSpeed: 7.2, jumpSquat: 5, fullHopVel: 16.6, doubleJumpVel: 15.6, width: 48, height: 84 },
+    moveScale: { dmg: 1.16, reach: 1.12, spd: 0.9 },
+    palettes: [
+      { body: '#292524', outfit: '#57534e', accent: '#e7e5e4', skin: '#d6a67e' },
+      { body: '#4a3728', outfit: '#1c1917', accent: '#f5f5f4', skin: '#d6a67e' },
+      { body: '#334155', outfit: '#0f172a', accent: '#cbd5e1', skin: '#d6a67e' },
+      { body: '#3f4a2a', outfit: '#1a2010', accent: '#fef3c7', skin: '#d6a67e' },
+    ],
+    rig: { silhouette: 'hero', hat: 'wrap', beard: 'long', cape: 'robe', eyes: 'unimpressed' },
+    moves: {
+      [MOVE.JAB]: { name: 'Disapproving Poke' },
+      [MOVE.FTILT]: { name: 'Finger Wag' },
+      [MOVE.UTILT]: { name: 'Single Eyebrow Raise' },
+      [MOVE.DTILT]: { name: 'Robe Hem Swipe' },
+      [MOVE.DASH_ATTACK]: { name: 'Brisk Shuffle' },
+      [MOVE.FSMASH]: { name: 'Withering Glare', startup: 15, damage: 20, bkb: 50, kbg: 116, shieldDamageMult: 2.2, sweetspot: true, chargeable: true },
+      [MOVE.USMASH]: { name: 'Unblinking Stare' },
+      [MOVE.DSMASH]: { name: 'Robe Twirl' },
+      [MOVE.NAIR]: { name: 'Billowing Robe' },
+      [MOVE.FAIR]: { name: 'Cassette Slap', damage: 14, startup: 9 },
+      [MOVE.BAIR]: { name: 'Paris Suburb Backhand' },
+      [MOVE.UAIR]: { name: 'Headbutt of Indifference' },
+      [MOVE.DAIR]: { name: 'Beard Drop', meteor: true, sweetspot: true },
+      [MOVE.NEUTRAL_B]: { name: 'Mixtape From Paris', kind: 'projectile', startup: 12, damage: 9, projSpeed: 10.5, projLife: 80, projGravity: 0, projAngle: 0, projStyle: 'cassette' },
+      [MOVE.SIDE_B]: { name: 'Air France Homecoming', kind: 'dashBurst', damage: 13, bkb: 46, kbg: 92, angle: 40, burstX: 16, burstY: 1 },
+      [MOVE.UP_B]: { name: 'Chartered 747', kind: 'recovery', damage: 11, recoveryX: 8.0, recoveryY: 19.6 },
+      [MOVE.DOWN_B]: { name: '"Nothing."', kind: 'stone', stoneArmor: 120, startup: 12, active: 26, endlag: 18, damage: 18, bkb: 54, kbg: 104, angle: 64 },
+      [MOVE.FTHROW]: { name: 'Exile to Paris' },
+      [MOVE.BTHROW]: { name: 'Return to Sender' },
+      [MOVE.UTHROW]: { name: 'Fourteen-Year Hold' },
+      [MOVE.DTHROW]: { name: 'Sit-In' },
     },
   }),
 ];

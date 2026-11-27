@@ -2543,12 +2543,12 @@ export class GameRenderer3D {
         }
       }
       if ((style.cape && id !== 'bario') || style.prop === 'scarf' || id === 'velda') {
-        const scarf = style.prop === 'scarf', apron = style.cape === 'apron', cloak = id === 'velda';
+        const scarf = style.prop === 'scarf', apron = style.cape === 'apron', robe = style.cape === 'robe', cloak = id === 'velda' || robe;
         const cape = this._bone(torso, 'cloth', chestRx * (apron ? 0.58 : cloak ? -0.7 : -0.86),
           scarf ? neckY : apron ? chestSz * 0.62 : shoulders, scarf ? breadth * 0.70 : 0);
-        const cloth = id === 'garth' ? '#9f1d32' : id === 'troy' ? '#e8b84a' : cloak ? '#4c1d95'
+        const cloth = id === 'garth' ? '#9f1d32' : id === 'troy' ? '#e8b84a' : robe ? pal.body : cloak ? '#4c1d95'
           : id === 'shriek' ? '#14182c' : style.cape === 'labcoat' ? '#edf2ff' : apron ? pal.outfit : pal.accent;
-        const lining = id === 'garth' ? '#facc15' : id === 'troy' ? '#fff1c2' : cloak ? '#c4b5fd' : pal.outfit;
+        const lining = id === 'garth' ? '#facc15' : id === 'troy' ? '#fff1c2' : robe ? pal.outfit : cloak ? '#c4b5fd' : pal.outfit;
         rig.cloth = this._makeCloth(cape, style, chestSz * (apron ? 0.72 : scarf ? 1.19 : cloak ? 1.35 : 1.47),
           breadth * (scarf ? 0.32 : apron ? 0.52 : 0.91), cloth, lining);
       }
@@ -2709,10 +2709,11 @@ export class GameRenderer3D {
       garth: ['Hair_SimpleParted','#784427',.57,.55], zink: ['Hair_SimpleParted','#f0c15c',.62,.44],
       'tiny-zink': ['Hair_SimpleParted','#edbd67',.65,.44], velda: ['Hair_Long','#ffe5ad',.05,1.16],
       screech: ['Hair_Buns','#ac501d',.59,.81], dadondorf: ['Hair_Beard','#cf541a',-.50,.69],
+      'atticus-khomeini': ['Hair_Beard','#e9e4da',-.62,.86],
     };
     const cut = hairStyles[id];
-    const coiffure = cut && this._pinPart(head,cut[0],-rx*(id==='dadondorf' ? -.36 : .13),ry*cut[2],0,
-      rx*(id==='dadondorf' ? .83 : 1.01),ry*cut[3],rz*1.04,{ NeutralTint: cut[1] });
+    const coiffure = cut && this._pinPart(head,cut[0],-rx*(cut?.[0]==='Hair_Beard' ? -.36 : .13),ry*cut[2],0,
+      rx*(cut?.[0]==='Hair_Beard' ? .83 : 1.01),ry*cut[3],rz*1.04,{ NeutralTint: cut[1] });
     if (!coiffure && ['elfCap', 'tiaraHair', 'tiara', 'headband', 'mysticCrown'].includes(style.hat) && sil !== 'flat2d' && id !== 'troy') {
       const hairColor = id === 'velda' ? '#f6e2a8' : id === 'garth' ? '#6a3b22'
         : (id === 'zink' || id === 'tiny-zink') ? '#f0d078'
@@ -2762,6 +2763,18 @@ export class GameRenderer3D {
           const tail = this._shape(head, 'box', detail, -rx * 1.05, ry * 0.35, s * rz * 0.15, rx * 0.7, ry * 0.07, rz * 0.07);
           tail.rotation.z = s * 0.55;
         }
+      }
+    }
+    if (style.hat === 'wrap') {
+      const cloth = this._mat(pal.outfit === '#57534e' ? '#1c1917' : pal.outfit, { roughness: 0.78 });
+      this._shape(head, 'ball', cloth, -rx * 0.06, ry * 0.62, 0, rx * 1.06, ry * 0.58, rz * 1.10);
+      for (let i = 0; i < 3; i++) {
+        const fold = this._shape(head, 'ring', cloth, -rx * 0.06, ry * (0.42 + i * 0.16), 0, rx * (0.96 - i * 0.12), rz * (1.0 - i * 0.12), 2.4);
+        fold.rotation.x = Math.PI / 2; fold.rotation.z = 0.06 - i * 0.05;
+      }
+      for (const s of [-1, 1]) {
+        const brow = this._shape(head, 'box', this._mat('#e9e4da'), rx * 0.86, ry * 0.20, s * rz * 0.34, rx * 0.10, ry * 0.08, rz * 0.30);
+        brow.rotation.x = s * 0.22;
       }
     }
     if (id === 'troy') {
@@ -4271,7 +4284,7 @@ export class GameRenderer3D {
     const T = this.T, root = this._bone(this.battleGroup, p.style || 'Projectile');
     const palette = { laser: '#63f4ff', shadowOrb: '#bb67ff', bolt: '#fff183', needle: '#ffd3ec',
       fireball: '#ff8e31', ice: '#a4edff', pill: '#ff70a7', charge: '#6be7ff', chargeShot: '#6be7ff', chargeOrb: '#6be7ff',
-      boomerang: '#fab94b', arrow: '#d3fa86', pancake: '#d69659', egg: '#b0fc9a', missile: '#ffa35c' };
+      boomerang: '#fab94b', arrow: '#d3fa86', pancake: '#d69659', egg: '#b0fc9a', missile: '#ffa35c', cassette: '#2b2b33' };
     const col = palette[p.style] || '#fca354', r = p.radius || 9;
     const luminous = this._basic(col, { toneMapped: false });
     const shine = this._basic('#fffbe5', { toneMapped: false });
@@ -4292,6 +4305,10 @@ export class GameRenderer3D {
       this._shape(root, 'ball', luminous, 0, 0, 0, r * 2.1, r * 0.49, r * 0.49, false);
       this._shape(root, 'smallBall', shine, r * 0.8, 0, 0, r * 0.86, r * 0.24, r * 0.25, false);
       this._shape(root, 'smallBall', glow, -r * 1.4, 0, 0, r * 2.8, r * 0.72, r * 0.65, false);
+    } else if (p.style === 'cassette') {
+      this._shape(root, 'box', this._mat(col, { roughness: 0.5 }), 0, 0, 0, r * 1.6, r * 1.0, r * 0.28);
+      this._shape(root, 'box', this._mat('#f1e6c8'), 0, r * 0.12, r * 0.15, r * 1.25, r * 0.5, r * 0.04);
+      for (const s of [-1, 1]) this._shape(root, 'smallBall', this._mat('#111118'), s * r * 0.42, r * 0.12, r * 0.18, r * 0.2, r * 0.2, r * 0.05);
     } else if (['boomerang', 'pancake'].includes(p.style)) {
       this._shape(root, 'hex', this._mat(col), 0, 0, 0, r * 1.35, r * 0.35, r * 1.1);
       this._shape(root, 'smallBall', shine, 2, 2, 1, r * 0.61, r * 0.30, r * 0.55, false);

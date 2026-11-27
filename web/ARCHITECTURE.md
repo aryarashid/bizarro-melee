@@ -10,7 +10,7 @@ Bizarro Melee is a standalone, offline-first 3D WebGL (with full 2D Canvas fallb
 ## Core Modules (`web/js/`)
 
 1. **`constants.js`** — Fixed-timestep constants (`TICK_RATE`, `DT`, `MELEE`), knockback formula (`computeMeleeKnockback`), enums (`STATE`, `MOVE`, `MODE`, `ITEM_FREQUENCY`), port colors, and physics tuning.
-2. **`roster.js`** — 26 playable Bizarro fighters (each with 4 costume palettes, archetype proportions, multi-region sweet/sourspot normals, and signature specials) plus 3 mode NPCs (`SAGGING_BAG`, `MASTER_MITT`, `BIZARRO_INTERN`).
+2. **`roster.js`** — 28 playable Bizarro fighters (each with 4 costume palettes, archetype proportions, multi-region sweet/sourspot normals, and signature specials) plus 3 mode NPCs (`SAGGING_BAG`, `MASTER_MITT`, `BIZARRO_INTERN`).
 3. **`stages.js`** — 29 VS stages across Tourney, Moving, Hazards, Huge, and Past 64 categories, plus `HOMERUN_STAGE`, `TARGET_STAGE`, dynamic platform resolver (`resolveStagePlatforms`), and hazards.
 4. **`items.js`** — 18 Bizarro items (thrown, battering, shooting, healing, explosives) with spawn/use/collision definitions.
 5. **`events.js`** — 8 handcrafted Bizarro Event Matches with custom rules, giant modifiers, starting percents, and clear tracking.

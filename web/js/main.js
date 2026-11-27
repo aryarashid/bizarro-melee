@@ -1,6 +1,6 @@
 /**
  * Bizarro Melee v2 — Main Application Shell, 3D WebGL + 2D Fallback Renderer,
- * 26 Fighters, 29 Stages, 18 Items, 4P FFA/Teams, Break the Targets, Multi-Man Brawl,
+ * 28 Fighters, 29 Stages, 18 Items, 4P FFA/Teams, Break the Targets, Multi-Man Brawl,
  * Home-Run Derby, Classic Arcade, Training Lab, and dpad.games SDK Integration.
  */
 
@@ -252,7 +252,7 @@ function startAttractMatch() {
 }
 
 // ============================================================================
-// CHARACTER SELECT SCREEN (ALL 26 BIZARRO FIGHTERS + UP TO 4P!)
+// CHARACTER SELECT SCREEN (ALL 28 BIZARRO FIGHTERS + UP TO 4P!)
 // ============================================================================
 function buildCssGrid() {
   const grid = $('css-grid');

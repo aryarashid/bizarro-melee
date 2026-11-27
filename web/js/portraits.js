@@ -1,7 +1,7 @@
 /**
  * High-Detail Illustrated Bizarro Character Portrait Atlas Loader.
- * Maps all 26 playable Bizarro fighters + Master Mitt to their illustrated
- * 3x3 sprite sheets in web/assets/portraits/sheet_{1,2,3}.jpg, with crisp
+ * Maps all 28 playable Bizarro fighters + Master Mitt to their illustrated
+ * 3x3 sprite sheets in web/assets/portraits/sheet_{1,2,3,4}.jpg, with crisp
  * alt-costume tint shifts and graceful procedural canvas fallback.
  */
 
@@ -40,6 +40,10 @@ const PORTRAIT_MAP = {
   'troy':          { sheet: 3, col: 0, row: 2 },
   'shriek':        { sheet: 3, col: 1, row: 2 },
   'master-mitt':   { sheet: 3, col: 2, row: 2 },
+
+  // Sheet 4 (Row 1: Sadaam Insane, Atticus Khomeini). Rendered from the live 3D rigs.
+  'sadaam-insane':    { sheet: 4, col: 0, row: 0 },
+  'atticus-khomeini': { sheet: 4, col: 1, row: 0 },
 };
 
 const sheets = new Map();
@@ -110,7 +114,7 @@ function paintCostume(ctx, w, h, def, palette) {
 export function preloadPortraits(onReady) {
   if (typeof onReady === 'function') listeners.add(onReady);
   if (typeof Image === 'undefined') return;
-  for (const num of [1, 2, 3]) {
+  for (const num of [1, 2, 3, 4]) {
     if (sheets.has(num)) continue;
     const img = new Image();
     img.decoding = 'async';
